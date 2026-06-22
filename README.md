@@ -184,6 +184,70 @@ Notes:
 - `VITE_MOLECULE_API_URL` is reserved for a future Vite migration and is not required by the current Next.js app.
 - If all values are empty, PubChem fallback still works.
 
+## Deploy to Vercel
+
+ChemVault Molecule Studio is a Next.js app with API route handlers under `/api/chem/*`, so Vercel is the simplest deployment target for the current implementation.
+
+Recommended Vercel settings:
+
+- Framework Preset: `Next.js`
+- Install Command: `npm install` or Vercel default
+- Build Command: `npm run build`
+- Output Directory: leave empty
+- Node.js Version: `20.x`
+- Root Directory: repository root
+
+Deployment steps:
+
+1. Create a new project in Vercel.
+2. Import the GitHub repository `Eddy-ZM/ChemVault-Model`.
+3. Confirm the Framework Preset is `Next.js`.
+4. Keep Output Directory empty.
+5. Set Node.js Version to `20.x` in Project Settings when available.
+6. Deploy.
+
+Environment variables on Vercel:
+
+```bash
+MOLECULE_API_URL=
+NEXT_PUBLIC_MOLECULE_API_URL=
+```
+
+Both are optional.
+
+- If `NEXT_PUBLIC_MOLECULE_API_URL` is empty, the frontend uses the current site routes such as `/api/chem/pubchem/search`.
+- If `MOLECULE_API_URL` is empty, the Next.js API routes do not call an external RDKit service.
+- Without RDKit, `Generate 3D Model` falls back to PubChem SDF.
+- PubChem search, PubChem structure loading, RCSB PDB loading, and the 3D viewer can run without RDKit.
+
+Deploy the optional RDKit Python backend separately to Render, Railway, Fly.io, or a VPS, then set `MOLECULE_API_URL` to that service URL.
+
+Suggested production domain:
+
+```text
+model.chemvault.science
+```
+
+## Custom Domain
+
+After adding `model.chemvault.science` in Vercel, configure Cloudflare DNS:
+
+```text
+Type: CNAME
+Name: model
+Target: cname.vercel-dns.com
+Proxy status: DNS only
+```
+
+Use `DNS only` for the first verification. After Vercel SSL is issued and the domain is healthy, you can decide whether to enable Cloudflare proxying.
+
+If Vercel shows `Invalid Configuration`, check that:
+
+- `model` is a CNAME record.
+- The CNAME target is `cname.vercel-dns.com`.
+- There is no conflicting `A`, `AAAA`, or CNAME record for `model`.
+- Cloudflare proxy is disabled during initial verification.
+
 ### Cloudflare Deployment
 
 This repository is a Next.js app, not a Vite app. It has dynamic API route handlers under:

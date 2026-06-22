@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchPropertiesByCid, getCidBySmiles } from '@/lib/chem/pubchem';
 import { toNumber } from '@/lib/chem/moleculeUtils';
+import { fetchWithTimeout } from '@/lib/chem/http';
 
 const BACKEND_URL =
   process.env.MOLECULE_API_URL || process.env.NEXT_PUBLIC_MOLECULE_API_URL || process.env.VITE_MOLECULE_API_URL;
@@ -8,10 +9,11 @@ const BACKEND_URL =
 async function safeFetchBackend(smiles: string) {
   if (!BACKEND_URL) return null;
   try {
-    const response = await fetch(`${BACKEND_URL.replace(/\/$/, '')}/properties`, {
+    const response = await fetchWithTimeout(`${BACKEND_URL.replace(/\/$/, '')}/properties`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ smiles })
+      body: JSON.stringify({ smiles }),
+      timeoutMs: 10000
     });
 
     if (!response.ok) {

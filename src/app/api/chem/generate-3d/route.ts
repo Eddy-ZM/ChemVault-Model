@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { fetchStructureBySmiles, getCidBySmiles } from '@/lib/chem/pubchem';
+import { fetchWithTimeout } from '@/lib/chem/http';
 
 const BACKEND_URL =
   process.env.MOLECULE_API_URL || process.env.NEXT_PUBLIC_MOLECULE_API_URL || process.env.VITE_MOLECULE_API_URL;
@@ -13,10 +14,11 @@ export async function POST(request: NextRequest) {
 
   if (BACKEND_URL) {
     try {
-      const response = await fetch(`${BACKEND_URL.replace(/\/$/, '')}/generate-3d`, {
+      const response = await fetchWithTimeout(`${BACKEND_URL.replace(/\/$/, '')}/generate-3d`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ smiles })
+        body: JSON.stringify({ smiles }),
+        timeoutMs: 12000
       });
       if (response.ok) {
         const payload = await response.json();

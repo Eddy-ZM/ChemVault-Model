@@ -1,5 +1,6 @@
 import { MoleculeSearchResult } from './types';
 import { normalizeSmiles } from './smiles';
+import { fetchWithTimeout } from './http';
 
 const PUBCHEM = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug';
 
@@ -27,7 +28,7 @@ export type PubChemStructureResult = {
 type SupportedPropertyName = (typeof supportedPropertyKeys)[number];
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetch(url);
+  const response = await fetchWithTimeout(url);
   if (!response.ok) {
     const message = await response.text();
     throw new Error(`${response.status} ${response.statusText}: ${message.slice(0, 200)}`);
@@ -36,7 +37,7 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 async function fetchText(url: string): Promise<string> {
-  const response = await fetch(url);
+  const response = await fetchWithTimeout(url);
   if (!response.ok) {
     const message = await response.text();
     throw new Error(`${response.status} ${response.statusText}: ${message.slice(0, 200)}`);

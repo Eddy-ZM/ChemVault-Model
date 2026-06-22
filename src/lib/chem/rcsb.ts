@@ -1,4 +1,5 @@
 import { PdbRecord } from './types';
+import { fetchWithTimeout } from './http';
 
 const BASE = 'https://files.rcsb.org/download';
 const META_BASE = 'https://data.rcsb.org/rest/v1/core/entry';
@@ -28,7 +29,7 @@ type RcsbMetadata = {
 export async function fetchPdbContentAndMetadata(pdbId: string): Promise<PdbRecord> {
   const upper = pdbId.trim().toUpperCase();
 
-  const structureResponse = await fetch(`${BASE}/${upper}.pdb`);
+  const structureResponse = await fetchWithTimeout(`${BASE}/${upper}.pdb`, { timeoutMs: 15000 });
   if (!structureResponse.ok) {
     throw new Error(`PDB download failed: ${structureResponse.status}`);
   }
@@ -56,7 +57,7 @@ export async function fetchPdbContentAndMetadata(pdbId: string): Promise<PdbReco
 
 async function fetchMetadata(url: string): Promise<RcsbMetadata | null> {
   try {
-    const response = await fetch(url);
+    const response = await fetchWithTimeout(url, { timeoutMs: 8000 });
     if (!response.ok) {
       return null;
     }

@@ -24,7 +24,7 @@ type CurrentMoleculeInfo = {
   formula?: string;
   molecularWeight?: number | null;
   cid?: string | null;
-  dataSource?: string;
+  dataSource?: 'initial' | 'manual' | 'pubchem' | 'import';
 };
 
 const INITIAL_SMILES = 'CCO';
@@ -33,6 +33,21 @@ type StructureState = {
   data: string | null;
   format: StructureFormat;
 };
+
+type SmilesChangeOptions = {
+  preserveMetadata?: boolean;
+  dataSource?: CurrentMoleculeInfo['dataSource'];
+};
+
+function metadataForSmiles(value: string, dataSource: CurrentMoleculeInfo['dataSource'] = 'manual'): CurrentMoleculeInfo {
+  const trimmed = value.trim();
+  return {
+    name: trimmed ? (dataSource === 'import' ? 'Imported SMILES' : 'Manual SMILES') : undefined,
+    smiles: value,
+    cid: null,
+    dataSource
+  };
+}
 
 export function MoleculeStudio() {
   const viewerRef = useRef<MoleculeViewerHandle>(null);
@@ -131,9 +146,13 @@ export function MoleculeStudio() {
   );
 
   const handleSmilesChange = useCallback(
-    (value: string) => {
+    (value: string, options: SmilesChangeOptions = {}) => {
       setSmiles(value);
-      setMetadata((prev) => ({ ...prev, smiles: value }));
+      setMetadata((prev) =>
+        options.preserveMetadata
+          ? { ...prev, smiles: value }
+          : metadataForSmiles(value, options.dataSource ?? 'manual')
+      );
       const last = undoStack.current[undoStack.current.length - 1];
       if (value !== last) {
         undoStack.current.push(value);
@@ -150,7 +169,7 @@ export function MoleculeStudio() {
     if (current) redoStack.current.push(current);
     if (previous !== undefined) {
       setSmiles(previous);
-      setMetadata((prev) => ({ ...prev, smiles: previous }));
+      setMetadata(metadataForSmiles(previous));
     }
   }, []);
 
@@ -159,7 +178,7 @@ export function MoleculeStudio() {
     if (!next) return;
     undoStack.current.push(next);
     setSmiles(next);
-    setMetadata((prev) => ({ ...prev, smiles: next }));
+    setMetadata(metadataForSmiles(next));
   }, []);
 
   const loadByQuery = useCallback(
@@ -188,7 +207,7 @@ export function MoleculeStudio() {
           cid: result.cid || null,
           dataSource: 'pubchem'
         });
-        handleSmilesChange(smilesValue);
+        handleSmilesChange(smilesValue, { preserveMetadata: true });
 
         if (result.cid) {
           const structureResp = await fetch(`/api/chem/pubchem/structure?cid=${result.cid}&format=sdf3d`);
@@ -228,7 +247,7 @@ export function MoleculeStudio() {
       syncViewer(payload.data, 'sdf');
       const nextProperties = await loadProperties(smiles);
       setMetadata((prev) => ({
-        ...prev,
+        ...(prev.dataSource === 'pubchem' && prev.smiles === smiles ? prev : metadataForSmiles(smiles)),
         smiles,
         formula: nextProperties?.formula ?? prev.formula,
         molecularWeight: nextProperties?.molecularWeight ?? prev.molecularWeight
@@ -330,8 +349,7 @@ export function MoleculeStudio() {
 
   const onImportSmiles = useCallback(
     (value: string) => {
-      handleSmilesChange(value);
-      setMetadata((prev) => ({ ...prev, smiles: value, dataSource: 'import' }));
+      handleSmilesChange(value, { dataSource: 'import' });
       syncViewer(null, 'sdf');
       loadProperties(value);
       toast('SMILES imported');
@@ -351,7 +369,7 @@ export function MoleculeStudio() {
     undoStack.current = [''];
     redoStack.current = [];
     setSmiles('');
-    setMetadata((prev) => ({ ...prev, smiles: '', dataSource: 'manual' }));
+    setMetadata(metadataForSmiles(''));
     setProperties(emptyProperties());
     syncViewer(null, 'sdf');
   }, [syncViewer]);

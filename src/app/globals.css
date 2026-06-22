@@ -1,0 +1,66 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --chemvault-ink: #0f172a;
+  --chemvault-paper: #f8fafc;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  min-height: 100%;
+  font-family: 'Inter', 'SF Pro Text', 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  color: var(--chemvault-ink);
+  background: #e8f0ff;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+button {
+  cursor: pointer;
+}
+
+.surface-card {
+  @apply rounded-2xl border border-slate-200 bg-white/95 shadow-card backdrop-blur-sm p-4;
+}
+
+.stat-card {
+  @apply rounded-xl border border-slate-200 bg-white px-4 py-3;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.toast {
+  @apply rounded-lg border px-3 py-2 text-sm shadow-lg bg-white;
+}
+
+.skeleton {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(
+    90deg,
+    rgba(148, 163, 184, 0.2) 25%,
+    rgba(148, 163, 184, 0.35) 50%,
+    rgba(148, 163, 184, 0.2) 75%
+  );
+  background-size: 200% 100%;
+  animation: pulseSlow 1.2s infinite;
+}

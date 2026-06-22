@@ -1,0 +1,22 @@
+import Link from 'next/link';
+
+export default function HomePage() {
+  return (
+    <main className="mx-auto flex min-h-[100vh] max-w-6xl flex-col items-center justify-center px-6">
+      <section className="w-full rounded-2xl border border-slate-200 bg-white/90 p-8 text-center shadow-card">
+        <h1 className="text-2xl font-bold text-chemvault-ink md:text-4xl">ChemVault Molecule Studio</h1>
+        <p className="mt-4 text-slate-600">
+          Modern web tool for molecule drawing, search, conversion, and 3D exploration.
+        </p>
+        <div className="mt-6">
+          <Link
+            href="/molecule"
+            className="inline-flex rounded-lg bg-chemvault-accent px-5 py-3 font-medium text-white transition hover:opacity-90"
+          >
+            Open Studio
+          </Link>
+        </div>
+      </section>
+    </main>
+  );
+}

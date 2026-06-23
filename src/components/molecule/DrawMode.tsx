@@ -271,61 +271,6 @@ export function DrawMode({ value, onValueChange, onGenerate3D, onClear, onExport
       </div>
 
       <div className="mt-5 grid gap-5">
-        <aside className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <div>
-            <p className="text-sm font-semibold text-slate-800">Drawing Toolbar</p>
-            <div className="mt-3 grid grid-cols-4 gap-2">
-              {DRAW_TOOLS.map((tool) => (
-                <button
-                  key={tool}
-                  type="button"
-                  title={tool}
-                  aria-label={tool}
-                  onClick={() => {
-                    setActiveTool(tool);
-                    setPendingBondAtomId(null);
-                  }}
-                  className={`grid h-11 place-items-center rounded-lg border text-sm font-medium transition ${
-                    activeTool === tool ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-300 bg-white text-slate-700 hover:border-sky-300'
-                  }`}
-                >
-                  <ToolIcon tool={tool} activeElement={activeElement} />
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <button type="button" onClick={undoSketch} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-100">
-              Undo
-            </button>
-            <button type="button" onClick={redoSketch} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-100">
-              Redo
-            </button>
-            <button type="button" onClick={resetSketch} className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-100">
-              Clear
-            </button>
-          </div>
-
-          <PeriodicTablePicker activeElement={activeElement} onSelectElement={handleSelectElement} />
-
-          <div>
-            <p className="text-sm font-semibold text-slate-800">Functional groups</p>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {FUNCTIONAL_GROUPS.map((group) => (
-                <button
-                  key={group}
-                  type="button"
-                  onClick={() => appendFunctionalGroup(group)}
-                  className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:border-sky-300"
-                >
-                  {group}
-                </button>
-              ))}
-            </div>
-          </div>
-        </aside>
-
         <div className="space-y-4">
           <div className="rounded-2xl border border-slate-200 bg-white p-3">
             <div className="mb-3 flex flex-wrap items-center justify-between gap-3 text-sm">
@@ -339,44 +284,95 @@ export function DrawMode({ value, onValueChange, onGenerate3D, onClear, onExport
               </div>
             </div>
 
-            <svg
-              ref={svgRef}
-              viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
-              onClick={handleCanvasClick}
-              className="h-[500px] w-full rounded-xl border border-slate-200 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.14)_1px,transparent_0)] bg-[length:26px_26px]"
-              role="img"
-              aria-label="2D molecule drawing canvas"
-            >
-              {bonds.map((bond) => {
-                const from = atoms.find((atom) => atom.id === bond.from);
-                const to = atoms.find((atom) => atom.id === bond.to);
-                if (!from || !to) return null;
-                return <BondLines key={bond.id} from={from} to={to} order={bond.order} />;
-              })}
-              {atoms.map((atom) => {
-                const selected = atom.id === selectedAtomId;
-                const pending = atom.id === pendingBondAtomId;
-                return (
-                  <g key={atom.id}>
-                    <circle
-                      cx={atom.x}
-                      cy={atom.y}
-                      r={ATOM_RADIUS}
-                      className={`${selected || pending ? 'fill-sky-100 stroke-sky-700' : 'fill-white stroke-slate-700'}`}
-                      strokeWidth={selected || pending ? 3 : 2}
-                    />
-                    <text x={atom.x} y={atom.y + 5} textAnchor="middle" className="select-none fill-slate-950 text-[16px] font-bold">
-                      {atom.element}
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
+            <div className="relative">
+              <div className="absolute left-3 top-3 z-10 flex flex-col gap-2 rounded-xl border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur">
+                {DRAW_TOOLS.map((tool) => (
+                  <button
+                    key={tool}
+                    type="button"
+                    title={tool}
+                    aria-label={tool}
+                    onClick={() => {
+                      setActiveTool(tool);
+                      setPendingBondAtomId(null);
+                    }}
+                    className={`grid h-10 w-10 place-items-center rounded-lg border text-sm font-medium transition ${
+                      activeTool === tool ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-300 bg-white text-slate-700 hover:border-sky-300'
+                    }`}
+                  >
+                    <ToolIcon tool={tool} activeElement={activeElement} />
+                  </button>
+                ))}
+              </div>
+
+              <div className="absolute right-3 top-3 z-10 flex flex-col gap-2 rounded-xl border border-slate-200 bg-white/95 p-2 shadow-sm backdrop-blur">
+                <button type="button" title="Undo" aria-label="Undo" onClick={undoSketch} className="grid h-10 w-10 place-items-center rounded-lg border border-slate-300 bg-white text-sm text-slate-700 hover:border-sky-300">
+                  ↶
+                </button>
+                <button type="button" title="Redo" aria-label="Redo" onClick={redoSketch} className="grid h-10 w-10 place-items-center rounded-lg border border-slate-300 bg-white text-sm text-slate-700 hover:border-sky-300">
+                  ↷
+                </button>
+                <button type="button" title="Clear" aria-label="Clear" onClick={resetSketch} className="grid h-10 w-10 place-items-center rounded-lg border border-slate-300 bg-white text-sm text-slate-700 hover:border-sky-300">
+                  ×
+                </button>
+              </div>
+
+              <svg
+                ref={svgRef}
+                viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
+                onClick={handleCanvasClick}
+                className="h-[500px] w-full rounded-xl border border-slate-200 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.14)_1px,transparent_0)] bg-[length:26px_26px]"
+                role="img"
+                aria-label="2D molecule drawing canvas"
+              >
+                {bonds.map((bond) => {
+                  const from = atoms.find((atom) => atom.id === bond.from);
+                  const to = atoms.find((atom) => atom.id === bond.to);
+                  if (!from || !to) return null;
+                  return <BondLines key={bond.id} from={from} to={to} order={bond.order} />;
+                })}
+                {atoms.map((atom) => {
+                  const selected = atom.id === selectedAtomId;
+                  const pending = atom.id === pendingBondAtomId;
+                  return (
+                    <g key={atom.id}>
+                      <circle
+                        cx={atom.x}
+                        cy={atom.y}
+                        r={ATOM_RADIUS}
+                        className={`${selected || pending ? 'fill-sky-100 stroke-sky-700' : 'fill-white stroke-slate-700'}`}
+                        strokeWidth={selected || pending ? 3 : 2}
+                      />
+                      <text x={atom.x} y={atom.y + 5} textAnchor="middle" className="select-none fill-slate-950 text-[16px] font-bold">
+                        {atom.element}
+                      </text>
+                    </g>
+                  );
+                })}
+              </svg>
+            </div>
 
             <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">{sketchMessage}</p>
           </div>
 
           <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+            <PeriodicTablePicker activeElement={activeElement} onSelectElement={handleSelectElement} />
+            <div className="mt-4">
+              <p className="text-sm font-semibold text-slate-800">Functional groups</p>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {FUNCTIONAL_GROUPS.map((group) => (
+                  <button
+                    key={group}
+                    type="button"
+                    onClick={() => appendFunctionalGroup(group)}
+                    className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:border-sky-300"
+                  >
+                    {group}
+                  </button>
+                ))}
+              </div>
+            </div>
+
             <label className="text-sm font-semibold text-slate-800" htmlFor="draw-smiles">
               Generated / editable SMILES
             </label>

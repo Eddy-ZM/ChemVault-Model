@@ -8,7 +8,7 @@ export function toNumber(value: unknown): number | null {
 
 export function formatValue(value: number | string | null | undefined, unit = '') {
   if (value === null || value === undefined || Number.isNaN(Number(value))) {
-    return 'Not available';
+    return 'N/A';
   }
   const text = typeof value === 'number' ? value.toFixed(4) : String(value);
   return unit ? `${text} ${unit}` : text;

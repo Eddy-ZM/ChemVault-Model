@@ -39,11 +39,11 @@ const cards: Array<{ key: keyof MoleculeProperties; label: string; unit?: string
 ];
 
 export function MoleculePropertiesPanel({ metadata, properties, loading, onCopy }: Props) {
-  const smiles = metadata?.smiles?.trim() || 'Not available';
-  const inchi = metadata?.inchi?.trim() || 'Not available';
-  const inchiKey = metadata?.inchikey?.trim() || 'Not available';
-  const formula = metadata?.formula || properties.formula || 'Not available';
-  const molecularWeight = metadata?.molecularWeight ?? properties.molecularWeight ?? 'Not available';
+  const smiles = metadata?.smiles?.trim() || 'N/A';
+  const inchi = metadata?.inchi?.trim() || 'N/A';
+  const inchiKey = metadata?.inchikey?.trim() || 'N/A';
+  const formula = metadata?.formula || properties.formula || 'N/A';
+  const molecularWeight = metadata?.molecularWeight ?? properties.molecularWeight ?? 'N/A';
 
   return (
     <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -53,12 +53,12 @@ export function MoleculePropertiesPanel({ metadata, properties, loading, onCopy 
           <p className="mt-1 text-sm text-slate-600">Identifiers, properties, and copied notations for the current structure.</p>
         </div>
         <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold capitalize text-slate-600">
-          {metadata?.source || 'empty'}
+              {metadata?.smiles || metadata?.structureData || metadata?.pdbId || metadata?.fileName ? metadata?.source : 'empty'}
         </span>
       </div>
 
       <div className="mt-5 grid gap-3 lg:grid-cols-2">
-        <Detail label="Name" value={metadata?.name || 'Not available'} />
+        <Detail label="Name" value={metadata?.name || 'N/A'} />
         <Detail label="CID" value={metadata?.cid || 'N/A'} />
         <Detail label="PDB ID" value={metadata?.pdbId || 'N/A'} />
         <Detail label="File" value={metadata?.fileName || 'N/A'} />
@@ -96,7 +96,7 @@ function Detail({ label, value }: { label: string; value: string }) {
 }
 
 function Identifier({ label, value, onCopy }: { label: string; value: string; onCopy?: (value: string) => void }) {
-  const available = value !== 'Not available';
+  const available = value !== 'N/A';
   return (
     <div className="min-w-0">
       <div className="flex items-center justify-between gap-3">

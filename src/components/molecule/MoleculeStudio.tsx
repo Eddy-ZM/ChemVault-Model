@@ -42,7 +42,7 @@ type StructureState = {
   format: StructureFormat;
 };
 
-const INITIAL_SMILES = 'CCO';
+const INITIAL_SMILES = '';
 const initialModeErrors: Record<MoleculeMode, string | null> = {
   search: null,
   smiles: null,
@@ -60,9 +60,8 @@ export function MoleculeStudio() {
   const [activeMode, setActiveMode] = useState<MoleculeMode>('search');
   const [smiles, setSmiles] = useState(INITIAL_SMILES);
   const [currentMolecule, setCurrentMolecule] = useState<CurrentMolecule>({
-    name: 'Ethanol draft',
     source: 'smiles',
-    smiles: INITIAL_SMILES
+    smiles: null
   });
   const [properties, setProperties] = useState<MoleculeProperties>(emptyProperties());
   const [structure, setStructure] = useState<StructureState>({ data: null, format: 'sdf' });
@@ -544,7 +543,7 @@ export function MoleculeStudio() {
     if (currentMolecule.source === 'pdb') return currentMolecule.pdbId ? `Loaded PDB ${currentMolecule.pdbId}` : 'Protein structure workflow';
     if (currentMolecule.source === 'upload') return currentMolecule.fileName ? `Imported ${currentMolecule.fileName}` : 'Uploaded structure workflow';
     if (currentMolecule.smiles) return `Current SMILES: ${currentMolecule.smiles}`;
-    return 'Choose a workflow above to load a structure.';
+    return 'No structure loaded.';
   }, [currentMolecule.fileName, currentMolecule.pdbId, currentMolecule.smiles, currentMolecule.source]);
 
   const exportAvailability = useMemo(
@@ -567,7 +566,10 @@ export function MoleculeStudio() {
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1800px] flex-col gap-3 px-3 py-3 md:flex-row md:items-center md:justify-between md:px-4">
           <div className="flex items-center gap-3">
-            <a href="/" className="text-base font-bold tracking-tight text-slate-950">ChemVault</a>
+            <a href="/" className="flex items-center gap-2 text-base font-bold tracking-tight text-slate-950">
+              <img src="/brand/chemvault-logo.png" alt="ChemVault logo" className="h-8 w-8 rounded-md object-contain" />
+              <span>ChemVault</span>
+            </a>
             <span className="h-5 w-px bg-slate-200" />
             <span className="text-sm font-medium text-slate-600">Molecule Studio</span>
           </div>
@@ -580,8 +582,19 @@ export function MoleculeStudio() {
       </header>
 
       <main className="mx-auto max-w-[1800px] px-3 py-3 md:px-4">
-        <section>
+        <section className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <MoleculeModeTabs activeMode={activeMode} onChange={setActiveMode} />
+          <div className="overflow-x-auto">
+            <ExportPanel
+              available={exportAvailability}
+              loadingExport={loadingExport}
+              onExportSmiles={exportSmiles}
+              onExportMol={exportMol}
+              onExportSdf={exportSdf}
+              onExportXyz={exportXyz}
+              onExportPdb={exportPdb}
+            />
+          </div>
         </section>
 
         <section className="mt-3 grid gap-3 xl:min-h-[calc(100vh-132px)] xl:grid-cols-[minmax(430px,0.95fr)_minmax(0,1.05fr)]">
@@ -656,15 +669,6 @@ export function MoleculeStudio() {
                 onToggleAtomLabels={() => setShowAtomLabels((value) => !value)}
                 onResetView={() => viewerRef.current?.resetView()}
                 onExportPng={exportPng}
-              />
-              <ExportPanel
-                available={exportAvailability}
-                loadingExport={loadingExport}
-                onExportSmiles={exportSmiles}
-                onExportMol={exportMol}
-                onExportSdf={exportSdf}
-                onExportXyz={exportXyz}
-                onExportPdb={exportPdb}
               />
             </ViewerPanel>
 

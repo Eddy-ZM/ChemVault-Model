@@ -18,8 +18,11 @@ http://localhost:3000/molecule
 
 ### Features
 
-- PubChem search by molecule name, CID, SMILES, or InChIKey
-- SMILES input with quick atom, ring, and functional group controls
+- Product-level workflow tabs for Search, SMILES, Draw, Upload, and PDB
+- PubChem search by molecule name or CID
+- Dedicated SMILES input with load, clear, copy, and example controls
+- Draw workspace with drawing toolbar, common fragments, and periodic table picker
+- Dedicated Upload tab for structure files
 - 3D molecule rendering with 3Dmol.js
 - Representation controls for ball-and-stick, stick, sphere, line, surface, and cartoon modes
 - PNG screenshot export from the 3D viewer
@@ -28,6 +31,39 @@ http://localhost:3000/molecule
 - Molecular property cards for formula, molecular weight, exact mass, LogP, TPSA, donors, acceptors, rings, heavy atoms, and charge
 - PDB structure loading from RCSB PDB
 - Optional RDKit backend for local 3D conformer generation and property calculation
+
+## Molecule Studio Workflows
+
+The `/molecule` page is organised as a focused modeling workbench. Users start from one workflow instead of seeing every tool at once.
+
+1. Search by name or PubChem CID
+
+Use the `Search` tab to query PubChem with examples such as `caffeine`, `aspirin`, `benzene`, or CID `2244`. Search results load into the shared 3D viewer and property panel.
+
+2. Enter SMILES
+
+Use the `SMILES` tab to paste or type strings such as `CCO` or `c1ccccc1`. The tab has dedicated `Load SMILES`, `Clear`, and `Copy SMILES` controls.
+
+3. Draw molecule
+
+Use the `Draw` tab for the 2D drawing workflow. It includes drawing tools, ring templates, functional groups, common elements, and an `Open Periodic Table` modal. The current implementation provides a structured sketcher workspace and SMILES bridge; it is ready for a full Ketcher/Kekule/RDKit sketcher integration later.
+
+4. Upload structure file
+
+Use the `Upload` tab to import `.mol`, `.sdf`, `.xyz`, `.pdb`, `.cif`, `.smi`, `.smiles`, or `.txt` files. File upload is no longer placed at the bottom of the page. SMILES text files are parsed from the first non-empty line.
+
+5. Load PDB structure
+
+Use the `PDB` tab for protein and nucleic acid structures such as `1CRN`, `4HHB`, and `1BNA`. PDB metadata is displayed when RCSB provides it, and missing metadata does not block structure rendering.
+
+After any workflow loads a structure, the result appears in the shared result workspace:
+
+- `3D Viewer`
+- `Structure Details`
+- `Display Controls`
+- `Export Actions`
+
+Export controls appear in the result workspace after a molecule or structure is loaded. Display controls are located near the 3D viewer and include representation mode, background, hydrogen visibility, atom labels, reset view, and PNG download.
 
 ### Local Development
 
@@ -63,7 +99,7 @@ npm test
 
 ### PubChem Search
 
-Use the Molecule Search panel on `/molecule`.
+Use the `Search` tab on `/molecule`.
 
 Supported query examples:
 
@@ -85,7 +121,7 @@ On Cloudflare, these endpoints are served by Cloudflare Pages Functions. The rou
 
 ### SMILES Input
 
-Use the 2D Sketch Area to paste or edit SMILES. Example inputs:
+Use the `SMILES` tab to paste or edit SMILES. Example inputs:
 
 ```text
 CCO
@@ -94,7 +130,7 @@ CC(=O)OC1=CC=CC=C1C(=O)O
 CN1C=NC2=C1C(=O)N(C(=O)N2C)C
 ```
 
-Click `Set SMILES` to update the current molecule, then click `Generate 3D Model` to request a 3D structure.
+Click `Load SMILES` to request a 3D structure. If the optional RDKit backend is unavailable, the Cloudflare function falls back to PubChem SDF.
 
 ### 3D Model Generation
 
@@ -123,7 +159,7 @@ RDKit is optional. The page remains usable without an RDKit backend.
 
 ### PDB Loading
 
-Use the Protein / PDB panel on `/molecule`.
+Use the `PDB` tab on `/molecule`.
 
 Examples:
 

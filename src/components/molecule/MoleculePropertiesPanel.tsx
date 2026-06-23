@@ -3,16 +3,23 @@
 import { MoleculeProperties } from '@/lib/chem/types';
 import { formatValue } from '@/lib/chem/moleculeUtils';
 
+type Metadata = {
+  name?: string;
+  source?: string;
+  smiles?: string | null;
+  inchi?: string | null;
+  inchikey?: string | null;
+  formula?: string | null;
+  molecularWeight?: number | null;
+  cid?: string | null;
+  iupacName?: string | null;
+  pdbId?: string | null;
+  fileName?: string | null;
+  structureFormat?: string | null;
+};
+
 type Props = {
-  metadata?: {
-    name?: string;
-    smiles?: string | null;
-    inchi?: string | null;
-    inchikey?: string | null;
-    formula?: string | null;
-    molecularWeight?: number | null;
-    cid?: string | null;
-  };
+  metadata?: Metadata;
   properties: MoleculeProperties;
   loading?: boolean;
   onCopy?: (value: string) => void;
@@ -22,7 +29,7 @@ const cards: Array<{ key: keyof MoleculeProperties; label: string; unit?: string
   { key: 'molecularWeight', label: 'Molecular Weight', unit: 'g/mol' },
   { key: 'exactMass', label: 'Exact Mass', unit: 'Da' },
   { key: 'logP', label: 'LogP' },
-  { key: 'tpsa', label: 'TPSA', unit: 'Å²' },
+  { key: 'tpsa', label: 'TPSA', unit: 'A2' },
   { key: 'hbd', label: 'H Bond Donors' },
   { key: 'hba', label: 'H Bond Acceptors' },
   { key: 'rotatableBonds', label: 'Rotatable Bonds' },
@@ -37,73 +44,73 @@ export function MoleculePropertiesPanel({ metadata, properties, loading, onCopy 
   const inchiKey = metadata?.inchikey?.trim() || 'Not available';
   const formula = metadata?.formula || properties.formula || 'Not available';
   const molecularWeight = metadata?.molecularWeight ?? properties.molecularWeight ?? 'Not available';
-  const copyValue = (value: string) => (value === 'Not available' ? '' : value);
 
   return (
-    <section className="space-y-3">
-      <h2 className="text-lg font-semibold">Molecule Information</h2>
-      <div className="space-y-2 rounded-xl border border-slate-200 bg-white p-3 text-sm">
-        <p>
-          <span className="text-slate-500">Name:</span> {metadata?.name || 'Not available'}
-        </p>
-        <p>
-          <span className="text-slate-500">CID:</span> {metadata?.cid || 'N/A'}
-        </p>
-        <p>
-          <span className="text-slate-500">Formula:</span> {formula}
-        </p>
-        <p>
-          <span className="text-slate-500">Molecular Weight:</span> {molecularWeight}
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => onCopy?.(copyValue(smiles))}
-            className="rounded-md border border-slate-200 px-2 py-1 text-xs"
-            disabled={smiles === 'Not available'}
-          >
-            Copy SMILES
-          </button>
-          <button
-            type="button"
-            onClick={() => onCopy?.(copyValue(inchi))}
-            className="rounded-md border border-slate-200 px-2 py-1 text-xs"
-            disabled={inchi === 'Not available'}
-          >
-            Copy InChI
-          </button>
-          <button
-            type="button"
-            onClick={() => onCopy?.(copyValue(inchiKey))}
-            className="rounded-md border border-slate-200 px-2 py-1 text-xs"
-            disabled={inchiKey === 'Not available'}
-          >
-            Copy InChIKey
-          </button>
+    <section className="rounded-[2rem] border border-slate-200 bg-white/95 p-5 shadow-card">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-950">Structure Details</h2>
+          <p className="mt-1 text-sm text-slate-600">Identifiers, properties, and copied notations for the current structure.</p>
         </div>
-        <p>
-          <span className="text-slate-500">SMILES:</span>{' '}
-          <span className="mt-1 block break-all font-mono text-xs text-slate-700">{smiles}</span>
-        </p>
-        <p>
-          <span className="text-slate-500">InChI:</span>{' '}
-          <span className="mt-1 block break-all font-mono text-xs text-slate-700">{inchi}</span>
-        </p>
-        <p>
-          <span className="text-slate-500">InChIKey:</span>{' '}
-          <span className="mt-1 block break-all font-mono text-xs text-slate-700">{inchiKey}</span>
-        </p>
+        <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold capitalize text-slate-600">
+          {metadata?.source || 'empty'}
+        </span>
       </div>
-      <div className="grid gap-2 sm:grid-cols-2">
+
+      <div className="mt-5 grid gap-3 lg:grid-cols-2">
+        <Detail label="Name" value={metadata?.name || 'Not available'} />
+        <Detail label="CID" value={metadata?.cid || 'N/A'} />
+        <Detail label="PDB ID" value={metadata?.pdbId || 'N/A'} />
+        <Detail label="File" value={metadata?.fileName || 'N/A'} />
+        <Detail label="Formula" value={formula} />
+        <Detail label="Molecular Weight" value={String(molecularWeight)} />
+      </div>
+
+      <div className="mt-4 space-y-3 rounded-3xl border border-slate-200 bg-slate-50 p-4">
+        <Identifier label="SMILES" value={smiles} onCopy={onCopy} />
+        <Identifier label="InChI" value={inchi} onCopy={onCopy} />
+        <Identifier label="InChIKey" value={inchiKey} onCopy={onCopy} />
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {cards.map((card) => (
-          <article key={card.key} className="stat-card">
-            <p className="text-xs text-slate-500">{card.label}</p>
-            <p className={`mt-2 text-lg font-semibold ${loading ? 'animate-pulse' : ''}`}>
+          <article key={card.key} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+            <p className="text-xs font-medium text-slate-500">{card.label}</p>
+            <p className={`mt-2 text-lg font-semibold text-slate-950 ${loading ? 'animate-pulse' : ''}`}>
               {loading ? '...' : formatValue(properties[card.key], card.unit)}
             </p>
           </article>
         ))}
       </div>
     </section>
+  );
+}
+
+function Detail({ label, value }: { label: string; value: string }) {
+  return (
+    <p className="min-w-0 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm">
+      <span className="block text-xs font-medium text-slate-500">{label}</span>
+      <span className="mt-1 block break-words text-slate-900">{value}</span>
+    </p>
+  );
+}
+
+function Identifier({ label, value, onCopy }: { label: string; value: string; onCopy?: (value: string) => void }) {
+  const available = value !== 'Not available';
+  return (
+    <div className="min-w-0">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500">{label}</p>
+        <button
+          type="button"
+          onClick={() => available && onCopy?.(value)}
+          disabled={!available}
+          className="rounded-full border border-slate-300 bg-white px-3 py-1 text-xs font-medium text-slate-700 hover:border-sky-300 hover:text-sky-800 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          Copy
+        </button>
+      </div>
+      <p className="mt-2 break-all rounded-2xl bg-white p-3 font-mono text-xs leading-5 text-slate-700">{value}</p>
+    </div>
   );
 }

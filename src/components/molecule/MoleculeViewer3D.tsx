@@ -40,6 +40,7 @@ type Props = {
   children?: ReactNode;
   onReady?: () => void;
   initialRepresentation?: Representation;
+  showHeader?: boolean;
 };
 
 function load3dmolScript(): Promise<void> {
@@ -92,7 +93,7 @@ function normalizeBackground(value: string) {
 }
 
 export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function MoleculeViewer3D(
-  { loading, initialRepresentation = 'stick', onReady, children },
+  { loading, initialRepresentation = 'stick', onReady, children, showHeader = true },
   ref
 ) {
   const container = useRef<HTMLDivElement>(null);
@@ -267,7 +268,7 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
 
   return (
     <div className="space-y-3">
-      <h2 className="text-lg font-semibold">3D Viewer</h2>
+      {showHeader ? <h2 className="text-lg font-semibold">3D Viewer</h2> : null}
       <div
         className={`relative h-[55vh] min-h-[360px] w-full overflow-hidden rounded-xl border border-slate-200 ${loading ? 'skeleton' : 'bg-white'}`}
       >

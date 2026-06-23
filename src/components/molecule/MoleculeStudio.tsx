@@ -1,83 +1,86 @@
 'use client';
 
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { MoleculeProperties, MoleculeGenerationResponse, PdbRecord } from '@/lib/chem/types';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { MoleculeGenerationResponse, MoleculeProperties, PdbRecord } from '@/lib/chem/types';
 import { downloadText, fileNameForFormat } from '@/lib/chem/fileExport';
 import { emptyProperties } from '@/lib/chem/moleculeUtils';
-import { MoleculeSketcher } from '@/components/molecule/MoleculeSketcher';
-import { MoleculeViewer3D, MoleculeViewerHandle } from '@/components/molecule/MoleculeViewer3D';
-import { MoleculeSearch } from '@/components/molecule/MoleculeSearch';
+import { normalizeSmiles } from '@/lib/chem/smiles';
+import { MoleculeViewerHandle } from '@/components/molecule/MoleculeViewer3D';
+import { MoleculeMode, MoleculeModeTabs } from '@/components/molecule/MoleculeModeTabs';
+import { SearchMode } from '@/components/molecule/SearchMode';
+import { SmilesMode } from '@/components/molecule/SmilesMode';
+import { DrawMode } from '@/components/molecule/DrawMode';
+import { UploadMode, UploadPayload } from '@/components/molecule/UploadMode';
+import { PdbMode } from '@/components/molecule/PdbMode';
+import { ViewerPanel } from '@/components/molecule/ViewerPanel';
 import { MoleculePropertiesPanel } from '@/components/molecule/MoleculePropertiesPanel';
-import { ImportExportPanel } from '@/components/molecule/ImportExportPanel';
-import { PDBViewerPanel } from '@/components/molecule/PDBViewerPanel';
-import { Toolbar } from '@/components/molecule/Toolbar';
+import { DisplayControls, Representation } from '@/components/molecule/DisplayControls';
+import { ExportPanel } from '@/components/molecule/ExportPanel';
 
 type StructureFormat = 'sdf' | 'mol' | 'xyz' | 'pdb' | 'cif';
-
+type MoleculeSource = 'search' | 'smiles' | 'draw' | 'upload' | 'pdb';
 type Toast = { id: number; text: string; level: 'error' | 'success' | 'info' };
 
-type CurrentMoleculeInfo = {
+type CurrentMolecule = {
   name?: string;
-  smiles?: string;
-  inchi?: string;
-  inchikey?: string;
-  formula?: string;
-  molecularWeight?: number | null;
+  source: MoleculeSource;
+  smiles?: string | null;
   cid?: string | null;
-  dataSource?: 'initial' | 'manual' | 'pubchem' | 'import';
+  formula?: string | null;
+  molecularWeight?: number | null;
+  inchi?: string | null;
+  inchikey?: string | null;
+  iupacName?: string | null;
+  structureData?: string | null;
+  structureFormat?: StructureFormat | null;
+  pdbId?: string | null;
+  fileName?: string | null;
 };
-
-const INITIAL_SMILES = 'CCO';
 
 type StructureState = {
   data: string | null;
   format: StructureFormat;
 };
 
-type SmilesChangeOptions = {
-  preserveMetadata?: boolean;
-  dataSource?: CurrentMoleculeInfo['dataSource'];
+const INITIAL_SMILES = 'CCO';
+const initialModeErrors: Record<MoleculeMode, string | null> = {
+  search: null,
+  smiles: null,
+  draw: null,
+  upload: null,
+  pdb: null
 };
-
-function metadataForSmiles(value: string, dataSource: CurrentMoleculeInfo['dataSource'] = 'manual'): CurrentMoleculeInfo {
-  const trimmed = value.trim();
-  return {
-    name: trimmed ? (dataSource === 'import' ? 'Imported SMILES' : 'Manual SMILES') : undefined,
-    smiles: value,
-    cid: null,
-    dataSource
-  };
-}
 
 export function MoleculeStudio() {
   const viewerRef = useRef<MoleculeViewerHandle>(null);
+  const undoStack = useRef<string[]>([INITIAL_SMILES]);
+  const redoStack = useRef<string[]>([]);
+  const initialPropertiesLoaded = useRef(false);
+
+  const [activeMode, setActiveMode] = useState<MoleculeMode>('search');
   const [smiles, setSmiles] = useState(INITIAL_SMILES);
-  const [metadata, setMetadata] = useState<CurrentMoleculeInfo>({
-    name: 'ethanol',
-    smiles: INITIAL_SMILES,
-    dataSource: 'initial'
+  const [currentMolecule, setCurrentMolecule] = useState<CurrentMolecule>({
+    name: 'Ethanol draft',
+    source: 'smiles',
+    smiles: INITIAL_SMILES
   });
   const [properties, setProperties] = useState<MoleculeProperties>(emptyProperties());
-
   const [structure, setStructure] = useState<StructureState>({ data: null, format: 'sdf' });
+  const [modeErrors, setModeErrors] = useState<Record<MoleculeMode, string | null>>(initialModeErrors);
+  const [toastMessages, setToastMessages] = useState<Toast[]>([]);
+
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [loading3D, setLoading3D] = useState(false);
   const [loadingProperties, setLoadingProperties] = useState(false);
   const [loadingPdb, setLoadingPdb] = useState(false);
+  const [loadingUpload, setLoadingUpload] = useState(false);
   const [loadingExport, setLoadingExport] = useState(false);
-  const [toastMessages, setToastMessages] = useState<Toast[]>([]);
 
-  const [representation, setRepresentation] = useState<
-    'ball-and-stick' | 'stick' | 'sphere' | 'line' | 'surface' | 'cartoon' | 'space-filling'
-  >('ball-and-stick');
+  const [representation, setRepresentation] = useState<Representation>('ball-and-stick');
   const [background, setBackground] = useState('white');
   const [showHydrogens, setShowHydrogens] = useState(true);
   const [showAtomLabels, setShowAtomLabels] = useState(false);
-
   const [pdbMeta, setPdbMeta] = useState<{ pdbId?: string; title?: string | null; resolution?: number | null; experimentalMethod?: string | null } | undefined>(undefined);
-
-  const undoStack = useRef<string[]>([INITIAL_SMILES]);
-  const redoStack = useRef<string[]>([]);
 
   const toast = useCallback((text: string, level: Toast['level'] = 'info') => {
     const id = Date.now() + Math.random();
@@ -87,18 +90,43 @@ export function MoleculeStudio() {
     }, 3500);
   }, []);
 
-  const syncViewer = useCallback((nextData: string | null, nextFormat: StructureState['format']) => {
+  const setModeError = useCallback((mode: MoleculeMode, message: string | null) => {
+    setModeErrors((prev) => ({ ...prev, [mode]: message }));
+  }, []);
+
+  const clearModeError = useCallback(
+    (mode: MoleculeMode) => {
+      setModeError(mode, null);
+    },
+    [setModeError]
+  );
+
+  const syncViewer = useCallback((nextData: string | null, nextFormat: StructureFormat) => {
     setStructure({ data: nextData, format: nextFormat });
+    setCurrentMolecule((prev) => ({ ...prev, structureData: nextData, structureFormat: nextFormat }));
     try {
-      if (!nextData) {
-        viewerRef.current?.loadModel(null, nextFormat);
-        return;
-      }
       viewerRef.current?.loadModel(nextData, nextFormat);
     } catch {
-      // ignored to keep UX resilient
+      toast('3D viewer could not load this structure.', 'error');
+    }
+  }, [toast]);
+
+  const pushSmilesHistory = useCallback((value: string) => {
+    const last = undoStack.current[undoStack.current.length - 1];
+    if (value !== last) {
+      undoStack.current.push(value);
+      redoStack.current = [];
     }
   }, []);
+
+  const updateSmilesDraft = useCallback(
+    (value: string) => {
+      setSmiles(value);
+      setCurrentMolecule((prev) => ({ ...prev, smiles: value }));
+      pushSmilesHistory(value);
+    },
+    [pushSmilesHistory]
+  );
 
   const loadProperties = useCallback(
     async (value: string): Promise<MoleculeProperties | null> => {
@@ -106,6 +134,7 @@ export function MoleculeStudio() {
         setProperties(emptyProperties());
         return null;
       }
+
       setLoadingProperties(true);
       try {
         const response = await fetch('/api/chem/properties', {
@@ -113,12 +142,12 @@ export function MoleculeStudio() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ smiles: value })
         });
-        const payload = await response.json();
+        const payload = (await response.json()) as Partial<MoleculeProperties> & { error?: string };
         if (!response.ok) {
-          throw new Error(payload?.error || 'Property calculation failed');
+          throw new Error(payload.error || 'Property calculation failed');
         }
 
-        const nextProperties = {
+        const nextProperties: MoleculeProperties = {
           formula: payload.formula ?? null,
           molecularWeight: payload.molecularWeight ?? null,
           exactMass: payload.exactMass ?? null,
@@ -145,23 +174,6 @@ export function MoleculeStudio() {
     [toast]
   );
 
-  const handleSmilesChange = useCallback(
-    (value: string, options: SmilesChangeOptions = {}) => {
-      setSmiles(value);
-      setMetadata((prev) =>
-        options.preserveMetadata
-          ? { ...prev, smiles: value }
-          : metadataForSmiles(value, options.dataSource ?? 'manual')
-      );
-      const last = undoStack.current[undoStack.current.length - 1];
-      if (value !== last) {
-        undoStack.current.push(value);
-        redoStack.current = [];
-      }
-    },
-    []
-  );
-
   const handleUndo = useCallback(() => {
     if (undoStack.current.length <= 1) return;
     const current = undoStack.current.pop();
@@ -169,7 +181,7 @@ export function MoleculeStudio() {
     if (current) redoStack.current.push(current);
     if (previous !== undefined) {
       setSmiles(previous);
-      setMetadata(metadataForSmiles(previous));
+      setCurrentMolecule((prev) => ({ ...prev, smiles: previous }));
     }
   }, []);
 
@@ -178,149 +190,292 @@ export function MoleculeStudio() {
     if (!next) return;
     undoStack.current.push(next);
     setSmiles(next);
-    setMetadata(metadataForSmiles(next));
+    setCurrentMolecule((prev) => ({ ...prev, smiles: next }));
   }, []);
 
-  const loadByQuery = useCallback(
-    async (query: string) => {
-      if (!query.trim()) {
-        toast('Please enter molecule name, smiles, CID, or InChIKey', 'error');
+  const clearStudio = useCallback(() => {
+    undoStack.current = [''];
+    redoStack.current = [];
+    setSmiles('');
+    setCurrentMolecule({ source: activeMode === 'pdb' ? 'pdb' : 'smiles', smiles: null, structureData: null, structureFormat: 'sdf' });
+    setProperties(emptyProperties());
+    setPdbMeta(undefined);
+    syncViewer(null, 'sdf');
+  }, [activeMode, syncViewer]);
+
+  const generate3DFromSmiles = useCallback(
+    async (rawValue: string, source: MoleculeSource, metadata: Partial<CurrentMolecule> = {}, modeForError: MoleculeMode = 'smiles') => {
+      const nextSmiles = normalizeSmiles(rawValue);
+      if (!nextSmiles) {
+        const message = 'SMILES is empty.';
+        setModeError(modeForError, message);
+        toast(message, 'error');
         return;
       }
 
+      clearModeError(modeForError);
+      setLoading3D(true);
+      setSmiles(nextSmiles);
+      pushSmilesHistory(nextSmiles);
+
+      try {
+        const response = await fetch('/api/chem/generate-3d', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ smiles: nextSmiles })
+        });
+        const payload = (await response.json()) as MoleculeGenerationResponse & { error?: string; cid?: string | null };
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || '3D generation failed');
+        }
+
+        syncViewer(payload.data, 'sdf');
+        const nextProperties = await loadProperties(nextSmiles);
+        setCurrentMolecule((prev) => ({
+          ...prev,
+          ...metadata,
+          source,
+          name: metadata.name || (source === 'draw' ? 'Drawn molecule' : source === 'upload' ? 'Imported SMILES' : 'SMILES molecule'),
+          smiles: nextSmiles,
+          cid: metadata.cid ?? payload.cid ?? prev.cid ?? null,
+          formula: nextProperties?.formula ?? metadata.formula ?? prev.formula ?? null,
+          molecularWeight: nextProperties?.molecularWeight ?? metadata.molecularWeight ?? prev.molecularWeight ?? null,
+          structureData: payload.data,
+          structureFormat: 'sdf',
+          pdbId: null
+        }));
+        setPdbMeta(undefined);
+        toast(`3D model loaded (${payload.method})`, 'success');
+      } catch (error) {
+        const message = error instanceof Error ? error.message : '3D generation failed';
+        setModeError(modeForError, message);
+        toast(message, 'error');
+      } finally {
+        setLoading3D(false);
+      }
+    },
+    [clearModeError, loadProperties, pushSmilesHistory, setModeError, syncViewer, toast]
+  );
+
+  const loadByQuery = useCallback(
+    async (query: string) => {
+      const trimmed = query.trim();
+      if (!trimmed) {
+        const message = 'Enter a molecule name or PubChem CID.';
+        setModeError('search', message);
+        return;
+      }
+
+      clearModeError('search');
       setLoadingSearch(true);
       try {
-        const response = await fetch(`/api/chem/pubchem/search?query=${encodeURIComponent(query)}`);
-        const result = await response.json();
+        const response = await fetch(`/api/chem/pubchem/search?query=${encodeURIComponent(trimmed)}`);
+        const result = (await response.json()) as {
+          error?: string;
+          name?: string;
+          cid?: string | null;
+          smiles?: string | null;
+          canonicalSmiles?: string | null;
+          formula?: string | null;
+          molecularWeight?: number | null;
+          inchi?: string | null;
+          inchikey?: string | null;
+        };
         if (!response.ok) {
-          throw new Error(result?.error || 'Search failed');
+          throw new Error(result.error || 'Search failed');
         }
 
-        const smilesValue = result.smiles || query;
-        setMetadata({
-          name: result.name || query,
-          smiles: smilesValue,
-          inchi: result.inchi || undefined,
-          inchikey: result.inchikey || undefined,
-          formula: result.formula || undefined,
-          molecularWeight: result.molecularWeight || null,
-          cid: result.cid || null,
-          dataSource: 'pubchem'
+        const nextSmiles = result.smiles || result.canonicalSmiles || '';
+        if (!nextSmiles) {
+          throw new Error('PubChem did not return a SMILES string for this query.');
+        }
+
+        setSmiles(nextSmiles);
+        pushSmilesHistory(nextSmiles);
+        setCurrentMolecule({
+          source: 'search',
+          name: result.name || trimmed,
+          smiles: nextSmiles,
+          inchi: result.inchi ?? null,
+          inchikey: result.inchikey ?? null,
+          formula: result.formula ?? null,
+          molecularWeight: result.molecularWeight ?? null,
+          cid: result.cid ?? null,
+          structureData: null,
+          structureFormat: 'sdf'
         });
-        handleSmilesChange(smilesValue, { preserveMetadata: true });
+
+        const nextProperties = await loadProperties(nextSmiles);
+        setCurrentMolecule((prev) => ({
+          ...prev,
+          formula: prev.formula ?? nextProperties?.formula ?? null,
+          molecularWeight: prev.molecularWeight ?? nextProperties?.molecularWeight ?? null
+        }));
 
         if (result.cid) {
-          const structureResp = await fetch(`/api/chem/pubchem/structure?cid=${result.cid}&format=sdf3d`);
-          const structurePayload = await structureResp.json();
-          if (structureResp.ok && structurePayload.data) {
-            syncViewer(structurePayload.data, 'sdf');
+          const structureResp = await fetch(`/api/chem/pubchem/structure?cid=${encodeURIComponent(result.cid)}&format=sdf3d`);
+          const structurePayload = (await structureResp.json()) as { error?: string; data?: string };
+          if (!structureResp.ok || !structurePayload.data) {
+            throw new Error(structurePayload.error || 'PubChem structure fetch failed');
           }
+          syncViewer(structurePayload.data, 'sdf');
+          setCurrentMolecule((prev) => ({ ...prev, structureData: structurePayload.data ?? null, structureFormat: 'sdf' }));
+        } else {
+          await generate3DFromSmiles(nextSmiles, 'search', { name: result.name || trimmed, cid: result.cid ?? null }, 'search');
         }
 
-        await loadProperties(smilesValue);
+        setPdbMeta(undefined);
+        toast('PubChem result loaded.', 'success');
       } catch (error) {
-        toast(error instanceof Error ? error.message : 'Search failed', 'error');
+        const message = error instanceof Error ? error.message : 'Search failed';
+        setModeError('search', message);
+        toast(message, 'error');
       } finally {
         setLoadingSearch(false);
       }
     },
-    [handleSmilesChange, loadProperties, syncViewer, toast]
+    [clearModeError, generate3DFromSmiles, loadProperties, pushSmilesHistory, setModeError, syncViewer, toast]
   );
 
-  const generate3D = useCallback(async () => {
-    if (!smiles.trim()) {
-      toast('SMILES is empty', 'error');
-      return;
-    }
-    setLoading3D(true);
-    try {
-      const response = await fetch('/api/chem/generate-3d', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ smiles })
-      });
-      const payload: MoleculeGenerationResponse & { error?: string } = await response.json();
-      if (!response.ok || !payload?.success) {
-        throw new Error(payload?.error || '3D generation failed');
-      }
+  const loadSmiles = useCallback(
+    async (value: string) => {
+      await generate3DFromSmiles(value, 'smiles', {}, 'smiles');
+    },
+    [generate3DFromSmiles]
+  );
 
-      syncViewer(payload.data, 'sdf');
-      const nextProperties = await loadProperties(smiles);
-      setMetadata((prev) => ({
-        ...(prev.dataSource === 'pubchem' && prev.smiles === smiles ? prev : metadataForSmiles(smiles)),
-        smiles,
-        formula: nextProperties?.formula ?? prev.formula,
-        molecularWeight: nextProperties?.molecularWeight ?? prev.molecularWeight
-      }));
-      toast(`3D model generated (${payload.method})`, 'success');
-    } catch (error) {
-      toast(error instanceof Error ? error.message : '3D generation failed', 'error');
-    } finally {
-      setLoading3D(false);
-    }
-  }, [smiles, syncViewer, toast]);
+  const loadDrawnSmiles = useCallback(
+    async (value: string) => {
+      await generate3DFromSmiles(value, 'draw', {}, 'draw');
+    },
+    [generate3DFromSmiles]
+  );
+
+  const loadUploadedFile = useCallback(
+    async ({ content, format, fileName, fileSize }: UploadPayload) => {
+      clearModeError('upload');
+      setLoadingUpload(true);
+      try {
+        if (!content.trim()) {
+          throw new Error('Uploaded file is empty.');
+        }
+        if (fileSize > 8 * 1024 * 1024) {
+          throw new Error('File is too large. Please upload a structure file smaller than 8 MB.');
+        }
+
+        if (format === 'smi' || format === 'smiles' || format === 'txt') {
+          const firstSmiles = content
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .find(Boolean)
+            ?.split(/\s+/)[0];
+          if (!firstSmiles) {
+            throw new Error('No SMILES string found in this text file.');
+          }
+          await generate3DFromSmiles(firstSmiles, 'upload', { name: 'Imported SMILES', fileName }, 'upload');
+          return;
+        }
+
+        if (format === 'sdf' || format === 'mol' || format === 'xyz' || format === 'pdb' || format === 'cif') {
+          const structureFormat = format;
+          setProperties(emptyProperties());
+          setPdbMeta(undefined);
+          setCurrentMolecule({
+            source: 'upload',
+            name: fileName,
+            fileName,
+            smiles: null,
+            cid: null,
+            structureData: content,
+            structureFormat
+          });
+          syncViewer(content, structureFormat);
+          if (structureFormat === 'pdb') {
+            setRepresentation('cartoon');
+          }
+          toast(`${fileName} loaded.`, 'success');
+          return;
+        }
+
+        throw new Error(`Unsupported file format: ${format}`);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'File import failed';
+        setModeError('upload', message);
+        toast(message, 'error');
+      } finally {
+        setLoadingUpload(false);
+      }
+    },
+    [clearModeError, generate3DFromSmiles, setModeError, syncViewer, toast]
+  );
 
   const loadPdb = useCallback(
     async (id: string) => {
+      const pdbId = id.trim().toUpperCase();
+      if (!/^[0-9A-Z]{4}$/.test(pdbId)) {
+        const message = 'Enter a valid four-character PDB ID, such as 1CRN.';
+        setModeError('pdb', message);
+        return;
+      }
+
+      clearModeError('pdb');
       setLoadingPdb(true);
       setPdbMeta(undefined);
       try {
-        const response = await fetch(`/api/chem/pdb/${encodeURIComponent(id)}`);
-        const payload: PdbRecord & { error?: string } = await response.json();
+        const response = await fetch(`/api/chem/pdb/${encodeURIComponent(pdbId)}`);
+        const payload = (await response.json()) as PdbRecord & { error?: string };
         if (!response.ok) {
-          throw new Error(payload?.error || 'PDB load failed');
+          throw new Error(payload.error || 'PDB load failed');
         }
 
+        setProperties(emptyProperties());
+        setRepresentation('cartoon');
         syncViewer(payload.data, 'pdb');
-        setPdbMeta({
+        const metadata = {
           pdbId: payload.pdbId,
           title: payload.title,
           resolution: payload.resolution,
           experimentalMethod: payload.experimentalMethod
+        };
+        setPdbMeta(metadata);
+        setCurrentMolecule({
+          source: 'pdb',
+          name: payload.title || `PDB ${payload.pdbId}`,
+          pdbId: payload.pdbId,
+          smiles: null,
+          cid: null,
+          structureData: payload.data,
+          structureFormat: 'pdb'
         });
-
-        setRepresentation('cartoon');
-        viewerRef.current?.setStyleConfig({ representation: 'cartoon', backgroundColor: background, showHydrogens, showAtomLabels });
+        toast(`PDB ${payload.pdbId} loaded.`, 'success');
       } catch (error) {
-        toast(error instanceof Error ? error.message : 'PDB load failed', 'error');
+        const message = error instanceof Error ? error.message : 'PDB load failed';
+        setModeError('pdb', message);
+        toast(message, 'error');
       } finally {
         setLoadingPdb(false);
       }
     },
-    [background, showHydrogens, showAtomLabels, syncViewer, toast]
+    [clearModeError, setModeError, syncViewer, toast]
   );
 
   const exportFile = useCallback(
-    (content: string | null, format: 'smi' | StructureFormat) => {
+    (content: string | null | undefined, format: 'smi' | StructureFormat) => {
       if (!content) {
         toast('No data available for this export format.', 'error');
         return;
       }
       const ext = format === 'smi' ? 'smi' : format;
-      downloadText(fileNameForFormat(ext, metadata.smiles ?? 'molecule'), content, mimeForFormat(format));
+      downloadText(fileNameForFormat(ext, currentMolecule.smiles ?? currentMolecule.name ?? 'molecule'), content, mimeForFormat(format));
     },
-    [metadata.smiles, toast]
+    [currentMolecule.name, currentMolecule.smiles, toast]
   );
 
-  const exportSmiles = useCallback(() => {
-    exportFile(smiles, 'smi');
-  }, [smiles, exportFile]);
-
-  const exportMol = useCallback(() => {
-    exportFile(structure.data, 'mol');
-  }, [exportFile, structure.data]);
-
-  const exportSdf = useCallback(() => {
-    exportFile(structure.data, 'sdf');
-  }, [exportFile, structure.data]);
-
-  const exportXyz = useCallback(() => {
-    exportFile(structure.data, 'xyz');
-  }, [exportFile, structure.data]);
-
-  const exportPdb = useCallback(() => {
-    exportFile(structure.data, 'pdb');
-  }, [exportFile, structure.data]);
+  const exportSmiles = useCallback(() => exportFile(smiles, 'smi'), [exportFile, smiles]);
+  const exportMol = useCallback(() => exportFile(structure.data, 'mol'), [exportFile, structure.data]);
+  const exportSdf = useCallback(() => exportFile(structure.data, 'sdf'), [exportFile, structure.data]);
+  const exportXyz = useCallback(() => exportFile(structure.data, 'xyz'), [exportFile, structure.data]);
+  const exportPdb = useCallback(() => exportFile(structure.data, 'pdb'), [exportFile, structure.data]);
 
   const exportPng = useCallback(async () => {
     setLoadingExport(true);
@@ -334,7 +489,7 @@ export function MoleculeStudio() {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `${(metadata.smiles ?? 'molecule').replace(/[^a-zA-Z0-9-_]/g, '_')}.png`;
+        link.download = `${(currentMolecule.smiles ?? currentMolecule.name ?? 'molecule').replace(/[^a-zA-Z0-9-_]/g, '_')}.png`;
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -345,34 +500,7 @@ export function MoleculeStudio() {
     } finally {
       setLoadingExport(false);
     }
-  }, [metadata.smiles, toast]);
-
-  const onImportSmiles = useCallback(
-    (value: string) => {
-      handleSmilesChange(value, { dataSource: 'import' });
-      syncViewer(null, 'sdf');
-      loadProperties(value);
-      toast('SMILES imported');
-    },
-    [handleSmilesChange, syncViewer, loadProperties, toast]
-  );
-
-  const onImportText = useCallback(
-    (value: string, format: 'sdf' | 'mol' | 'xyz' | 'pdb' | 'cif') => {
-      syncViewer(value, format);
-      toast(`Imported ${format.toUpperCase()} file`);
-    },
-    [syncViewer, toast]
-  );
-
-  const clearSketch = useCallback(() => {
-    undoStack.current = [''];
-    redoStack.current = [];
-    setSmiles('');
-    setMetadata(metadataForSmiles(''));
-    setProperties(emptyProperties());
-    syncViewer(null, 'sdf');
-  }, [syncViewer]);
+  }, [currentMolecule.name, currentMolecule.smiles, toast]);
 
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
@@ -386,12 +514,12 @@ export function MoleculeStudio() {
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
         event.preventDefault();
-        exportFile(`${smiles}` , 'smi');
+        exportSmiles();
       }
     };
     window.addEventListener('keydown', keyDown);
     return () => window.removeEventListener('keydown', keyDown);
-  }, [exportFile, handleRedo, handleUndo, smiles]);
+  }, [exportSmiles, handleRedo, handleUndo]);
 
   useEffect(() => {
     viewerRef.current?.setStyleConfig({
@@ -406,10 +534,27 @@ export function MoleculeStudio() {
   }, [background, representation, showAtomLabels, showHydrogens, structure.data, structure.format]);
 
   useEffect(() => {
-    if (smiles && structure.data === null) {
+    if (!initialPropertiesLoaded.current && smiles && !loadingProperties) {
+      initialPropertiesLoaded.current = true;
       loadProperties(smiles);
     }
-  }, [smiles, loadProperties, structure.data]);
+  }, [loadProperties, loadingProperties, smiles]);
+
+  const sourceLabel = useMemo(() => {
+    if (currentMolecule.source === 'pdb') return currentMolecule.pdbId ? `Loaded PDB ${currentMolecule.pdbId}` : 'Protein structure workflow';
+    if (currentMolecule.source === 'upload') return currentMolecule.fileName ? `Imported ${currentMolecule.fileName}` : 'Uploaded structure workflow';
+    if (currentMolecule.smiles) return `Current SMILES: ${currentMolecule.smiles}`;
+    return 'Choose a workflow above to load a structure.';
+  }, [currentMolecule.fileName, currentMolecule.pdbId, currentMolecule.smiles, currentMolecule.source]);
+
+  const exportAvailability = useMemo(
+    () => ({
+      smiles: Boolean(smiles.trim()),
+      structure: Boolean(structure.data),
+      pdb: structure.format === 'pdb' && Boolean(structure.data)
+    }),
+    [smiles, structure.data, structure.format]
+  );
 
   const toastClass = useCallback((level: Toast['level']) => {
     if (level === 'error') return 'border-rose-200 text-rose-700';
@@ -418,99 +563,112 @@ export function MoleculeStudio() {
   }, []);
 
   return (
-    <div className="min-h-screen">
-      <header className="border-b border-slate-200 bg-white/90">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-4 md:px-8">
-          <h1 className="text-xl font-bold">ChemVault Molecule Studio</h1>
-          <p className="text-sm text-slate-600">Academic molecular modeling workspace</p>
+    <div className="min-h-screen overflow-x-hidden">
+      <header className="border-b border-slate-200 bg-white/90 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-8">
+          <a href="/" className="text-lg font-bold tracking-tight text-slate-950">ChemVault</a>
+          <p className="text-sm text-slate-600">Molecule Studio</p>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 md:px-8">
-        <section className="surface-card space-y-4">
-          <p className="text-sm text-slate-600">
-            Draw a molecule, paste SMILES, or search PubChem to begin.
-          </p>
-
-          <div className="grid gap-4 lg:grid-cols-[1.05fr_1.2fr]">
-            <aside className="space-y-6">
-              <MoleculeSearch onSearch={loadByQuery} loading={loadingSearch} />
-              <MoleculeSketcher
-                smiles={smiles}
-                onChange={handleSmilesChange}
-                onUndo={handleUndo}
-                onRedo={handleRedo}
-                onClear={clearSketch}
-                loading={loading3D || loadingSearch}
-              />
-              <Toolbar
-                onGenerate3D={generate3D}
-                loadingGenerate3d={loading3D}
-                loadingExport={loadingExport}
-                generatingDisabled={!smiles.trim()}
-                onUndo={handleUndo}
-                onRedo={handleRedo}
-                onClear={clearSketch}
-                onResetView={() => viewerRef.current?.resetView()}
-                onExportPng={exportPng}
-                loadingMessage={loading3D ? 'Generating 3D geometry…' : ''}
-                representation={representation}
-                background={background}
-                onRepresentationChange={setRepresentation}
-                onBackgroundChange={setBackground}
-                onHydrogensToggle={() => setShowHydrogens((value) => !value)}
-                showHydrogens={showHydrogens}
-                onLabelsToggle={() => setShowAtomLabels((value) => !value)}
-                showAtomLabels={showAtomLabels}
-              />
-              <ImportExportPanel
-                onImportSmiles={onImportSmiles}
-                onImportText={onImportText}
-                onExportMol={exportMol}
-                onExportSdf={exportSdf}
-                onExportXyz={exportXyz}
-                onExportPdb={exportPdb}
-                onExportSmi={exportSmiles}
-                loadingExport={loadingExport}
-              />
-              <PDBViewerPanel onLoadPdb={loadPdb} loading={loadingPdb} metadata={pdbMeta} />
-            </aside>
-
-            <section className="space-y-6">
-              <MoleculeViewer3D
-                ref={viewerRef}
-                loading={loading3D || loadingSearch}
-                initialRepresentation={representation}
-                onReady={() => {
-                  if (structure.data) {
-                    viewerRef.current?.loadModel(structure.data, structure.format);
-                  }
-                }}
-              />
-              <MoleculePropertiesPanel
-                metadata={metadata}
-                properties={properties}
-                loading={loadingProperties}
-                onCopy={(value) => {
-                  navigator.clipboard?.writeText(value).catch(() => {});
-                }}
-              />
-            </section>
+        <section className="relative overflow-hidden rounded-[2rem] border border-slate-200 bg-white p-6 shadow-card md:p-8">
+          <div className="absolute right-0 top-0 h-64 w-64 rounded-full bg-sky-200/40 blur-3xl" />
+          <div className="absolute bottom-0 left-10 h-48 w-48 rounded-full bg-emerald-200/40 blur-3xl" />
+          <div className="relative max-w-4xl">
+            <h1 className="text-4xl font-bold tracking-tight text-slate-950 md:text-6xl">ChemVault Molecule Studio</h1>
+            <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-600">Draw, search, upload and visualise molecules in 2D and 3D.</p>
+            <p className="mt-3 text-sm text-slate-500">Start with one workflow, then review the result in a unified 3D viewer and property workspace.</p>
           </div>
+        </section>
+
+        <section className="mt-6">
+          <MoleculeModeTabs activeMode={activeMode} onChange={setActiveMode} />
+        </section>
+
+        <section className="mt-6 animate-fade">
+          {activeMode === 'search' ? <SearchMode onSearch={loadByQuery} loading={loadingSearch} error={modeErrors.search} /> : null}
+          {activeMode === 'smiles' ? (
+            <SmilesMode
+              value={smiles}
+              onValueChange={updateSmilesDraft}
+              onLoad={loadSmiles}
+              onClear={clearStudio}
+              onCopy={(value) => navigator.clipboard?.writeText(value).catch(() => {})}
+              loading={loading3D}
+              error={modeErrors.smiles}
+            />
+          ) : null}
+          {activeMode === 'draw' ? (
+            <DrawMode
+              value={smiles}
+              onValueChange={updateSmilesDraft}
+              onGenerate3D={loadDrawnSmiles}
+              onUndo={handleUndo}
+              onRedo={handleRedo}
+              onClear={clearStudio}
+              onExportSmiles={exportSmiles}
+              loading={loading3D}
+              error={modeErrors.draw}
+            />
+          ) : null}
+          {activeMode === 'upload' ? <UploadMode onLoadFile={loadUploadedFile} loading={loadingUpload || loading3D} error={modeErrors.upload} /> : null}
+          {activeMode === 'pdb' ? <PdbMode onLoadPdb={loadPdb} loading={loadingPdb} error={modeErrors.pdb} metadata={pdbMeta} /> : null}
+        </section>
+
+        <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
+          <ViewerPanel
+            ref={viewerRef}
+            loading={loading3D || loadingSearch || loadingPdb || loadingUpload}
+            hasStructure={Boolean(structure.data)}
+            sourceLabel={sourceLabel}
+            initialRepresentation={representation}
+            onReady={() => {
+              if (structure.data) {
+                viewerRef.current?.loadModel(structure.data, structure.format);
+              }
+            }}
+          >
+            <DisplayControls
+              representation={representation}
+              background={background}
+              showHydrogens={showHydrogens}
+              showAtomLabels={showAtomLabels}
+              loadingExport={loadingExport}
+              onRepresentationChange={setRepresentation}
+              onBackgroundChange={setBackground}
+              onToggleHydrogens={() => setShowHydrogens((value) => !value)}
+              onToggleAtomLabels={() => setShowAtomLabels((value) => !value)}
+              onResetView={() => viewerRef.current?.resetView()}
+              onExportPng={exportPng}
+            />
+            <ExportPanel
+              available={exportAvailability}
+              loadingExport={loadingExport}
+              onExportSmiles={exportSmiles}
+              onExportMol={exportMol}
+              onExportSdf={exportSdf}
+              onExportXyz={exportXyz}
+              onExportPdb={exportPdb}
+            />
+          </ViewerPanel>
+
+          <MoleculePropertiesPanel
+            metadata={currentMolecule}
+            properties={properties}
+            loading={loadingProperties}
+            onCopy={(value) => navigator.clipboard?.writeText(value).catch(() => {})}
+          />
         </section>
       </main>
 
-      <footer className="mx-auto max-w-7xl px-4 py-6 text-center text-xs text-slate-500 md:px-8">
-        ChemVault Molecule Studio is an independent educational chemistry tool. It is not affiliated with MolView, PubChem, or RCSB
-        PDB.
+      <footer className="mx-auto max-w-7xl px-4 py-8 text-center text-xs leading-6 text-slate-500 md:px-8">
+        ChemVault Molecule Studio is an independent educational chemistry tool. It is not affiliated with MolView, PubChem, or RCSB PDB.
       </footer>
 
-      <div className="pointer-events-none fixed right-4 top-4 z-20 flex flex-col gap-2 md:right-6">
+      <div className="pointer-events-none fixed right-4 top-4 z-50 flex flex-col gap-2 md:right-6">
         {toastMessages.map((item) => (
-          <div
-            key={item.id}
-            className={`toast pointer-events-auto max-w-[min(80vw,360px)] border ${toastClass(item.level)} bg-white/95`}
-          >
+          <div key={item.id} className={`toast pointer-events-auto max-w-[min(80vw,360px)] border ${toastClass(item.level)} bg-white/95`}>
             <span>{item.text}</span>
           </div>
         ))}

@@ -362,7 +362,16 @@ Cloudflare Pages build confusion:
 - `POST /api/chem/properties`
 - `GET /api/chem/pdb/[id]`
 
-### License Notes
+### License
+
+This repository is source-available but not open source. Public visibility is
+for review and reference only; no rights are granted to use, copy, modify,
+distribute, host, deploy, or create derivative works without prior written
+permission from Ziwen Mu or the repository owner.
+
+See [LICENSE](./LICENSE). All rights reserved.
+
+### Third-Party License Notes
 
 - Next.js, React, Tailwind CSS, Vitest: open-source packages distributed by their upstream projects
 - 3Dmol.js: loaded from its public distribution endpoint

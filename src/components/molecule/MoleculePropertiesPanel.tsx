@@ -15,6 +15,7 @@ type Metadata = {
   iupacName?: string | null;
   pdbId?: string | null;
   fileName?: string | null;
+  structureData?: string | null;
   structureFormat?: string | null;
 };
 

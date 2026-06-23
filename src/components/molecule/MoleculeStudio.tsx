@@ -79,6 +79,7 @@ export function MoleculeStudio() {
   const [background, setBackground] = useState('white');
   const [showHydrogens, setShowHydrogens] = useState(true);
   const [showAtomLabels, setShowAtomLabels] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [pdbMeta, setPdbMeta] = useState<{ pdbId?: string; title?: string | null; resolution?: number | null; experimentalMethod?: string | null } | undefined>(undefined);
 
   const toast = useCallback((text: string, level: Toast['level'] = 'info') => {
@@ -562,7 +563,7 @@ export function MoleculeStudio() {
   }, []);
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-slate-100">
+    <div className="h-screen overflow-hidden bg-slate-100">
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1800px] flex-col gap-3 px-3 py-3 md:flex-row md:items-center md:justify-between md:px-4">
           <div className="flex items-center gap-3">
@@ -581,7 +582,7 @@ export function MoleculeStudio() {
         </div>
       </header>
 
-      <main className="mx-auto max-w-[1800px] px-3 py-3 md:px-4">
+      <main className="mx-auto flex h-[calc(100vh-61px)] max-w-[1800px] flex-col px-3 py-3 md:px-4">
         <section className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <MoleculeModeTabs activeMode={activeMode} onChange={setActiveMode} />
           <div className="overflow-x-auto">
@@ -597,8 +598,8 @@ export function MoleculeStudio() {
           </div>
         </section>
 
-        <section className="mt-3 grid gap-3 xl:min-h-[calc(100vh-132px)] xl:grid-cols-[minmax(430px,0.95fr)_minmax(0,1.05fr)]">
-          <div className="min-h-0 animate-fade rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:overflow-auto">
+        <section className="mt-3 grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(430px,0.95fr)_minmax(0,1.05fr)]">
+          <div className="min-h-0 animate-fade overflow-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
             <div className="mb-3 flex items-center justify-between border-b border-slate-200 pb-3">
               <div>
                 <h1 className="text-sm font-semibold text-slate-950">2D Input Workspace</h1>
@@ -635,15 +636,24 @@ export function MoleculeStudio() {
             {activeMode === 'pdb' ? <PdbMode onLoadPdb={loadPdb} loading={loadingPdb} error={modeErrors.pdb} metadata={pdbMeta} /> : null}
           </div>
 
-          <div className="min-h-0 space-y-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:overflow-auto">
+          <div className="min-h-0 space-y-3 overflow-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
             <div className="flex items-center justify-between border-b border-slate-200 pb-3">
               <div>
                 <h2 className="text-sm font-semibold text-slate-950">3D Output Workspace</h2>
                 <p className="mt-1 text-xs text-slate-500">Inspect geometry, properties, display settings, and exports.</p>
               </div>
-              <span className={`rounded-md px-2 py-1 text-xs font-medium ${structure.data ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
-                {structure.data ? 'Loaded' : 'Empty'}
-              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setDetailsOpen(true)}
+                  className="rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-sky-300 hover:text-sky-800"
+                >
+                  Structure Details
+                </button>
+                <span className={`rounded-md px-2 py-1 text-xs font-medium ${structure.data ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                  {structure.data ? 'Loaded' : 'Empty'}
+                </span>
+              </div>
             </div>
             <ViewerPanel
               ref={viewerRef}
@@ -671,7 +681,26 @@ export function MoleculeStudio() {
                 onExportPng={exportPng}
               />
             </ViewerPanel>
+          </div>
+        </section>
+      </main>
 
+      {detailsOpen ? (
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true">
+          <div className="max-h-[90vh] w-full max-w-5xl overflow-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between gap-4 border-b border-slate-200 pb-3">
+              <div>
+                <h2 className="text-lg font-bold text-slate-950">Structure Details</h2>
+                <p className="mt-1 text-xs text-slate-500">Identifiers, properties, and copied notations for the current structure.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDetailsOpen(false)}
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Close
+              </button>
+            </div>
             <MoleculePropertiesPanel
               metadata={currentMolecule}
               properties={properties}
@@ -679,12 +708,8 @@ export function MoleculeStudio() {
               onCopy={(value) => navigator.clipboard?.writeText(value).catch(() => {})}
             />
           </div>
-        </section>
-      </main>
-
-      <footer className="mx-auto max-w-7xl px-4 py-8 text-center text-xs leading-6 text-slate-500 md:px-8">
-        ChemVault Molecule Studio is an independent educational chemistry tool. It is not affiliated with MolView, PubChem, or RCSB PDB.
-      </footer>
+        </div>
+      ) : null}
 
       <div className="pointer-events-none fixed right-4 top-4 z-50 flex flex-col gap-2 md:right-6">
         {toastMessages.map((item) => (

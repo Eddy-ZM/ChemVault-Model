@@ -274,20 +274,22 @@ export function DrawMode({ value, onValueChange, onGenerate3D, onClear, onExport
         <aside className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
           <div>
             <p className="text-sm font-semibold text-slate-800">Drawing Toolbar</p>
-            <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="mt-3 grid grid-cols-4 gap-2">
               {DRAW_TOOLS.map((tool) => (
                 <button
                   key={tool}
                   type="button"
+                  title={tool}
+                  aria-label={tool}
                   onClick={() => {
                     setActiveTool(tool);
                     setPendingBondAtomId(null);
                   }}
-                  className={`rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                  className={`grid h-11 place-items-center rounded-lg border text-sm font-medium transition ${
                     activeTool === tool ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-300 bg-white text-slate-700 hover:border-sky-300'
                   }`}
                 >
-                  {tool}
+                  <ToolIcon tool={tool} activeElement={activeElement} />
                 </button>
               ))}
             </div>
@@ -458,6 +460,23 @@ function BondLines({ from, to, order }: { from: AtomNode; to: AtomNode; order: B
   }
 
   return <line x1={from.x} y1={from.y} x2={to.x} y2={to.y} className={common} strokeWidth={3} strokeLinecap="round" />;
+}
+
+function ToolIcon({ tool, activeElement }: { tool: DrawTool; activeElement: string }) {
+  if (tool === 'Select') return <span className="text-lg leading-none">↖</span>;
+  if (tool === 'Atom') return <span className="font-mono text-sm font-bold">{activeElement}</span>;
+  if (tool === 'Erase') return <span className="text-lg leading-none">⌫</span>;
+  if (tool === 'Ring') return <span className="text-lg leading-none">⬡</span>;
+  if (tool === 'Aromatic Ring') return <span className="text-lg leading-none">◎</span>;
+
+  const lineCount = tool === 'Triple Bond' ? 3 : tool === 'Double Bond' ? 2 : 1;
+  return (
+    <span className="flex h-5 w-8 flex-col items-center justify-center gap-0.5" aria-hidden="true">
+      {Array.from({ length: lineCount }).map((_, index) => (
+        <span key={index} className="block h-0.5 w-7 rounded-full bg-current" />
+      ))}
+    </span>
+  );
 }
 
 function findAtomAt(atoms: AtomNode[], x: number, y: number) {

@@ -220,8 +220,8 @@ export function PeriodicTablePicker({ activeElement, onSelectElement }: Props) {
       </div>
 
       {open ? (
-        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/50 px-3 py-6" role="dialog" aria-modal="true">
-          <div className="max-h-[90vh] w-full max-w-7xl overflow-y-auto rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl">
+        <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/50 p-3" role="dialog" aria-modal="true">
+          <div className="max-h-[94vh] w-full max-w-[1500px] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
             <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-4">
               <div>
                 <h3 className="text-2xl font-bold text-slate-950">Periodic Table</h3>
@@ -254,7 +254,7 @@ export function PeriodicTablePicker({ activeElement, onSelectElement }: Props) {
               className={
                 isFiltering
                   ? 'mt-5 grid grid-cols-2 gap-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-9'
-                  : 'mt-5 grid min-w-[1060px] grid-cols-[repeat(18,minmax(0,1fr))] gap-1.5 overflow-x-auto'
+                  : 'mt-4 grid grid-cols-[repeat(18,minmax(0,1fr))] gap-1'
               }
             >
               {filteredElements.map((element) => {
@@ -273,13 +273,13 @@ export function PeriodicTablePicker({ activeElement, onSelectElement }: Props) {
                     title={`${element.name} (${element.atomicNumber})`}
                     onClick={() => onSelectElement(element)}
                     style={position}
-                    className={`min-h-16 rounded-lg border p-2 text-left transition hover:-translate-y-0.5 ${
+                    className={`min-h-12 rounded-md border p-1.5 text-left transition hover:-translate-y-0.5 ${
                       selected ? 'border-slate-950 bg-slate-950 text-white shadow-card' : categoryClasses[element.category]
                     }`}
                   >
-                    <span className="block text-[10px] opacity-70">{element.atomicNumber}</span>
-                    <span className="block text-lg font-bold leading-tight">{element.symbol}</span>
-                    <span className="mt-0.5 block truncate text-[10px] opacity-80">{element.name}</span>
+                    <span className="block text-[9px] leading-none opacity-70">{element.atomicNumber}</span>
+                    <span className="block text-sm font-bold leading-tight md:text-base">{element.symbol}</span>
+                    <span className="mt-0.5 hidden truncate text-[9px] opacity-80 md:block">{element.name}</span>
                   </button>
                 );
               })}

@@ -33,6 +33,9 @@ export function DrawMode({ value, onValueChange, onGenerate3D, onClear, onExport
   const history = useRef<SketchState[]>([{ atoms: [], bonds: [] }]);
   const redoHistory = useRef<SketchState[]>([]);
   const idCounter = useRef(0);
+  const dragAtomId = useRef<string | null>(null);
+  const latestDragAtoms = useRef<AtomNode[]>([]);
+  const suppressNextClick = useRef(false);
 
   const [activeTool, setActiveTool] = useState<DrawTool>('Atom');
   const [activeElement, setActiveElement] = useState('C');
@@ -114,6 +117,11 @@ export function DrawMode({ value, onValueChange, onGenerate3D, onClear, onExport
   };
 
   const handleCanvasClick = (event: MouseEvent<SVGSVGElement>) => {
+    if (suppressNextClick.current) {
+      suppressNextClick.current = false;
+      return;
+    }
+
     const point = getCanvasPoint(event);
     const hitAtom = findAtomAt(atoms, point.x, point.y);
     const hitBond = findBondAt(atoms, bonds, point.x, point.y);
@@ -137,6 +145,14 @@ export function DrawMode({ value, onValueChange, onGenerate3D, onClear, onExport
       return;
     }
 
+    if (activeTool === 'Atom' && hitAtom) {
+      const nextAtoms = atoms.map((atom) => (atom.id === hitAtom.id ? { ...atom, element: activeElement } : atom));
+      commitSketch({ atoms: nextAtoms, bonds }, `Atom changed to ${activeElement}.`);
+      setSelectedAtomId(hitAtom.id);
+      setPendingBondAtomId(null);
+      return;
+    }
+
     if (hitAtom) {
       setSelectedAtomId(hitAtom.id);
       setPendingBondAtomId(null);
@@ -147,6 +163,46 @@ export function DrawMode({ value, onValueChange, onGenerate3D, onClear, onExport
     addAtom(point.x, point.y, activeElement);
   };
 
+  const handleCanvasMouseDown = (event: MouseEvent<SVGSVGElement>) => {
+    if (activeTool !== 'Select') return;
+    const point = getCanvasPoint(event);
+    const hitAtom = findAtomAt(atoms, point.x, point.y);
+    if (!hitAtom) {
+      setSelectedAtomId(null);
+      setPendingBondAtomId(null);
+      return;
+    }
+
+    dragAtomId.current = hitAtom.id;
+    latestDragAtoms.current = atoms;
+    setSelectedAtomId(hitAtom.id);
+    setPendingBondAtomId(null);
+    event.preventDefault();
+  };
+
+  const handleCanvasMouseMove = (event: MouseEvent<SVGSVGElement>) => {
+    if (!dragAtomId.current) return;
+    const point = getCanvasPoint(event);
+    const atomId = dragAtomId.current;
+    setAtoms((previous) => {
+      const nextAtoms = previous.map((atom) =>
+        atom.id === atomId
+          ? { ...atom, x: clamp(point.x, 28, VIEWBOX_WIDTH - 28), y: clamp(point.y, 28, VIEWBOX_HEIGHT - 28) }
+          : atom
+      );
+      latestDragAtoms.current = nextAtoms;
+      return nextAtoms;
+    });
+    suppressNextClick.current = true;
+  };
+
+  const endCanvasDrag = () => {
+    if (!dragAtomId.current) return;
+    const nextAtoms = latestDragAtoms.current.length ? latestDragAtoms.current : atoms;
+    dragAtomId.current = null;
+    commitSketch({ atoms: nextAtoms, bonds }, 'Atom moved.');
+  };
+
   const addAtom = (x: number, y: number, element: string) => {
     const atom = { id: nextId('atom'), x: clamp(x, 28, VIEWBOX_WIDTH - 28), y: clamp(y, 28, VIEWBOX_HEIGHT - 28), element };
     commitSketch({ atoms: [...atoms, atom], bonds }, `Placed ${element}.`);
@@ -154,10 +210,12 @@ export function DrawMode({ value, onValueChange, onGenerate3D, onClear, onExport
   };
 
   const placeBond = (x: number, y: number, order: BondOrder, hitAtom: AtomNode | null) => {
+    const anchorId = pendingBondAtomId ?? selectedAtomId;
+
     if (hitAtom) {
-      if (pendingBondAtomId && pendingBondAtomId !== hitAtom.id) {
-        addBond(pendingBondAtomId, hitAtom.id, order);
-        setPendingBondAtomId(null);
+      if (anchorId && anchorId !== hitAtom.id) {
+        addBond(anchorId, hitAtom.id, order);
+        setPendingBondAtomId(hitAtom.id);
         setSelectedAtomId(hitAtom.id);
         return;
       }
@@ -167,10 +225,17 @@ export function DrawMode({ value, onValueChange, onGenerate3D, onClear, onExport
       return;
     }
 
-    if (pendingBondAtomId) {
-      const source = atoms.find((atom) => atom.id === pendingBondAtomId);
+    if (anchorId) {
+      const source = atoms.find((atom) => atom.id === anchorId);
       if (!source) return;
-      const atom = { id: nextId('atom'), x: clamp(x, 28, VIEWBOX_WIDTH - 28), y: clamp(y, 28, VIEWBOX_HEIGHT - 28), element: activeElement };
+      const angle = Math.atan2(y - source.y, x - source.x);
+      const safeAngle = Number.isFinite(angle) ? angle : 0;
+      const atom = {
+        id: nextId('atom'),
+        x: clamp(source.x + Math.cos(safeAngle) * 82, 28, VIEWBOX_WIDTH - 28),
+        y: clamp(source.y + Math.sin(safeAngle) * 82, 28, VIEWBOX_HEIGHT - 28),
+        element: activeElement
+      };
       const bond = { id: nextId('bond'), from: source.id, to: atom.id, order };
       commitSketch({ atoms: [...atoms, atom], bonds: [...bonds, bond] }, `Placed ${labelForOrder(order)} bond to ${activeElement}.`);
       setPendingBondAtomId(atom.id);
@@ -320,6 +385,10 @@ export function DrawMode({ value, onValueChange, onGenerate3D, onClear, onExport
               <svg
                 ref={svgRef}
                 viewBox={`0 0 ${VIEWBOX_WIDTH} ${VIEWBOX_HEIGHT}`}
+                onMouseDown={handleCanvasMouseDown}
+                onMouseMove={handleCanvasMouseMove}
+                onMouseUp={endCanvasDrag}
+                onMouseLeave={endCanvasDrag}
                 onClick={handleCanvasClick}
                 className="h-[500px] w-full rounded-xl border border-slate-200 bg-[radial-gradient(circle_at_1px_1px,rgba(15,23,42,0.14)_1px,transparent_0)] bg-[length:26px_26px]"
                 role="img"

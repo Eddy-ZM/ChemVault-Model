@@ -37,7 +37,7 @@ export function SmilesMode({ value, onValueChange, onLoad, onClear, onCopy, load
   };
 
   return (
-    <section className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-card">
+    <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
       <div className="max-w-3xl">
         <h2 className="text-2xl font-bold text-slate-950">Enter SMILES</h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">

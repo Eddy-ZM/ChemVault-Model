@@ -46,7 +46,7 @@ export function MoleculePropertiesPanel({ metadata, properties, loading, onCopy 
   const molecularWeight = metadata?.molecularWeight ?? properties.molecularWeight ?? 'Not available';
 
   return (
-    <section className="rounded-[2rem] border border-slate-200 bg-white/95 p-5 shadow-card">
+    <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-2xl font-bold text-slate-950">Structure Details</h2>

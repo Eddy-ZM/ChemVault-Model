@@ -563,29 +563,36 @@ export function MoleculeStudio() {
   }, []);
 
   return (
-    <div className="min-h-screen overflow-x-hidden">
-      <header className="border-b border-slate-200 bg-white/90 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-7xl flex-col gap-3 px-4 py-4 md:flex-row md:items-center md:justify-between md:px-8">
-          <a href="/" className="text-lg font-bold tracking-tight text-slate-950">ChemVault</a>
-          <p className="text-sm text-slate-600">Molecule Studio</p>
+    <div className="min-h-screen overflow-x-hidden bg-slate-100">
+      <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-xl">
+        <div className="mx-auto flex max-w-[1800px] flex-col gap-3 px-3 py-3 md:flex-row md:items-center md:justify-between md:px-4">
+          <div className="flex items-center gap-3">
+            <a href="/" className="text-base font-bold tracking-tight text-slate-950">ChemVault</a>
+            <span className="h-5 w-px bg-slate-200" />
+            <span className="text-sm font-medium text-slate-600">Molecule Studio</span>
+          </div>
+          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">2D editor</span>
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">3D viewer</span>
+            <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">PubChem / PDB</span>
+          </div>
         </div>
       </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-6 md:px-8">
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
-          <div className="max-w-4xl">
-            <h1 className="text-3xl font-bold tracking-tight text-slate-950 md:text-4xl">ChemVault Molecule Studio</h1>
-            <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">Draw, search, upload and visualise molecules in 2D and 3D.</p>
-            <p className="mt-2 text-sm text-slate-500">Choose one input workflow on the left, then inspect the output on the right.</p>
-          </div>
-        </section>
-
-        <section className="mt-6">
+      <main className="mx-auto max-w-[1800px] px-3 py-3 md:px-4">
+        <section>
           <MoleculeModeTabs activeMode={activeMode} onChange={setActiveMode} />
         </section>
 
-        <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(360px,0.9fr)_minmax(0,1.1fr)]">
-          <div className="animate-fade">
+        <section className="mt-3 grid gap-3 xl:min-h-[calc(100vh-132px)] xl:grid-cols-[minmax(430px,0.95fr)_minmax(0,1.05fr)]">
+          <div className="min-h-0 animate-fade rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:overflow-auto">
+            <div className="mb-3 flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <h1 className="text-sm font-semibold text-slate-950">2D Input Workspace</h1>
+                <p className="mt-1 text-xs text-slate-500">Choose a workflow, then send the structure to the 3D viewer.</p>
+              </div>
+              <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-medium capitalize text-slate-600">{activeMode}</span>
+            </div>
             {activeMode === 'search' ? <SearchMode onSearch={loadByQuery} loading={loadingSearch} error={modeErrors.search} /> : null}
             {activeMode === 'smiles' ? (
               <SmilesMode
@@ -615,7 +622,16 @@ export function MoleculeStudio() {
             {activeMode === 'pdb' ? <PdbMode onLoadPdb={loadPdb} loading={loadingPdb} error={modeErrors.pdb} metadata={pdbMeta} /> : null}
           </div>
 
-          <div className="space-y-6">
+          <div className="min-h-0 space-y-3 rounded-2xl border border-slate-200 bg-white p-3 shadow-sm xl:overflow-auto">
+            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+              <div>
+                <h2 className="text-sm font-semibold text-slate-950">3D Output Workspace</h2>
+                <p className="mt-1 text-xs text-slate-500">Inspect geometry, properties, display settings, and exports.</p>
+              </div>
+              <span className={`rounded-md px-2 py-1 text-xs font-medium ${structure.data ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500'}`}>
+                {structure.data ? 'Loaded' : 'Empty'}
+              </span>
+            </div>
             <ViewerPanel
               ref={viewerRef}
               loading={loading3D || loadingSearch || loadingPdb || loadingUpload}

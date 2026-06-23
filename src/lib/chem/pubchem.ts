@@ -15,7 +15,9 @@ const supportedPropertyKeys = [
   'HBondAcceptorCount',
   'RotatableBondCount',
   'HeavyAtomCount',
-  'SMILES',
+  'Charge',
+  'CanonicalSMILES',
+  'IsomericSMILES',
   'InChI',
   'InChIKey'
 ] as const;
@@ -24,8 +26,6 @@ export type PubChemStructureResult = {
   data: string;
   source: '3d' | '2d';
 };
-
-type SupportedPropertyName = (typeof supportedPropertyKeys)[number];
 
 async function fetchJson<T>(url: string): Promise<T> {
   const response = await fetchWithTimeout(url);
@@ -68,29 +68,50 @@ async function resolveCid(query: string): Promise<string | null> {
   return getCidFromSmiles(query).catch(() => null);
 }
 
-async function fetchProperty<T>(identifier: string, propertyName: SupportedPropertyName, asCid = true): Promise<T | null> {
-  const path = asCid
-    ? `${PUBCHEM}/compound/cid/${encodeURIComponent(identifier)}/property/${propertyName}/JSON`
-    : `${PUBCHEM}/compound/smiles/${encodeURIComponent(identifier)}/property/${propertyName}/JSON`;
-  try {
-    const data = await fetchJson<{ PropertyTable?: { Properties?: Array<Record<string, T>> } }>(path);
-    const item = data.PropertyTable?.Properties?.[0];
-    if (!item) return null;
-    return (item as Record<string, T>)[propertyName] ?? null;
-  } catch {
-    return null;
-  }
+type PubChemNamespace = 'cid' | 'smiles' | 'name' | 'inchikey';
+
+async function fetchProperties(identifier: string, namespace: PubChemNamespace = 'cid'): Promise<Record<string, number | string | null>> {
+  const properties = supportedPropertyKeys.join(',');
+  const path = `${PUBCHEM}/compound/${namespace}/${encodeURIComponent(identifier)}/property/${properties}/JSON`;
+
+  const data = await fetchJson<{ PropertyTable?: { Properties?: Array<Record<string, number | string | null>> } }>(path);
+  return data.PropertyTable?.Properties?.[0] ?? {};
 }
 
-async function fetchProperties(identifier: string, asCid = true): Promise<Record<string, number | string | null>> {
-  const entries = await Promise.all(
-    supportedPropertyKeys.map(async (propertyName) => {
-      const value = await fetchProperty<unknown>(identifier, propertyName, asCid);
-      return [propertyName, value ?? null] as const;
-    })
-  );
+function getSmiles(props: Record<string, unknown>) {
+  if (typeof props.SMILES === 'string') return props.SMILES;
+  if (typeof props.ConnectivitySMILES === 'string') return props.ConnectivitySMILES;
+  if (typeof props.CanonicalSMILES === 'string') return props.CanonicalSMILES;
+  if (typeof props.IsomericSMILES === 'string') return props.IsomericSMILES;
+  return undefined;
+}
 
-  return Object.fromEntries(entries) as Record<string, number | string | null>;
+function getMolecularWeight(props: Record<string, unknown>) {
+  if (typeof props.MolecularWeight === 'string') return Number(props.MolecularWeight);
+  if (typeof props.MolecularWeight === 'number') return props.MolecularWeight;
+  return undefined;
+}
+
+function toSearchResult(
+  query: string,
+  props: Record<string, unknown>,
+  fallbackCid?: string | null
+): MoleculeSearchResult | null {
+  const smiles = getSmiles(props);
+  const cid = typeof props.CID === 'number' || typeof props.CID === 'string' ? String(props.CID) : fallbackCid ?? null;
+
+  if (!cid && !smiles && !props.MolecularFormula) return null;
+
+  return {
+    cid,
+    name: query,
+    smiles,
+    formula: typeof props.MolecularFormula === 'string' ? props.MolecularFormula : undefined,
+    molecularWeight: getMolecularWeight(props),
+    inchi: typeof props.InChI === 'string' ? props.InChI : undefined,
+    inchikey: typeof props.InChIKey === 'string' ? props.InChIKey : undefined,
+    canonicalSmiles: smiles
+  };
 }
 
 export async function getCompoundByNameOrIdentifier(query: string): Promise<MoleculeSearchResult | null> {
@@ -101,46 +122,29 @@ export async function getCompoundByNameOrIdentifier(query: string): Promise<Mole
   const isInchiKey = /^[A-Z]{14}-[A-Z]{10}-[A-Z]$/i.test(normalized);
 
   if (isInchiKey) {
-    const props = await fetchProperties(normalized.toUpperCase(), false);
-    return {
-      name: normalized,
-      smiles: typeof props.SMILES === 'string' ? String(props.SMILES) : undefined,
-      formula: typeof props.MolecularFormula === 'string' ? props.MolecularFormula : undefined,
-      molecularWeight:
-        typeof props.MolecularWeight === 'string' ? Number(props.MolecularWeight) :
-          (typeof props.MolecularWeight === 'number' ? props.MolecularWeight : undefined),
-      inchi: typeof props.InChI === 'string' ? props.InChI : undefined,
-      inchikey: normalized.toUpperCase(),
-      canonicalSmiles: typeof props.SMILES === 'string' ? String(props.SMILES) : undefined
-    };
+    const props = await fetchProperties(normalized.toUpperCase(), 'inchikey').catch(() => ({}));
+    const result = toSearchResult(normalized, props);
+    return result ? { ...result, inchikey: normalized.toUpperCase() } : null;
   }
 
   const cid = isCid ? normalized : await resolveCid(normalized);
-  if (!cid) return null;
-  const props = await fetchProperties(cid, true);
+  if (cid) {
+    const props = await fetchProperties(cid, 'cid');
+    return toSearchResult(normalized, props, cid);
+  }
 
-  return {
-    cid,
-    name: normalized,
-    smiles: typeof props.SMILES === 'string' ? props.SMILES : undefined,
-    formula: typeof props.MolecularFormula === 'string' ? props.MolecularFormula : undefined,
-    molecularWeight:
-      typeof props.MolecularWeight === 'string' ? Number(props.MolecularWeight) :
-        (typeof props.MolecularWeight === 'number' ? props.MolecularWeight : undefined),
-    inchi: typeof props.InChI === 'string' ? props.InChI : undefined,
-    inchikey: typeof props.InChIKey === 'string' ? props.InChIKey : undefined,
-    canonicalSmiles: typeof props.SMILES === 'string' ? props.SMILES : undefined
-  };
+  const propsByName = await fetchProperties(normalized, 'name').catch(() => ({}));
+  return toSearchResult(normalized, propsByName);
 }
 
 export async function fetchSmilesProperties(smiles: string): Promise<Record<string, unknown>> {
   const normalized = normalizeSmiles(smiles);
-  const props = await fetchProperties(normalized, false);
+  const props = await fetchProperties(normalized, 'smiles');
   return props;
 }
 
 export async function fetchPropertiesByCid(cid: string): Promise<Record<string, unknown>> {
-  const props = await fetchProperties(cid, true);
+  const props = await fetchProperties(cid, 'cid');
   return props;
 }
 

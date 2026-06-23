@@ -75,13 +75,13 @@ Supported query examples:
 - `2244`
 - `CCO`
 
-The app calls the local Next.js API route first:
+The app calls the same-origin chemistry API:
 
 ```text
 GET /api/chem/pubchem/search?query=
 ```
 
-The route uses PubChem PUG-REST. No API key is required.
+On Cloudflare, these endpoints are served by Cloudflare Pages Functions. The route uses PubChem PUG-REST. No API key is required.
 
 ### SMILES Input
 
@@ -184,87 +184,112 @@ Notes:
 - `VITE_MOLECULE_API_URL` is reserved for a future Vite migration and is not required by the current Next.js app.
 - If all values are empty, PubChem fallback still works.
 
-## Deploy to Vercel
+## Deploy to Cloudflare
 
-ChemVault Molecule Studio is a Next.js app with API route handlers under `/api/chem/*`, so Vercel is the simplest deployment target for the current implementation.
+Cloudflare deployment is the primary deployment target for this project.
 
-Recommended Vercel settings:
+ChemVault Molecule Studio uses a static Next.js export for the website and Cloudflare Pages Functions for `/api/chem/*`. This keeps deployment simple while preserving PubChem search, property lookup, 3D SDF fallback, and PDB loading without requiring OpenNext or a Python RDKit backend.
 
-- Framework Preset: `Next.js`
-- Install Command: `npm install` or Vercel default
-- Build Command: `npm run build`
-- Output Directory: leave empty
-- Node.js Version: `20.x`
-- Root Directory: repository root
+Selected deployment approach:
 
-Deployment steps:
+- Scheme: Cloudflare Pages static deployment plus Pages Functions
+- Static output directory: `out`
+- Functions directory: `functions`
+- API runtime: Cloudflare Pages Functions using standard `fetch`
+- RDKit backend: optional external service only
 
-1. Create a new project in Vercel.
-2. Import the GitHub repository `Eddy-ZM/ChemVault-Model`.
-3. Confirm the Framework Preset is `Next.js`.
-4. Keep Output Directory empty.
-5. Set Node.js Version to `20.x` in Project Settings when available.
-6. Deploy.
+Cloudflare Pages settings:
 
-Environment variables on Vercel:
+- Framework preset: `Next.js` or `None`
+- Build command: `npm run build`
+- Output directory: `out`
+- Functions directory: `functions`
+- Node.js version: `20`
+- Root directory: repository root
+
+Local Cloudflare preview:
+
+```bash
+npm run preview
+```
+
+This builds the static export and serves it through Wrangler Pages dev with the `functions/` API routes enabled.
+
+Production deploy from local CLI:
+
+```bash
+npm run deploy
+```
+
+For Git-based Cloudflare Pages deploys, connect the GitHub repository and use the same build settings above.
+
+Environment variables:
 
 ```bash
 MOLECULE_API_URL=
 NEXT_PUBLIC_MOLECULE_API_URL=
+VITE_MOLECULE_API_URL=
 ```
 
-Both are optional.
+All are optional.
 
-- If `NEXT_PUBLIC_MOLECULE_API_URL` is empty, the frontend uses the current site routes such as `/api/chem/pubchem/search`.
-- If `MOLECULE_API_URL` is empty, the Next.js API routes do not call an external RDKit service.
+- If `MOLECULE_API_URL` is empty, Cloudflare Pages Functions do not call an external RDKit service.
 - Without RDKit, `Generate 3D Model` falls back to PubChem SDF.
-- PubChem search, PubChem structure loading, RCSB PDB loading, and the 3D viewer can run without RDKit.
+- PubChem search, PubChem structure loading, RCSB PDB loading, and the 3D viewer work without RDKit.
+- Deploy the optional RDKit Python backend separately to Render, Railway, Fly.io, or a VPS, then set `MOLECULE_API_URL` in Cloudflare Pages project settings.
 
-Deploy the optional RDKit Python backend separately to Render, Railway, Fly.io, or a VPS, then set `MOLECULE_API_URL` to that service URL.
+### Cloudflare API Routes
 
-Suggested production domain:
+Cloudflare Pages Functions provide these same-origin endpoints:
+
+```text
+GET  /api/chem/pubchem/search?query=
+GET  /api/chem/pubchem/structure?cid=&format=sdf3d
+POST /api/chem/generate-3d
+POST /api/chem/properties
+GET  /api/chem/pdb/[id]
+```
+
+The functions live in:
+
+```text
+functions/api/chem/
+```
+
+They do not use Node-only APIs such as `fs` or `path`.
+
+## Custom Domain
+
+Target domain:
 
 ```text
 model.chemvault.science
 ```
 
-## Custom Domain
+Cloudflare setup:
 
-After adding `model.chemvault.science` in Vercel, configure Cloudflare DNS:
+1. Open the Cloudflare Pages project.
+2. Go to `Custom domains`.
+3. Select `Add custom domain`.
+4. Enter `model.chemvault.science`.
+5. Follow Cloudflare's DNS verification prompt.
 
-```text
-Type: CNAME
-Name: model
-Target: cname.vercel-dns.com
-Proxy status: DNS only
-```
+If the `chemvault.science` zone is already managed in Cloudflare, Cloudflare Pages can usually bind the custom domain directly.
 
-Use `DNS only` for the first verification. After Vercel SSL is issued and the domain is healthy, you can decide whether to enable Cloudflare proxying.
+## Deploy to Vercel
 
-If Vercel shows `Invalid Configuration`, check that:
+Vercel remains an optional alternative for standard Next.js hosting. Cloudflare is the primary deployment target for this repository.
 
-- `model` is a CNAME record.
-- The CNAME target is `cname.vercel-dns.com`.
-- There is no conflicting `A`, `AAAA`, or CNAME record for `model`.
-- Cloudflare proxy is disabled during initial verification.
+For the current Cloudflare-first layout, `/api/chem/*` is implemented in Cloudflare Pages Functions. If deploying to Vercel, either recreate equivalent Vercel route handlers or point the frontend at an external chemistry API.
 
-### Cloudflare Deployment
+Suggested Vercel settings for a static deployment:
 
-This repository is a Next.js app, not a Vite app. It has dynamic API route handlers under:
-
-```text
-/api/chem/*
-```
-
-Because of those route handlers, it is not a pure static Pages deployment with `dist` output.
-
-Recommended Cloudflare setup for the current app:
-
-- Build command: `npm run build`
-- Runtime target: Cloudflare Workers or Cloudflare Pages with the current OpenNext Cloudflare adapter
-- RDKit backend: deploy separately and set `MOLECULE_API_URL` or `NEXT_PUBLIC_MOLECULE_API_URL`
-
-If you want a static-only Cloudflare Pages deployment, the API routes must be moved out to Cloudflare Workers or another external API, and the Next.js app would need a static export configuration. The current implementation intentionally keeps the lightweight PubChem/RCSB proxy routes inside Next.js.
+- Framework Preset: `Next.js`
+- Install Command: `npm install` or Vercel default
+- Build Command: `npm run build`
+- Output Directory: `out`
+- Node.js Version: `20.x`
+- Root Directory: repository root
 
 ### Common Issues
 

@@ -58,10 +58,10 @@ export function MoleculeModeTabs({ activeMode, onChange }: Props) {
               key={mode.id}
               type="button"
               onClick={() => onChange(mode.id)}
-              className={`group rounded-2xl border p-4 text-left transition duration-200 ${
+              className={`group rounded-xl border p-4 text-left transition duration-200 ${
                 selected
-                  ? 'border-sky-500 bg-sky-50 shadow-card'
-                  : 'border-slate-200 bg-white/85 hover:-translate-y-0.5 hover:border-sky-200 hover:bg-white'
+                  ? 'border-sky-500 bg-sky-50 shadow-sm'
+                  : 'border-slate-200 bg-white hover:border-sky-200'
               }`}
               aria-pressed={selected}
             >
@@ -75,7 +75,7 @@ export function MoleculeModeTabs({ activeMode, onChange }: Props) {
         })}
       </div>
 
-      <div className="overflow-x-auto rounded-full border border-slate-200 bg-white/80 p-1 shadow-sm">
+      <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
         <div className="flex min-w-max gap-1">
           {MOLECULE_MODES.map((mode) => {
             const selected = activeMode === mode.id;
@@ -84,7 +84,7 @@ export function MoleculeModeTabs({ activeMode, onChange }: Props) {
                 key={mode.id}
                 type="button"
                 onClick={() => onChange(mode.id)}
-                className={`rounded-full px-4 py-2 text-sm font-medium transition ${
+                className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
                   selected ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'
                 }`}
               >

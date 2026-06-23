@@ -572,13 +572,11 @@ export function MoleculeStudio() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6 md:px-8">
-        <section className="relative overflow-hidden rounded-[2rem] border border-slate-200 bg-white p-6 shadow-card md:p-8">
-          <div className="absolute right-0 top-0 h-64 w-64 rounded-full bg-sky-200/40 blur-3xl" />
-          <div className="absolute bottom-0 left-10 h-48 w-48 rounded-full bg-emerald-200/40 blur-3xl" />
-          <div className="relative max-w-4xl">
-            <h1 className="text-4xl font-bold tracking-tight text-slate-950 md:text-6xl">ChemVault Molecule Studio</h1>
-            <p className="mt-4 max-w-2xl text-lg leading-8 text-slate-600">Draw, search, upload and visualise molecules in 2D and 3D.</p>
-            <p className="mt-3 text-sm text-slate-500">Start with one workflow, then review the result in a unified 3D viewer and property workspace.</p>
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm md:p-6">
+          <div className="max-w-4xl">
+            <h1 className="text-3xl font-bold tracking-tight text-slate-950 md:text-4xl">ChemVault Molecule Studio</h1>
+            <p className="mt-3 max-w-2xl text-base leading-7 text-slate-600">Draw, search, upload and visualise molecules in 2D and 3D.</p>
+            <p className="mt-2 text-sm text-slate-500">Choose one input workflow on the left, then inspect the output on the right.</p>
           </div>
         </section>
 
@@ -586,79 +584,81 @@ export function MoleculeStudio() {
           <MoleculeModeTabs activeMode={activeMode} onChange={setActiveMode} />
         </section>
 
-        <section className="mt-6 animate-fade">
-          {activeMode === 'search' ? <SearchMode onSearch={loadByQuery} loading={loadingSearch} error={modeErrors.search} /> : null}
-          {activeMode === 'smiles' ? (
-            <SmilesMode
-              value={smiles}
-              onValueChange={updateSmilesDraft}
-              onLoad={loadSmiles}
-              onClear={clearStudio}
+        <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(360px,0.9fr)_minmax(0,1.1fr)]">
+          <div className="animate-fade">
+            {activeMode === 'search' ? <SearchMode onSearch={loadByQuery} loading={loadingSearch} error={modeErrors.search} /> : null}
+            {activeMode === 'smiles' ? (
+              <SmilesMode
+                value={smiles}
+                onValueChange={updateSmilesDraft}
+                onLoad={loadSmiles}
+                onClear={clearStudio}
+                onCopy={(value) => navigator.clipboard?.writeText(value).catch(() => {})}
+                loading={loading3D}
+                error={modeErrors.smiles}
+              />
+            ) : null}
+            {activeMode === 'draw' ? (
+              <DrawMode
+                value={smiles}
+                onValueChange={updateSmilesDraft}
+                onGenerate3D={loadDrawnSmiles}
+                onUndo={handleUndo}
+                onRedo={handleRedo}
+                onClear={clearStudio}
+                onExportSmiles={exportSmiles}
+                loading={loading3D}
+                error={modeErrors.draw}
+              />
+            ) : null}
+            {activeMode === 'upload' ? <UploadMode onLoadFile={loadUploadedFile} loading={loadingUpload || loading3D} error={modeErrors.upload} /> : null}
+            {activeMode === 'pdb' ? <PdbMode onLoadPdb={loadPdb} loading={loadingPdb} error={modeErrors.pdb} metadata={pdbMeta} /> : null}
+          </div>
+
+          <div className="space-y-6">
+            <ViewerPanel
+              ref={viewerRef}
+              loading={loading3D || loadingSearch || loadingPdb || loadingUpload}
+              hasStructure={Boolean(structure.data)}
+              sourceLabel={sourceLabel}
+              initialRepresentation={representation}
+              onReady={() => {
+                if (structure.data) {
+                  viewerRef.current?.loadModel(structure.data, structure.format);
+                }
+              }}
+            >
+              <DisplayControls
+                representation={representation}
+                background={background}
+                showHydrogens={showHydrogens}
+                showAtomLabels={showAtomLabels}
+                loadingExport={loadingExport}
+                onRepresentationChange={setRepresentation}
+                onBackgroundChange={setBackground}
+                onToggleHydrogens={() => setShowHydrogens((value) => !value)}
+                onToggleAtomLabels={() => setShowAtomLabels((value) => !value)}
+                onResetView={() => viewerRef.current?.resetView()}
+                onExportPng={exportPng}
+              />
+              <ExportPanel
+                available={exportAvailability}
+                loadingExport={loadingExport}
+                onExportSmiles={exportSmiles}
+                onExportMol={exportMol}
+                onExportSdf={exportSdf}
+                onExportXyz={exportXyz}
+                onExportPdb={exportPdb}
+              />
+            </ViewerPanel>
+
+            <MoleculePropertiesPanel
+              metadata={currentMolecule}
+              properties={properties}
+              loading={loadingProperties}
               onCopy={(value) => navigator.clipboard?.writeText(value).catch(() => {})}
-              loading={loading3D}
-              error={modeErrors.smiles}
             />
-          ) : null}
-          {activeMode === 'draw' ? (
-            <DrawMode
-              value={smiles}
-              onValueChange={updateSmilesDraft}
-              onGenerate3D={loadDrawnSmiles}
-              onUndo={handleUndo}
-              onRedo={handleRedo}
-              onClear={clearStudio}
-              onExportSmiles={exportSmiles}
-              loading={loading3D}
-              error={modeErrors.draw}
-            />
-          ) : null}
-          {activeMode === 'upload' ? <UploadMode onLoadFile={loadUploadedFile} loading={loadingUpload || loading3D} error={modeErrors.upload} /> : null}
-          {activeMode === 'pdb' ? <PdbMode onLoadPdb={loadPdb} loading={loadingPdb} error={modeErrors.pdb} metadata={pdbMeta} /> : null}
-        </section>
-
-        <section className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(360px,0.8fr)]">
-          <ViewerPanel
-            ref={viewerRef}
-            loading={loading3D || loadingSearch || loadingPdb || loadingUpload}
-            hasStructure={Boolean(structure.data)}
-            sourceLabel={sourceLabel}
-            initialRepresentation={representation}
-            onReady={() => {
-              if (structure.data) {
-                viewerRef.current?.loadModel(structure.data, structure.format);
-              }
-            }}
-          >
-            <DisplayControls
-              representation={representation}
-              background={background}
-              showHydrogens={showHydrogens}
-              showAtomLabels={showAtomLabels}
-              loadingExport={loadingExport}
-              onRepresentationChange={setRepresentation}
-              onBackgroundChange={setBackground}
-              onToggleHydrogens={() => setShowHydrogens((value) => !value)}
-              onToggleAtomLabels={() => setShowAtomLabels((value) => !value)}
-              onResetView={() => viewerRef.current?.resetView()}
-              onExportPng={exportPng}
-            />
-            <ExportPanel
-              available={exportAvailability}
-              loadingExport={loadingExport}
-              onExportSmiles={exportSmiles}
-              onExportMol={exportMol}
-              onExportSdf={exportSdf}
-              onExportXyz={exportXyz}
-              onExportPdb={exportPdb}
-            />
-          </ViewerPanel>
-
-          <MoleculePropertiesPanel
-            metadata={currentMolecule}
-            properties={properties}
-            loading={loadingProperties}
-            onCopy={(value) => navigator.clipboard?.writeText(value).catch(() => {})}
-          />
+          </div>
         </section>
       </main>
 

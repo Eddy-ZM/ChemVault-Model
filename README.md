@@ -46,7 +46,7 @@ Use the `SMILES` tab to paste or type strings such as `CCO` or `c1ccccc1`. The t
 
 3. Draw molecule
 
-Use the `Draw` tab for the 2D drawing workflow. It includes drawing tools, ring templates, functional groups, common elements, and an `Open Periodic Table` modal. The current implementation provides a structured sketcher workspace and SMILES bridge; it is ready for a full Ketcher/Kekule/RDKit sketcher integration later.
+Use the `Draw` tab for the 2D drawing workflow. It includes a lightweight SVG sketcher for placing atoms, single bonds, double bonds, triple bonds, six-member rings, and aromatic rings. The `Open Periodic Table` modal includes all 118 elements and lets users select or replace the active atom. The sketcher generates basic SMILES for the existing 3D generation workflow; complex fragment editing can still be enhanced later with Ketcher, Kekule.js, or RDKit.js.
 
 4. Upload structure file
 

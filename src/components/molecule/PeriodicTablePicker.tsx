@@ -164,9 +164,10 @@ const categoryClasses: Record<PeriodicElement['category'], string> = {
 type Props = {
   activeElement: string;
   onSelectElement: (element: PeriodicElement) => void;
+  onLockElement?: (element: PeriodicElement) => void;
 };
 
-export function PeriodicTablePicker({ activeElement, onSelectElement }: Props) {
+export function PeriodicTablePicker({ activeElement, onSelectElement, onLockElement }: Props) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
 
@@ -179,7 +180,9 @@ export function PeriodicTablePicker({ activeElement, onSelectElement }: Props) {
     const normalized = query.trim().toLowerCase();
     if (!normalized) return ELEMENTS;
     return ELEMENTS.filter(
-      (element) => element.symbol.toLowerCase().includes(normalized) || element.name.toLowerCase().includes(normalized)
+      (element) => element.symbol.toLowerCase().includes(normalized) ||
+        element.name.toLowerCase().includes(normalized) ||
+        element.atomicNumber.toString().includes(normalized)
     );
   }, [query]);
 
@@ -210,6 +213,7 @@ export function PeriodicTablePicker({ activeElement, onSelectElement }: Props) {
             type="button"
             title={`${element.name} (${element.atomicNumber})`}
             onClick={() => onSelectElement(element)}
+            onDoubleClick={() => onLockElement?.(element)}
             className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
               activeElement === element.symbol ? 'border-slate-950 bg-slate-950 text-white' : categoryClasses[element.category]
             }`}
@@ -225,7 +229,7 @@ export function PeriodicTablePicker({ activeElement, onSelectElement }: Props) {
             <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 pb-4">
               <div>
                 <h3 className="text-2xl font-bold text-slate-950">Periodic Table</h3>
-                <p className="mt-1 text-sm text-slate-600">Complete 118-element picker. Search by symbol or name.</p>
+                <p className="mt-1 text-sm text-slate-600">Complete 118-element picker. Search by symbol, name, or atomic number.</p>
                 <p className="mt-2 text-sm text-slate-700">
                   Active element: <span className="font-mono font-semibold">{activeElement}</span>
                 </p>
@@ -247,7 +251,7 @@ export function PeriodicTablePicker({ activeElement, onSelectElement }: Props) {
               value={query}
               onChange={(event) => setQuery(event.target.value)}
               className="mt-2 w-full rounded-xl border border-slate-300 px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
-              placeholder="Carbon, C, Oxygen, O"
+              placeholder="Carbon, C, Oxygen, O, 6"
             />
 
             <div
@@ -272,6 +276,7 @@ export function PeriodicTablePicker({ activeElement, onSelectElement }: Props) {
                     type="button"
                     title={`${element.name} (${element.atomicNumber})`}
                     onClick={() => onSelectElement(element)}
+            onDoubleClick={() => onLockElement?.(element)}
                     style={position}
                     className={`min-h-12 rounded-md border p-1.5 text-left transition hover:-translate-y-0.5 ${
                       selected ? 'border-slate-950 bg-slate-950 text-white shadow-card' : categoryClasses[element.category]

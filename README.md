@@ -65,6 +65,24 @@ After any workflow loads a structure, the result appears in the shared result wo
 
 Export controls appear in the result workspace after a molecule or structure is loaded. Display controls are located near the 3D viewer and include representation mode, background, hydrogen visibility, atom labels, reset view, and PNG download.
 
+## Draw Molecule Workflow
+
+The `Draw` tab is implemented with a ChemVault custom SVG sketcher rather than a third-party editor. This keeps the Cloudflare static export stable and avoids browser-only package SSR issues. No Ketcher, Kekule.js, or RDKit.js sketcher dependency is currently bundled.
+
+Supported draw workflow:
+
+- Click blank canvas to place the active element; carbon is the default.
+- Drag from an atom to create a new atom and bond.
+- Select single, double, triple, aromatic, wedge, or dash bond tools; wedge and dash export as single bonds in generated SMILES and MOL fallback.
+- Click an existing bond to cycle bond order, or apply the active bond tool.
+- Select common elements from the element picker; double-click an element to lock atom placement mode.
+- Open the full 118-element periodic table and search by symbol, name, or atomic number.
+- Place ring templates including cyclopropane, cyclobutane, cyclopentane, cyclohexane, benzene, pyridine, furan, and thiophene.
+- Attach basic functional groups including OH, NH2, COOH, CHO, NO2, OMe, acetyl, and phenyl.
+- Generate SMILES for acyclic sketches and simple standalone rings, then send the result to the existing 3D viewer. Complex fused or heavily substituted cyclic systems may require the Search or SMILES workflow until a full chemical layout engine is added.
+
+License note: no new third-party sketcher library was added for this workflow. If Ketcher, Kekule.js, or RDKit.js is added later, its license must be listed here before deployment.
+
 ### Local Development
 
 Install dependencies:

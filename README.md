@@ -109,12 +109,6 @@ Run the production build:
 npm run build
 ```
 
-Run tests:
-
-```bash
-npm test
-```
-
 ### PubChem Search
 
 Use the `Search` tab on `/molecule`.
@@ -448,7 +442,7 @@ See [LICENSE](./LICENSE). All rights reserved.
 
 ### Third-Party License Notes
 
-- Next.js, React, Tailwind CSS, Vitest: open-source packages distributed by their upstream projects
+- Next.js, React, and Tailwind CSS: open-source packages distributed by their upstream projects
 - 3Dmol.js: loaded from its public distribution endpoint
 - PubChem and RCSB PDB: public web services, no API key required
 - RDKit, FastAPI, and Uvicorn: optional Python backend dependencies in `python-backend/requirements.txt`

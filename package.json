@@ -8,10 +8,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "preview": "npm run build && wrangler pages dev out --compatibility-date=2026-06-23 --port 8788",
-    "deploy": "npm run build && wrangler pages deploy out",
-    "lint": "next lint",
-    "test": "vitest run"
+    "preview": "npm run build && npx --yes wrangler@4 pages dev out --compatibility-date=2026-06-23 --port 8788",
+    "deploy": "npm run build && npx --yes wrangler@4 pages deploy out",
+    "lint": "next lint"
   },
   "dependencies": {
     "next": "^14.2.35",
@@ -27,9 +26,7 @@
     "eslint-config-next": "^14.2.5",
     "postcss": "^8.5.3",
     "tailwindcss": "^3.4.17",
-    "typescript": "^5.7.3",
-    "vitest": "^2.1.8",
-    "wrangler": "^4.20.0"
+    "typescript": "^5.7.3"
   },
   "optionalDependencies": {
     "@next/swc-darwin-arm64": "^14.2.33"

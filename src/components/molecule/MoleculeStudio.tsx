@@ -16,6 +16,7 @@ import { ViewerPanel } from '@/components/molecule/ViewerPanel';
 import { MoleculePropertiesPanel } from '@/components/molecule/MoleculePropertiesPanel';
 import { DisplayControls, Representation } from '@/components/molecule/DisplayControls';
 import { ExportPanel } from '@/components/molecule/ExportPanel';
+import { AuthButton } from '@/components/auth/AuthButton';
 
 type StructureFormat = 'sdf' | 'mol' | 'xyz' | 'pdb' | 'cif';
 type MoleculeSource = 'search' | 'smiles' | 'draw' | 'upload' | 'pdb';
@@ -575,9 +576,10 @@ export function MoleculeStudio() {
             <span className="text-sm font-medium text-slate-600">Molecule Studio</span>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
-            <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">2D editor</span>
-            <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">3D viewer</span>
-            <span className="rounded-md border border-slate-200 bg-slate-50 px-2 py-1">PubChem / PDB</span>
+            <span className="hidden rounded-md border border-slate-200 bg-slate-50 px-2 py-1 sm:inline-flex">2D editor</span>
+            <span className="hidden rounded-md border border-slate-200 bg-slate-50 px-2 py-1 sm:inline-flex">3D viewer</span>
+            <span className="hidden rounded-md border border-slate-200 bg-slate-50 px-2 py-1 lg:inline-flex">PubChem / PDB</span>
+            <AuthButton />
           </div>
         </div>
       </header>

@@ -229,6 +229,12 @@ See `.env.example`.
 MOLECULE_API_URL=
 NEXT_PUBLIC_MOLECULE_API_URL=
 VITE_MOLECULE_API_URL=
+AUTH_SECRET=
+AUTH_URL=
+AUTH_GOOGLE_ID=
+AUTH_GOOGLE_SECRET=
+AUTH_GITHUB_ID=
+AUTH_GITHUB_SECRET=
 ```
 
 Notes:
@@ -236,7 +242,58 @@ Notes:
 - `MOLECULE_API_URL` is the preferred server-side URL for the optional RDKit backend.
 - `NEXT_PUBLIC_MOLECULE_API_URL` can be used when the deployment platform exposes only public build/runtime variables.
 - `VITE_MOLECULE_API_URL` is reserved for a future Vite migration and is not required by the current Next.js app.
+- `AUTH_*` values are reserved for a future production authentication backend. They are optional for the current Cloudflare static deployment.
 - If all values are empty, PubChem fallback still works.
+
+## Authentication
+
+Authentication is currently optional. Users who are not signed in can still use the full Molecule Studio workflow:
+
+- Search
+- SMILES input
+- Draw
+- Upload
+- PDB loading
+- 3D viewer
+- Export actions
+
+The top-right header includes a `Sign in` entry. After signing in, the header shows a circular initials avatar, user name or email, and a menu with:
+
+- `Profile`
+- `My Molecules`
+- `Settings`
+- `Sign out`
+
+Current implementation:
+
+- Uses a Cloudflare-compatible client-side auth shell.
+- Stores only a local demo display profile in browser `localStorage`.
+- Does not store passwords.
+- Does not unlock paid/server-side features.
+- Does not require any OAuth environment variables to build.
+- Leaves Molecule Studio public and fully usable without login.
+
+Placeholder pages:
+
+- `/login`
+- `/profile`
+- `/molecules`
+- `/settings`
+
+Future production auth should be connected through ChemVault-user, preferably using an OAuth/token handoff flow or an Auth.js-compatible backend that runs outside the static export path. Because this repository currently uses `output: export` plus Cloudflare Pages Functions, standard NextAuth/Auth.js API routes are not enabled in this phase. If Auth.js is added later, deploy it through a Cloudflare-compatible server runtime or external auth service and keep secrets server-side only.
+
+Reserved environment variables:
+
+```bash
+AUTH_SECRET=
+AUTH_URL=
+AUTH_GOOGLE_ID=
+AUTH_GOOGLE_SECRET=
+AUTH_GITHUB_ID=
+AUTH_GITHUB_SECRET=
+```
+
+Do not commit real secrets. OAuth provider secrets must never be exposed to client code.
 
 ## Deploy to Cloudflare
 

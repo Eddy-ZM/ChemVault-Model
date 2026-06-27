@@ -223,12 +223,7 @@ See `.env.example`.
 MOLECULE_API_URL=
 NEXT_PUBLIC_MOLECULE_API_URL=
 VITE_MOLECULE_API_URL=
-AUTH_SECRET=
-AUTH_URL=
-AUTH_GOOGLE_ID=
-AUTH_GOOGLE_SECRET=
-AUTH_GITHUB_ID=
-AUTH_GITHUB_SECRET=
+NEXT_PUBLIC_CHEMVAULT_USER_ORIGIN=https://user.chemvault.science
 ```
 
 Notes:
@@ -236,7 +231,7 @@ Notes:
 - `MOLECULE_API_URL` is the preferred server-side URL for the optional RDKit backend.
 - `NEXT_PUBLIC_MOLECULE_API_URL` can be used when the deployment platform exposes only public build/runtime variables.
 - `VITE_MOLECULE_API_URL` is reserved for a future Vite migration and is not required by the current Next.js app.
-- `AUTH_*` values are reserved for a future production authentication backend. They are optional for the current Cloudflare static deployment.
+- `NEXT_PUBLIC_CHEMVAULT_USER_ORIGIN` points the optional sign-in UI to ChemVault User. It defaults to `https://user.chemvault.science` when omitted.
 - If all values are empty, PubChem fallback still works.
 
 ## Authentication
@@ -260,12 +255,12 @@ The top-right header includes a `Sign in` entry. After signing in, the header sh
 
 Current implementation:
 
-- Uses a Cloudflare-compatible client-side auth shell.
-- Stores only a local demo display profile in browser `localStorage`.
-- Does not store passwords.
-- Does not unlock paid/server-side features.
-- Does not require any OAuth environment variables to build.
+- Uses the production ChemVault User system at `https://user.chemvault.science`.
+- Calls `POST /api/auth/login`, `GET /api/auth/me`, and `POST /api/auth/logout` with `credentials: include`.
+- Relies on ChemVault User HttpOnly cookie sessions.
+- Sends passwords only to ChemVault User; Molecule Studio never stores passwords.
 - Leaves Molecule Studio public and fully usable without login.
+- Does not require OAuth provider secrets in this static frontend.
 
 Placeholder pages:
 
@@ -274,20 +269,17 @@ Placeholder pages:
 - `/molecules`
 - `/settings`
 
-Future production auth should be connected through ChemVault-user, preferably using an OAuth/token handoff flow or an Auth.js-compatible backend that runs outside the static export path. Because this repository currently uses `output: export` plus Cloudflare Pages Functions, standard NextAuth/Auth.js API routes are not enabled in this phase. If Auth.js is added later, deploy it through a Cloudflare-compatible server runtime or external auth service and keep secrets server-side only.
+ChemVault User must allow CORS credentials for the Molecule Studio origin. Production `https://model.chemvault.science` is already allowed by ChemVault User. Local development uses `http://localhost:3000` for `next dev` and `http://localhost:8788` for Cloudflare Pages preview.
 
-Reserved environment variables:
+Because this repository currently uses `output: export` plus Cloudflare Pages Functions, standard NextAuth/Auth.js API routes are not used here. If OAuth provider integrations are added later, keep provider secrets in ChemVault User or another server-side auth runtime, never in the static Molecule frontend.
+
+Molecule frontend auth environment variable:
 
 ```bash
-AUTH_SECRET=
-AUTH_URL=
-AUTH_GOOGLE_ID=
-AUTH_GOOGLE_SECRET=
-AUTH_GITHUB_ID=
-AUTH_GITHUB_SECRET=
+NEXT_PUBLIC_CHEMVAULT_USER_ORIGIN=https://user.chemvault.science
 ```
 
-Do not commit real secrets. OAuth provider secrets must never be exposed to client code.
+Do not add user-system secrets to this frontend. OAuth provider secrets belong in ChemVault User or another server-side auth runtime.
 
 ## Deploy to Cloudflare
 

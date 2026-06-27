@@ -5,7 +5,7 @@ import { useAuth } from '@/components/auth/AuthProvider';
 import { UserMenu } from '@/components/auth/UserMenu';
 
 export function AuthButton() {
-  const { ready, user } = useAuth();
+  const { ready, user, userOrigin } = useAuth();
 
   if (!ready) {
     return <span className="h-10 w-24 animate-pulse rounded-full bg-slate-200" aria-label="Loading authentication state" />;
@@ -22,7 +22,7 @@ export function AuthButton() {
         Sign in
       </Link>
       <a
-        href="https://user.chemvault.science"
+        href={`${userOrigin}/register`}
         className="hidden rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 sm:inline-flex"
       >
         Create account

@@ -62,7 +62,7 @@ export function UserMenu({ user }: { user: AuthUser }) {
             <button
               type="button"
               onClick={() => {
-                signOut();
+                void signOut();
                 setOpen(false);
               }}
               className="mt-1 w-full rounded-xl px-3 py-2 text-left text-sm font-medium text-rose-700 transition hover:bg-rose-50"

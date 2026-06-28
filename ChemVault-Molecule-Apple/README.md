@@ -1,148 +1,100 @@
 # ChemVault Molecule Apple App
 
-ChemVault Molecule is a native Apple molecule application for iOS, iPadOS, and macOS. It is not a WebView wrapper. The core app is implemented with SwiftUI, URLSession, Codable, Keychain, and SceneKit.
+ChemVault Molecule Apple App 是 ChemVault Molecule Studio 的 Apple 设备版本，面向 iOS、iPadOS 和 macOS 提供分子搜索、SMILES 输入、基础绘制、PDB 查看、三维结构展示和本地分子管理能力。
 
-## Why this is not WebView
+## 支持平台
 
-The app does not embed `model.chemvault.science/molecule` as the main interface. Search, SMILES input, native drawing, PDB loading, molecule details, permissions, library, and 3D rendering are implemented with native SwiftUI views and API clients.
+- iOS
+- iPadOS
+- macOS
 
-Allowed web usage is limited to opening the ChemVault User Portal or future authentication pages through system browser/authentication flows.
+## App 定位
 
-## Supported Platforms
+Apple App 面向移动端和桌面端分子浏览场景。用户可以在 Apple 设备上快速搜索分子、输入 SMILES、绘制基础结构、查看 PDB 结构，并在原生三维视图中浏览分子形态。
 
-- iOS 17+
-- iPadOS 17+
-- macOS 14+
-- visionOS is listed in the package platforms for future work, but the SceneKit viewer should be reviewed before shipping on visionOS.
+## 主要功能
 
-## Project Shape
+### 分子搜索
 
-This directory is a Swift Package plus source tree designed for Xcode import:
+- 支持按分子名称搜索。
+- 支持按 CID 搜索。
+- 搜索结果可打开为分子详情页。
+- 适用于课堂演示、快速查询和个人常用分子浏览。
 
-```text
-ChemVault-Molecule-Apple/
-  Package.swift
-  Sources/ChemVaultMolecule/
-    App/
-    Configuration/
-    Models/
-    Services/
-    Parsers/
-    Views/
-```
+### SMILES 输入
 
-For App Store work, the recommended route is to create a real Xcode Multiplatform App target and drag `Sources/ChemVaultMolecule` into it.
+- 支持手动输入 SMILES。
+- 支持将输入结果打开为分子详情。
+- 适用于快速查看小分子结构和基础信息。
 
-## API Configuration
+### 原生绘制
 
-Defaults are defined in `Configuration/AppConfig.swift`:
+- 支持在设备上绘制基础分子草图。
+- 支持添加原子和单键。
+- 支持撤销、重做、擦除和清空。
+- 提供常用元素选择。
+- 绘制结果可进入详情页查看。
 
-```text
-userAPIBaseURL = https://user.chemvault.science
-moleculeAPIBaseURL = https://model.chemvault.science/api/chem
-appScheme = chemvaultmolecule
-bundleID = science.chemvault.molecule
-```
+### PDB 查看
 
-The app calls JSON/SDF/PDB APIs. It does not inspect or depend on React DOM.
+- 支持输入 PDB 编号加载蛋白质或核酸结构。
+- 支持显示结构坐标并进入三维查看。
+- 适用于教学展示和初步结构浏览。
 
-## Login and Permissions
+### 分子详情
 
-Implemented pieces:
+- 展示分子名称、结构信息和可用元数据。
+- 提供三维结构查看区域。
+- 支持从搜索、SMILES、绘制、文件导入或 PDB 入口进入详情。
 
-- `AuthService` supports a proposed `POST /api/auth/app/login` contract.
-- Access tokens are stored in Keychain using `KeychainStore`.
-- Passwords are never stored.
-- `PermissionsService` calls `GET /api/apps/molecule/permissions`.
-- If permissions fail, the app falls back to Free limited mode.
-- `PermissionLockedView` gates protected features.
+### 三维查看
 
-Future production recommendation:
+- 支持分子和结构的三维显示。
+- 支持球棍、球形和棍状显示模式。
+- 适配触控、鼠标和触控板操作。
 
-- Add OAuth or token handoff through `ASWebAuthenticationSession`.
-- Keep all server secrets on ChemVault servers, never in the app.
+### 本地分子库
 
-## Native Features in this MVP
+- 支持保存常用分子。
+- 支持查看本地保存的分子列表。
+- 支持从本地文件导入结构。
 
-- `SearchView`: searches molecules by name or CID through ChemVault Molecule API.
-- `SmilesInputView`: accepts SMILES and opens a native detail page.
-- `DrawView`: native SwiftUI Canvas sketcher MVP with atoms, single bonds, erase, undo, redo, clear, and a 36-element periodic table.
-- `PDBView`: loads PDB structures through the Molecule API and parses ATOM/HETATM coordinates.
-- `MoleculeDetailView`: native molecule detail screen with 3D viewer and metadata.
-- `NativeMolecule3DView`: SceneKit ball-and-stick, sphere, and stick display modes.
-- `LibraryView`: local saved molecule list and file import.
-- `AccountView`: login state, membership tier, permission summary, quotas, portal link, logout.
-- Parsers for MOL/SDF/XYZ/PDB and fallback bond estimation.
+支持的常见结构类型包括：
 
-## Xcode Setup
+- MOL
+- SDF
+- XYZ
+- PDB
 
-Option A: open the Swift Package directly for development.
+### 账号与权限
 
-1. Open Xcode.
-2. Choose `File -> Open`.
-3. Select `ChemVault-Molecule-Apple/Package.swift`.
-4. Build the `ChemVaultMolecule` executable target on macOS.
+- 支持连接 ChemVault User Center。
+- 支持查看登录状态。
+- 支持展示会员等级、权限摘要和使用配额。
+- 未登录或权限不足时，可保留基础免费模式。
+- 提供 ChemVault 门户入口，方便用户管理账号资料。
 
-Option B: create the final Apple app target.
+### 设置
 
-1. Open Xcode.
-2. Create a new `Multiplatform App`.
-3. Product Name: `ChemVaultMolecule`.
-4. Bundle Identifier: `science.chemvault.molecule`.
-5. Minimum deployments: iOS 17, iPadOS 17, macOS 14.
-6. Delete the default generated Swift files if needed.
-7. Drag `Sources/ChemVaultMolecule` into the Xcode project.
-8. Ensure files are added to the iOS, iPadOS, and macOS targets.
-9. Set your Apple Development Team under Signing & Capabilities.
-10. Add URL scheme `chemvaultmolecule` when OAuth callback support is added.
-11. Run on iPhone, iPad, or Mac.
+- 提供 App 基础设置入口。
+- 提供账号、服务和偏好相关入口。
+- 支持集中管理 App 使用偏好和 ChemVault 服务入口。
 
-## Molecule API Endpoints Used
+## 典型使用场景
 
-- `GET /api/chem/pubchem/search?query=`
-- `GET /api/chem/pubchem/structure?cid=&format=sdf3d`
-- `POST /api/chem/properties`
-- `POST /api/chem/generate-3d`
-- `GET /api/chem/pdb/{id}`
+- 在 iPhone 或 iPad 上快速查询常见分子。
+- 在课堂或会议中展示小分子三维结构。
+- 在 Mac 上整理本地常用分子。
+- 输入 SMILES 后快速检查结构外观。
+- 使用 PDB 编号查看蛋白质或核酸结构。
 
-## User API Endpoints Expected
+## 产品边界
 
-- `POST /api/auth/app/login`
-- `GET /api/apps/molecule/permissions`
+- 本 App 是教育、研究辅助和结构浏览工具。
+- App 中显示的结构和性质信息应结合专业判断使用。
+- 本 App 不用于临床诊断、药物审批、合规申报或安全关键决策。
+- 账号、会员和高级权限以 ChemVault User Center 的实际状态为准。
 
-If the current user system does not provide these yet, the app can still run in Free limited mode.
+## 版权
 
-## Security Notes
-
-- No OpenAI keys or server secrets are included.
-- No hardcoded user tokens are included.
-- Tokens are stored in Keychain.
-- The app does not depend on localhost.
-
-## Current Limitations
-
-- DrawView generates SMILES only for simple acyclic sketches; complex ring and stereochemistry support is a later phase.
-- PDB rendering is atom/bond estimated, not full ribbon/cartoon yet.
-- SceneKit viewer supports ball-and-stick, sphere, and stick modes; labels and screenshots are TODO.
-- Real OAuth via ASWebAuthenticationSession is not wired until ChemVault-user exposes an app auth flow.
-- Cloud library sync is reserved for Pro or higher tiers later.
-
-## Build Check
-
-From this directory:
-
-```bash
-swift build
-```
-
-For the production app bundle, use Xcode Multiplatform App as described above.
-
-## GitHub Setup
-
-If this directory is not already connected to GitHub:
-
-```bash
-git remote add origin https://github.com/Eddy-ZM/ChemVault-Molecule-Apple.git
-git branch -M main
-git push -u origin main
-```
+ChemVault Molecule Apple App 是 ChemVault Molecule Studio 的组成部分。未经 Ziwen Mu 或仓库所有者事先书面许可，不得使用、复制、修改、分发、托管、部署或创建衍生作品。

@@ -1,444 +1,229 @@
 # ChemVault Molecule Studio
 
-## ChemVault Molecule Studio
+ChemVault Molecule Studio 是 ChemVault 的分子结构查看、建模输入和三维可视化工具。当前包含网站端 Molecule Studio，以及面向 iOS、iPadOS 和 macOS 的 Apple App。
 
-ChemVault Molecule Studio is the molecular modeling workspace for ChemVault. It provides a browser-based page for chemistry students, instructors, and researchers to search compounds, enter SMILES, inspect molecular properties, render 3D structures, export files, and load PDB protein structures.
+本文档仅说明网站和 App 的正式功能范围，不包含实现原理、代码结构、部署流程或开发配置。
 
-Access path:
+## 功能总览
 
-```text
-/molecule
-```
+- 按分子名称或 PubChem CID 搜索化合物
+- 输入或粘贴 SMILES 字符串
+- 使用二维绘图工具构建基础分子结构
+- 上传或导入常见分子结构文件
+- 按 PDB ID 加载蛋白质或核酸结构
+- 查看三维结构、分子属性和结构标识符
+- 调整三维显示模式、背景、氢原子和原子标签
+- 导出结构文件或三维视图图片
+- 通过账号入口访问个人资料、分子库和设置相关页面
 
-Local URL after starting the app:
+## 网站功能
 
-```text
-http://localhost:3000/molecule
-```
+网站端主入口为：
 
-### Features
+- 首页：`/`
+- 分子工作台：`/molecule`
+- 生产访问地址：`https://model.chemvault.science/molecule`
 
-- Product-level workflow tabs for Search, SMILES, Draw, Upload, and PDB
-- PubChem search by molecule name or CID
-- Dedicated SMILES input with load, clear, copy, and example controls
-- Draw workspace with drawing toolbar, common fragments, and periodic table picker
-- Dedicated Upload tab for structure files
-- 3D molecule rendering with 3Dmol.js
-- Representation controls for ball-and-stick, stick, sphere, line, surface, and cartoon modes
-- PNG screenshot export from the 3D viewer
-- File import for `.mol`, `.sdf`, `.xyz`, `.pdb`, `.cif`, `.smi`, `.smiles`, and `.txt`
-- File export for SMILES, Molfile, SDF, XYZ, PDB, and PNG
-- Molecular property cards for formula, molecular weight, exact mass, LogP, TPSA, donors, acceptors, rings, heavy atoms, and charge
-- PDB structure loading from RCSB PDB
-- Optional RDKit backend for local 3D conformer generation and property calculation
+### 工作台布局
 
-## Molecule Studio Workflows
+网站端采用左右分区工作流。
 
-The `/molecule` page is organised as a focused modeling workbench. Users start from one workflow instead of seeing every tool at once.
+- 2D Input Workspace：选择输入方式、编辑结构、搜索分子或上传文件。
+- 3D Output Workspace：查看三维结构、显示属性、调整渲染方式并执行导出。
 
-1. Search by name or PubChem CID
+用户可以通过任意输入方式加载结构，再在同一个三维输出区继续查看和导出。
 
-Use the `Search` tab to query PubChem with examples such as `caffeine`, `aspirin`, `benzene`, or CID `2244`. Search results load into the shared 3D viewer and property panel.
+### Search 搜索
 
-2. Enter SMILES
+- 支持分子名称搜索，例如 water、ethanol、benzene、caffeine、aspirin
+- 支持 PubChem CID 搜索，例如 2244
+- 支持常用示例快速加载
+- 搜索结果可直接载入三维查看器
+- 可显示名称、CID、分子式、分子量、SMILES、InChI 和 InChIKey 等信息
 
-Use the `SMILES` tab to paste or type strings such as `CCO` or `c1ccccc1`. The tab has dedicated `Load SMILES`, `Clear`, and `Copy SMILES` controls.
+### SMILES 输入
 
-3. Draw molecule
+- 支持手动输入或粘贴 SMILES
+- 支持常见 SMILES 与芳香环 SMILES
+- 提供 Load SMILES、Clear、Copy SMILES 等操作
+- 内置常用示例，便于快速加载测试结构
+- 加载后可进入三维查看、属性查看和文件导出流程
 
-Use the `Draw` tab for the 2D drawing workflow. It includes a lightweight SVG sketcher for placing atoms, single bonds, double bonds, triple bonds, six-member rings, and aromatic rings. The `Open Periodic Table` modal includes all 118 elements and lets users select or replace the active atom. The sketcher generates basic SMILES for the existing 3D generation workflow; complex fragment editing can still be enhanced later with Ketcher, Kekule.js, or RDKit.js.
+### Draw 绘制
 
-4. Upload structure file
+- 支持选择、移动、擦除和清空画布
+- 支持单键、双键、三键、芳香键、楔形键和虚线键
+- 支持在画布上放置原子、拖拽延伸键和点击修改键类型
+- 支持常用元素选择和完整周期表选择
+- 支持撤销、重做、复制 SMILES 和下载 MOL 文件
+- 支持环模板，包括环丙烷、环丁烷、环戊烷、环己烷、苯、吡啶、呋喃和噻吩
+- 支持官能团模板，包括 OH、NH2、COOH、CHO、NO2、OMe、Acetyl 和 Phenyl
+- 支持将可识别的绘制结果生成 SMILES，并进一步生成三维模型
 
-Use the `Upload` tab to import `.mol`, `.sdf`, `.xyz`, `.pdb`, `.cif`, `.smi`, `.smiles`, or `.txt` files. File upload is no longer placed at the bottom of the page. SMILES text files are parsed from the first non-empty line.
+### Upload 上传
 
-5. Load PDB structure
+- 支持拖放上传或文件选择上传
+- 网站端单个文件上限为 8 MB
+- 支持 `.mol`、`.sdf`、`.xyz`、`.pdb`、`.cif`、`.smi`、`.smiles` 和 `.txt`
+- SMILES 文本文件会读取首个有效结构字符串
+- 结构文件加载后可直接进入三维查看器
 
-Use the `PDB` tab for protein and nucleic acid structures such as `1CRN`, `4HHB`, and `1BNA`. PDB metadata is displayed when RCSB provides it, and missing metadata does not block structure rendering.
+### PDB 结构加载
 
-After any workflow loads a structure, the result appears in the shared result workspace:
+- 支持四位 PDB ID，例如 1CRN、4HHB、1BNA
+- 可显示 PDB 标题、实验方法和分辨率等可用元数据
+- PDB 结构可使用适合大分子查看的显示模式
 
-- `3D Viewer`
-- `Structure Details`
-- `Display Controls`
-- `Export Actions`
+### 三维查看器
 
-Export controls appear in the result workspace after a molecule or structure is loaded. Display controls are located near the 3D viewer and include representation mode, background, hydrogen visibility, atom labels, reset view, and PNG download.
+- 支持小分子、上传结构和 PDB 结构查看
+- 支持 Ball and stick、Stick、Sphere、Line、Cartoon、Surface 和 Space-filling 显示模式
+- 支持浅色、深色和透明背景
+- 支持显示或隐藏氢原子
+- 支持显示或隐藏原子标签
+- 支持重置视角
+- 支持导出当前三维视图为 PNG 图片
 
-## Draw Molecule Workflow
+### 结构详情与属性
 
-The `Draw` tab is implemented with a ChemVault custom SVG sketcher rather than a third-party editor. This keeps the Cloudflare static export stable and avoids browser-only package SSR issues. No Ketcher, Kekule.js, or RDKit.js sketcher dependency is currently bundled.
+Structure Details 面板用于查看当前结构的标识符和分子属性。
 
-Supported draw workflow:
+- 名称、来源、CID、PDB ID、文件名
+- 分子式、分子量、精确质量
+- SMILES、InChI、InChIKey
+- LogP、TPSA
+- 氢键供体、氢键受体
+- 可旋转键数量、环数量、重原子数量、形式电荷
+- 支持复制关键结构标识符
 
-- Click blank canvas to place the active element; carbon is the default.
-- Drag from an atom to create a new atom and bond.
-- Select single, double, triple, aromatic, wedge, or dash bond tools; wedge and dash export as single bonds in generated SMILES and MOL fallback.
-- Click an existing bond to cycle bond order, or apply the active bond tool.
-- Select common elements from the element picker; double-click an element to lock atom placement mode.
-- Open the full 118-element periodic table and search by symbol, name, or atomic number.
-- Place ring templates including cyclopropane, cyclobutane, cyclopentane, cyclohexane, benzene, pyridine, furan, and thiophene.
-- Attach basic functional groups including OH, NH2, COOH, CHO, NO2, OMe, acetyl, and phenyl.
-- Generate SMILES for acyclic sketches and simple standalone rings, then send the result to the existing 3D viewer. Complex fused or heavily substituted cyclic systems may require the Search or SMILES workflow until a full chemical layout engine is added.
+### 导出功能
 
-License note: no new third-party sketcher library was added for this workflow. If Ketcher, Kekule.js, or RDKit.js is added later, its license must be listed here before deployment.
+- SMILES
+- Molfile
+- SDF
+- XYZ
+- PDB
+- PNG 三维视图图片
 
-### Local Development
+导出按钮会根据当前已加载的数据自动启用或禁用，避免导出空结构。
 
-Install dependencies:
+### 账号入口
 
-```bash
-npm install
-```
+网站端可以匿名使用 Molecule Studio 核心功能。账号入口用于连接 ChemVault 用户系统和个人空间功能。
 
-Start the Next.js development server:
+- 未登录用户可使用搜索、SMILES、绘制、上传、PDB、三维查看和导出
+- 顶部提供 Sign in 和 Create account 入口
+- 登录后显示用户头像、名称或邮箱
+- 用户菜单包含 Profile、My Molecules、Settings 和 Sign out
+- Profile、My Molecules 和 Settings 是账号空间入口，部分账户联动能力会按版本逐步开放
 
-```bash
-npm run dev
-```
+## Apple App 功能
 
-Open:
+ChemVault Molecule Apple App 面向 Apple 设备提供原生应用体验。
 
-```text
-http://localhost:3000/molecule
-```
+### 支持平台
 
-Run the production build:
+- iOS 17+
+- iPadOS 17+
+- macOS 14+
 
-```bash
-npm run build
-```
+### 导航结构
 
-### PubChem Search
-
-Use the `Search` tab on `/molecule`.
-
-Supported query examples:
-
-- `water`
-- `ethanol`
-- `benzene`
-- `caffeine`
-- `aspirin`
-- `2244`
-- `CCO`
-
-The app calls the same-origin chemistry API:
-
-```text
-GET /api/chem/pubchem/search?query=
-```
-
-On Cloudflare, these endpoints are served by Cloudflare Pages Functions. The route uses PubChem PUG-REST. No API key is required.
-
-### SMILES Input
-
-Use the `SMILES` tab to paste or edit SMILES. Example inputs:
-
-```text
-CCO
-c1ccccc1
-CC(=O)OC1=CC=CC=C1C(=O)O
-CN1C=NC2=C1C(=O)N(C(=O)N2C)C
-```
-
-Click `Load SMILES` to request a 3D structure. If the optional RDKit backend is unavailable, the Cloudflare function falls back to PubChem SDF.
-
-### 3D Model Generation
-
-The frontend calls:
-
-```text
-POST /api/chem/generate-3d
-```
-
-Request body:
-
-```json
-{
-  "smiles": "CCO"
-}
-```
-
-Resolution order:
-
-1. If `MOLECULE_API_URL` or `NEXT_PUBLIC_MOLECULE_API_URL` is configured, the route tries the RDKit backend.
-2. If the RDKit backend is unavailable or not configured, it falls back to PubChem 3D SDF.
-3. If PubChem has no 3D conformer, it falls back to PubChem 2D SDF when available.
-4. If all sources fail, the page shows a user-facing error and does not crash.
-
-RDKit is optional. The page remains usable without an RDKit backend.
-
-### PDB Loading
-
-Use the `PDB` tab on `/molecule`.
-
-Examples:
-
-```text
-1CRN
-4HHB
-1BNA
-```
-
-The app calls:
-
-```text
-GET /api/chem/pdb/[id]
-```
-
-The route downloads structure data from RCSB PDB and attempts to fetch title, resolution, and experimental method. If metadata is unavailable, the viewer can still load the structure when the PDB file download succeeds.
-
-### Optional RDKit Backend
-
-The Python backend is optional and lives in:
-
-```text
-python-backend/
-```
-
-Run locally:
-
-```bash
-cd python-backend
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
-
-Then set:
-
-```bash
-MOLECULE_API_URL=http://localhost:8000
-```
-
-For hosted deployments, deploy the RDKit backend separately to Render, Railway, Fly.io, or a VPS. RDKit Python should not be deployed inside Cloudflare Pages or Cloudflare Workers.
-
-### Environment Variables
-
-See `.env.example`.
-
-```bash
-MOLECULE_API_URL=
-NEXT_PUBLIC_MOLECULE_API_URL=
-VITE_MOLECULE_API_URL=
-NEXT_PUBLIC_CHEMVAULT_USER_ORIGIN=https://user.chemvault.science
-```
-
-Notes:
-
-- `MOLECULE_API_URL` is the preferred server-side URL for the optional RDKit backend.
-- `NEXT_PUBLIC_MOLECULE_API_URL` can be used when the deployment platform exposes only public build/runtime variables.
-- `VITE_MOLECULE_API_URL` is reserved for a future Vite migration and is not required by the current Next.js app.
-- `NEXT_PUBLIC_CHEMVAULT_USER_ORIGIN` points the optional sign-in UI to ChemVault User. It defaults to `https://user.chemvault.science` when omitted.
-- If all values are empty, PubChem fallback still works.
-
-## Authentication
-
-Authentication is currently optional. Users who are not signed in can still use the full Molecule Studio workflow:
+Apple App 提供以下主入口：
 
 - Search
-- SMILES input
+- SMILES
 - Draw
-- Upload
-- PDB loading
-- 3D viewer
-- Export actions
-
-The top-right header includes a `Sign in` entry. After signing in, the header shows a circular initials avatar, user name or email, and a menu with:
-
-- `Profile`
-- `My Molecules`
-- `Settings`
-- `Sign out`
-
-Current implementation:
-
-- Uses the production ChemVault User system at `https://user.chemvault.science`.
-- Calls `POST /api/auth/login`, `GET /api/auth/me`, and `POST /api/auth/logout` with `credentials: include`.
-- Relies on ChemVault User HttpOnly cookie sessions.
-- Sends passwords only to ChemVault User; Molecule Studio never stores passwords.
-- Leaves Molecule Studio public and fully usable without login.
-- Does not require OAuth provider secrets in this static frontend.
-
-Placeholder pages:
-
-- `/login`
-- `/profile`
-- `/molecules`
-- `/settings`
-
-ChemVault User must allow CORS credentials for the Molecule Studio origin. Production `https://model.chemvault.science` is already allowed by ChemVault User. Local development uses `http://localhost:3000` for `next dev` and `http://localhost:8788` for Cloudflare Pages preview.
-
-Because this repository currently uses `output: export` plus Cloudflare Pages Functions, standard NextAuth/Auth.js API routes are not used here. If OAuth provider integrations are added later, keep provider secrets in ChemVault User or another server-side auth runtime, never in the static Molecule frontend.
-
-Molecule frontend auth environment variable:
-
-```bash
-NEXT_PUBLIC_CHEMVAULT_USER_ORIGIN=https://user.chemvault.science
-```
-
-Do not add user-system secrets to this frontend. OAuth provider secrets belong in ChemVault User or another server-side auth runtime.
-
-## Deploy to Cloudflare
-
-Cloudflare deployment is the primary deployment target for this project.
-
-ChemVault Molecule Studio uses a static Next.js export for the website and Cloudflare Pages Functions for `/api/chem/*`. This keeps deployment simple while preserving PubChem search, property lookup, 3D SDF fallback, and PDB loading without requiring OpenNext or a Python RDKit backend.
-
-Selected deployment approach:
-
-- Scheme: Cloudflare Pages static deployment plus Pages Functions
-- Static output directory: `out`
-- Functions directory: `functions`
-- API runtime: Cloudflare Pages Functions using standard `fetch`
-- RDKit backend: optional external service only
-
-Cloudflare Pages settings:
-
-- Framework preset: `Next.js` or `None`
-- Build command: `npm run build`
-- Output directory: `out`
-- Functions directory: `functions`
-- Node.js version: `20`
-- Root directory: repository root
-
-Local Cloudflare preview:
-
-```bash
-npm run preview
-```
-
-This builds the static export and serves it through Wrangler Pages dev with the `functions/` API routes enabled.
-
-Production deploy from local CLI:
-
-```bash
-npm run deploy
-```
-
-For Git-based Cloudflare Pages deploys, connect the GitHub repository and use the same build settings above.
-
-Environment variables:
-
-```bash
-MOLECULE_API_URL=
-NEXT_PUBLIC_MOLECULE_API_URL=
-VITE_MOLECULE_API_URL=
-```
-
-All are optional.
-
-- If `MOLECULE_API_URL` is empty, Cloudflare Pages Functions do not call an external RDKit service.
-- Without RDKit, `Generate 3D Model` falls back to PubChem SDF.
-- PubChem search, PubChem structure loading, RCSB PDB loading, and the 3D viewer work without RDKit.
-- Deploy the optional RDKit Python backend separately to Render, Railway, Fly.io, or a VPS, then set `MOLECULE_API_URL` in Cloudflare Pages project settings.
-
-### Cloudflare API Routes
-
-Cloudflare Pages Functions provide these same-origin endpoints:
-
-```text
-GET  /api/chem/pubchem/search?query=
-GET  /api/chem/pubchem/structure?cid=&format=sdf3d
-POST /api/chem/generate-3d
-POST /api/chem/properties
-GET  /api/chem/pdb/[id]
-```
-
-The functions live in:
-
-```text
-functions/api/chem/
-```
-
-They do not use Node-only APIs such as `fs` or `path`.
-
-## Custom Domain
-
-Target domain:
-
-```text
-model.chemvault.science
-```
-
-Cloudflare setup:
-
-1. Open the Cloudflare Pages project.
-2. Go to `Custom domains`.
-3. Select `Add custom domain`.
-4. Enter `model.chemvault.science`.
-5. Follow Cloudflare's DNS verification prompt.
-
-If the `chemvault.science` zone is already managed in Cloudflare, Cloudflare Pages can usually bind the custom domain directly.
-
-## Deploy to Vercel
-
-Vercel remains an optional alternative for standard Next.js hosting. Cloudflare is the primary deployment target for this repository.
-
-For the current Cloudflare-first layout, `/api/chem/*` is implemented in Cloudflare Pages Functions. If deploying to Vercel, either recreate equivalent Vercel route handlers or point the frontend at an external chemistry API.
-
-Suggested Vercel settings for a static deployment:
-
-- Framework Preset: `Next.js`
-- Install Command: `npm install` or Vercel default
-- Build Command: `npm run build`
-- Output Directory: `out`
-- Node.js Version: `20.x`
-- Root Directory: repository root
-
-### Common Issues
-
-3D viewer stays on loading:
-
-- Check that the browser can load the 3Dmol.js CDN script.
-- Check the browser console for blocked network requests.
-
-RDKit generation fails:
-
-- Confirm `MOLECULE_API_URL` points to the Python backend.
-- If no backend is configured, this is expected; PubChem fallback is used.
-
-PubChem has no 3D conformer:
-
-- The app falls back to 2D SDF when available.
-- The model may display as a flat structure.
-
-PDB metadata is missing:
-
-- The PDB file can still render when structure download succeeds.
-- Missing title, resolution, or method fields are shown as unavailable.
-
-Cloudflare Pages build confusion:
-
-- Use Next.js deployment guidance, not Vite `dist` output.
-- Use OpenNext/Cloudflare for dynamic Next.js API routes, or move `/api/chem/*` to Workers/external services.
-
-### API Endpoints
-
-- `GET /api/chem/pubchem/search?query=`
-- `GET /api/chem/pubchem/structure?cid=&format=sdf3d`
-- `POST /api/chem/generate-3d`
-- `POST /api/chem/properties`
-- `GET /api/chem/pdb/[id]`
-
-### License
-
-This repository is source-available but not open source. Public visibility is
-for review and reference only; no rights are granted to use, copy, modify,
-distribute, host, deploy, or create derivative works without prior written
-permission from Ziwen Mu or the repository owner.
-
-See [LICENSE](./LICENSE). All rights reserved.
-
-### Third-Party License Notes
-
-- Next.js, React, and Tailwind CSS: open-source packages distributed by their upstream projects
-- 3Dmol.js: loaded from its public distribution endpoint
-- PubChem and RCSB PDB: public web services, no API key required
-- RDKit, FastAPI, and Uvicorn: optional Python backend dependencies in `python-backend/requirements.txt`
-
-### Disclaimer
-
-ChemVault Molecule Studio is an independent educational chemistry tool. It is not affiliated with MolView, PubChem, or RCSB PDB.
+- PDB
+- Library
+- Account
+
+iPhone 使用底部标签栏；iPad 和 Mac 使用侧边栏布局，便于在功能模块之间切换。
+
+### Search 搜索
+
+- 支持按分子名称或 CID 搜索
+- 支持 Water、Ethanol、Benzene、Caffeine、Aspirin、Paracetamol、Ibuprofen、Glucose 等示例
+- 搜索结果可进入分子详情页
+- 详情页可继续加载三维结构和分子属性
+
+### SMILES 输入
+
+- 支持多行文本输入
+- 支持常用示例快速填入
+- 支持 Load Molecule 和 Clear
+- 输入有效 SMILES 后可进入分子详情页和三维查看流程
+
+### Draw 绘制
+
+- 支持放置原子和创建单键
+- 支持选择、擦除、撤销、重做和清空
+- 支持 36 个常用元素选择
+- 支持为简单绘制结构生成 SMILES
+- 可将可识别的绘制结果发送到三维详情页
+
+### PDB 加载
+
+- 支持输入四位 PDB ID
+- 提供 1CRN、4HHB、1BNA 等示例
+- 加载后可进入分子详情页查看三维结构
+
+### 分子详情页
+
+- 支持三维分子查看
+- 支持 Ball and stick、Sphere 和 Stick 显示模式
+- 支持背景切换
+- 显示名称、分子式、分子量、Canonical SMILES、InChIKey、IUPAC Name、来源、PDB ID 和文件名
+- 支持保存到本地 Library
+- 支持分享结构摘要
+- 支持复制 SMILES
+- 支持导出 XYZ 文本
+
+### Library 本地分子库
+
+- 支持从详情页保存分子到本地列表
+- 支持查看已保存分子
+- 支持删除本地保存项
+- 支持导入 `.mol`、`.sdf`、`.xyz`、`.pdb`、`.smi`、`.smiles` 和 `.txt`
+- 导入的结构可进入分子详情页继续查看
+
+### Account 账号与权限
+
+- 支持 Free mode 和 Signed in 状态显示
+- 显示用户名称、会员等级和可用权限
+- 显示搜索、导出和保存项目额度
+- 支持刷新权限
+- 支持打开 ChemVault User Portal
+- 支持退出登录
+- 权限不可用时，App 会以 Free limited mode 继续提供可用功能
+
+## 输入与输出能力对照
+
+| 能力 | 网站端 | Apple App |
+| --- | --- | --- |
+| 分子名称搜索 | 支持 | 支持 |
+| PubChem CID 搜索 | 支持 | 支持 |
+| SMILES 输入 | 支持 | 支持 |
+| 二维绘制 | 支持完整网站绘图工作流 | 支持基础原生绘图工作流 |
+| PDB ID 加载 | 支持 | 支持 |
+| 文件上传或导入 | `.mol`、`.sdf`、`.xyz`、`.pdb`、`.cif`、`.smi`、`.smiles`、`.txt` | `.mol`、`.sdf`、`.xyz`、`.pdb`、`.smi`、`.smiles`、`.txt` |
+| 三维查看 | 支持 | 支持 |
+| 属性查看 | 支持 | 支持 |
+| 本地分子库 | 账号空间入口已预留 | 支持本地保存 |
+| 结构导出 | SMILES、Molfile、SDF、XYZ、PDB、PNG | 分享摘要、复制 SMILES、导出 XYZ |
+
+## 当前功能边界
+
+- 网站端核心分子工作台无需登录即可使用。
+- 网站端 My Molecules、Profile 和 Settings 为账号空间入口，部分账户联动能力按后续版本开放。
+- 网站端绘图功能适合基础结构、常见环模板和常用官能团；复杂稠环、完整立体化学或高级反应编辑建议使用 Search、SMILES 或文件上传方式加载。
+- Apple App 当前提供 Search、SMILES、Draw、PDB、Library 和 Account 的主要使用路径；复杂绘制和高级三维显示能力会按版本扩展。
+
+## 适用场景
+
+- 化学学习中的分子结构搜索、查看和演示
+- 小分子 SMILES 的快速三维可视化
+- PDB 结构的快速加载与展示
+- 分子文件在常见格式之间的查看和导出
+- 课堂、实验记录或文档中的三维结构截图准备
+- Apple 设备上的移动分子查看和本地分子收藏

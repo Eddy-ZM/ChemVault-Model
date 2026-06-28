@@ -3,8 +3,16 @@ node_modules/
 .env
 .env.local
 .python-backend-venv/
+.venv/
+__pycache__/
+*.pyc
 dist/
 out/
 .DS_Store
 .vscode/
 .wrangler/
+*.pem
+*.p8
+*.p12
+*.mobileprovision
+*.cer

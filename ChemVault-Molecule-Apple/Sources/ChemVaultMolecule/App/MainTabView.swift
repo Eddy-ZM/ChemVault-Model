@@ -35,30 +35,49 @@ enum AppSection: String, CaseIterable, Identifiable, Hashable {
 }
 
 struct MainTabView: View {
+    @Environment(AppState.self) private var appState
 #if !os(macOS)
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 #endif
     @State private var selection: AppSection = .search
 
+    private var sections: [AppSection] {
+        let visibleSections = AppSection.allCases.filter(appState.remoteConfig.isSectionEnabled)
+        return visibleSections.isEmpty ? AppSection.allCases : visibleSections
+    }
+
     var body: some View {
+        Group {
 #if os(macOS)
-        SidebarMainView(selection: $selection)
+            SidebarMainView(selection: $selection, sections: sections)
 #else
-        if horizontalSizeClass == .regular {
-            SidebarMainView(selection: $selection)
-        } else {
-            PhoneTabMainView(selection: $selection)
-        }
+            if horizontalSizeClass == .regular {
+                SidebarMainView(selection: $selection, sections: sections)
+            } else {
+                PhoneTabMainView(selection: $selection, sections: sections)
+            }
 #endif
+        }
+        .onAppear(perform: normalizeSelection)
+        .onChange(of: appState.remoteConfig.enabledModuleIDs) { _ in
+            normalizeSelection()
+        }
+    }
+
+    private func normalizeSelection() {
+        if !sections.contains(selection) {
+            selection = sections.first ?? .search
+        }
     }
 }
 
 private struct PhoneTabMainView: View {
     @Binding var selection: AppSection
+    let sections: [AppSection]
 
     var body: some View {
         TabView(selection: $selection) {
-            ForEach(AppSection.allCases) { section in
+            ForEach(sections) { section in
                 NavigationStack {
                     section.content
                         .navigationTitle(section.rawValue)
@@ -72,10 +91,11 @@ private struct PhoneTabMainView: View {
 
 private struct SidebarMainView: View {
     @Binding var selection: AppSection
+    let sections: [AppSection]
 
     var body: some View {
         NavigationSplitView {
-            List(AppSection.allCases, selection: $selection) { section in
+            List(sections, selection: $selection) { section in
                 Label(section.rawValue, systemImage: section.systemImage)
                     .tag(section)
             }

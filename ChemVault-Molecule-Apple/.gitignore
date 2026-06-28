@@ -7,3 +7,8 @@ xcuserdata
 *.xcodeproj/project.xcworkspace/xcuserdata
 .env
 .env.local
+*.pem
+*.p8
+*.p12
+*.mobileprovision
+*.cer

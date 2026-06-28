@@ -121,7 +121,7 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
         if (!threeDMol) return;
         viewer.current = threeDMol.createViewer(container.current, { defaultcolors: threeDMol.rasmolElementColors });
         setReady(true);
-        viewer.current.setBackgroundColor(normalizeBackground(background));
+        viewer.current.setBackgroundColor(normalizeBackground('white'));
         setError(null);
         onReadyRef.current?.();
       })
@@ -194,7 +194,7 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
       setError('Cannot render this structure with current style.');
       // defensive: keep interface stable even if 3dmol API differs by version
     }
-  }, [representation, background, showHydrogens, showAtomLabels]);
+  }, [representation, showHydrogens, showAtomLabels]);
 
   const loadModel = useCallback(
     async (modelData: string | null, format: StructureFormat = 'sdf') => {

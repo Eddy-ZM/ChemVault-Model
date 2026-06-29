@@ -8,7 +8,7 @@ export const metadata: Metadata = {
   icons: {
     icon: [
       { url: '/favicon.ico', sizes: 'any' },
-      { url: '/assets/chemvault-icon-192.png', type: 'image/png', sizes: '192x192' },
+      { url: '/assets/favicon-192.png', type: 'image/png', sizes: '192x192' },
       { url: '/assets/favicon.svg', type: 'image/svg+xml' }
     ],
     apple: '/assets/chemvault-apple-touch-icon.png'

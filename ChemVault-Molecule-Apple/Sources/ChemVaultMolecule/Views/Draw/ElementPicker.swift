@@ -8,12 +8,11 @@ struct ElementPicker: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Elements").font(.headline)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 48))], spacing: 8) {
-                ForEach(common, id: \ .self) { element in
+                ForEach(common, id: \.self) { element in
                     Button(element) { activeElement = element }
                         .buttonStyle(.bordered)
-                        .tint(activeElement == element ? .blue : .secondary)
+                        .tint(activeElement == element ? AppTheme.brand : .secondary)
                 }
                 Button("Table") { showPeriodicTable = true }.buttonStyle(.borderedProminent)
             }

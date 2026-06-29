@@ -1,0 +1,77 @@
+name: ChemVaultMolecule
+options:
+  bundleIdPrefix: science.chemvault
+  deploymentTarget:
+    iOS: "17.0"
+    macOS: "14.0"
+settings:
+  base:
+    MARKETING_VERSION: 1.0.0
+    CURRENT_PROJECT_VERSION: 1
+    SWIFT_VERSION: 5.9
+    DEVELOPMENT_TEAM: ""
+packages: {}
+targets:
+  ChemVaultMolecule-iOS:
+    type: application
+    platform: iOS
+    deploymentTarget: "17.0"
+    sources:
+      - path: Sources/ChemVaultMolecule
+      - path: Resources
+    info:
+      path: Supporting/Info.plist
+      properties:
+        CFBundleDisplayName: ChemVault Molecule
+        CFBundleIdentifier: science.chemvault.molecule
+        UILaunchScreen:
+          UIColorName: LaunchBackground
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        UISupportedInterfaceOrientations~ipad:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationPortraitUpsideDown
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+    entitlements:
+      path: Supporting/ChemVaultMolecule-iOS.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: science.chemvault.molecule
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+  ChemVaultMolecule-macOS:
+    type: application
+    platform: macOS
+    deploymentTarget: "14.0"
+    sources:
+      - path: Sources/ChemVaultMolecule
+      - path: Resources
+    info:
+      path: Supporting/Info.plist
+      properties:
+        CFBundleDisplayName: ChemVault Molecule
+        CFBundleIdentifier: science.chemvault.molecule.mac
+        LSApplicationCategoryType: public.app-category.education
+    entitlements:
+      path: Supporting/ChemVaultMolecule-macOS.entitlements
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: science.chemvault.molecule.mac
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ENABLE_USER_SCRIPT_SANDBOXING: YES
+schemes:
+  ChemVaultMolecule-iOS:
+    build:
+      targets:
+        ChemVaultMolecule-iOS: all
+    run:
+      config: Debug
+  ChemVaultMolecule-macOS:
+    build:
+      targets:
+        ChemVaultMolecule-macOS: all
+    run:
+      config: Debug

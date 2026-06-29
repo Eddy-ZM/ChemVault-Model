@@ -3,7 +3,7 @@ import Foundation
 struct PDBParser: Sendable {
     func parse(_ text: String) throws -> Molecule3DModel {
         var atoms: [Atom3D] = []
-        for line in text.split(whereSeparator: \ .isNewline).map(String.init) {
+        for line in text.split(whereSeparator: \.isNewline).map(String.init) {
             guard line.hasPrefix("ATOM") || line.hasPrefix("HETATM") else { continue }
             let x = doubleField(line, 30, 38)
             let y = doubleField(line, 38, 46)

@@ -14,30 +14,42 @@ struct SearchView: View {
             if !appState.permissions.allows(.search) {
                 PermissionLockedView(permission: .search, requiredTier: .free)
             } else {
-                List {
-                    Section("Search PubChem") {
+                WorkspaceScreen(
+                    title: "Compound Search",
+                    subtitle: "Search PubChem by compound name or CID, then open a native 3D detail view.",
+                    systemImage: "magnifyingglass"
+                ) {
+                    CVPanel("Search PubChem", subtitle: "Use a precise molecule name, common name, or PubChem CID.") {
                         TextField("Molecule name or CID", text: $query)
                             .textFieldStyle(.roundedBorder)
                             .onSubmit { Task { await search(query) } }
-                        Button { Task { await search(query) } } label: {
-                            LoadingButtonLabel(title: "Search Molecule", isLoading: isLoading)
+                        HStack {
+                            Button { Task { await search(query) } } label: {
+                                LoadingButtonLabel(title: "Search Molecule", isLoading: isLoading)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isLoading || query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            Button("Clear") { query = "" }
+                                .buttonStyle(.bordered)
+                                .disabled(query.isEmpty || isLoading)
                         }
-                        .disabled(isLoading || query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
 
-                    Section("Examples") {
-                        FlowLayout(items: examples) { example in
-                            Button(example) { Task { await search(example) } }
-                                .buttonStyle(.bordered)
+                    CVPanel("Examples", subtitle: "Known compounds for a fast structure check.") {
+                        ExampleButtonGrid(examples: examples) { example in
+                            Task { await search(example) }
                         }
                     }
 
                     if let errorMessage {
-                        Section { InlineErrorView(message: errorMessage) }
+                        InlineErrorView(message: errorMessage)
                     }
 
                     if let offline = appState.offlineMessage {
-                        Section { Text(offline).foregroundStyle(.secondary) }
+                        CVPanel {
+                            ActionRow(title: "Limited mode", subtitle: offline, systemImage: "wifi.exclamationmark")
+                        }
                     }
                 }
             }
@@ -55,17 +67,6 @@ struct SearchView: View {
             selectedMolecule = try await appState.moleculeClient.searchCompound(query: value)
         } catch {
             errorMessage = error.localizedDescription
-        }
-    }
-}
-
-struct FlowLayout<Item: Hashable, Content: View>: View {
-    let items: [Item]
-    let content: (Item) -> Content
-
-    var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], alignment: .leading, spacing: 8) {
-            ForEach(items, id: \ .self) { item in content(item) }
         }
     }
 }

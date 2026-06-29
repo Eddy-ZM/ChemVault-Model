@@ -15,7 +15,7 @@ struct StructureParser: Sendable {
         guard let text = String(data: data, encoding: .utf8) else { throw ChemVaultError.parserFailed("File is not UTF-8 text.") }
         let lower = name.lowercased()
         if lower.hasSuffix(".smi") || lower.hasSuffix(".smiles") || lower.hasSuffix(".txt") {
-            let firstLine = text.split(whereSeparator: \ .isNewline).first.map(String.init) ?? ""
+            let firstLine = text.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
             return .smiles(firstLine.trimmingCharacters(in: .whitespacesAndNewlines))
         }
         let format: MoleculeFileFormat

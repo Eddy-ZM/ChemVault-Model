@@ -8,19 +8,22 @@ struct LoginView: View {
     @State private var errorMessage: String?
 
     var body: some View {
-        VStack(spacing: 24) {
-            VStack(spacing: 10) {
+        VStack(spacing: 22) {
+            VStack(spacing: 12) {
                 Image(systemName: "atom")
-                    .font(.system(size: 56))
-                    .foregroundStyle(.blue)
+                    .font(.system(size: 48, weight: .semibold))
+                    .foregroundStyle(AppTheme.brand)
+                    .frame(width: 72, height: 72)
+                    .background(AppTheme.brand.opacity(0.10), in: RoundedRectangle(cornerRadius: 16))
                 Text("ChemVault Molecule")
-                    .font(.largeTitle.bold())
-                Text("Native molecule search, drawing, and 3D viewing for Apple platforms.")
+                    .font(.largeTitle.weight(.semibold))
+                Text("Native molecule search, drawing, PDB loading, local library, and 3D viewing for Apple platforms.")
                     .foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
+                    .frame(maxWidth: 520)
             }
 
-            VStack(spacing: 12) {
+            CVPanel("Account Access", subtitle: "Sign in for account-linked permissions, or continue with the available free workspace.") {
                 TextField("Email", text: $email)
                     .textContentType(.emailAddress)
 #if !os(macOS)
@@ -54,6 +57,8 @@ struct LoginView: View {
             .frame(maxWidth: 420)
         }
         .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppTheme.workspaceBackground)
     }
 
     private func login() async {

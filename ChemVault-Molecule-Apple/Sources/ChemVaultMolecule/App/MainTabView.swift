@@ -21,6 +21,17 @@ enum AppSection: String, CaseIterable, Identifiable, Hashable {
         }
     }
 
+    var subtitle: String {
+        switch self {
+        case .search: "PubChem lookup"
+        case .smiles: "Notation input"
+        case .draw: "Native sketcher"
+        case .pdb: "RCSB structure"
+        case .library: "Local workspace"
+        case .account: "Access and quota"
+        }
+    }
+
     @ViewBuilder
     var content: some View {
         switch self {
@@ -95,16 +106,47 @@ private struct SidebarMainView: View {
 
     var body: some View {
         NavigationSplitView {
-            List(sections, selection: $selection) { section in
-                Label(section.rawValue, systemImage: section.systemImage)
-                    .tag(section)
+            VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("ChemVault")
+                        .font(.title3.weight(.semibold))
+                    Text("Molecule Studio")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 16)
+
+                List(sections, selection: $selection) { section in
+                    NavigationRow(section: section)
+                        .tag(section)
+                }
+                .listStyle(.sidebar)
             }
-            .navigationTitle("ChemVault")
+            .background(AppTheme.workspaceBackground)
         } detail: {
             NavigationStack {
                 selection.content
                     .navigationTitle(selection.rawValue)
             }
+        }
+    }
+}
+
+private struct NavigationRow: View {
+    let section: AppSection
+
+    var body: some View {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(section.rawValue)
+                    .font(.subheadline.weight(.medium))
+                Text(section.subtitle)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        } icon: {
+            Image(systemName: section.systemImage)
         }
     }
 }

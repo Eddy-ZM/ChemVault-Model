@@ -6,8 +6,7 @@ struct RootView: View {
     var body: some View {
         Group {
             if appState.isBootstrapping {
-                ProgressView("Starting ChemVault Molecule")
-                    .controlSize(.large)
+                LaunchStatusView()
             } else if appState.remoteConfig.maintenanceMode {
                 RemoteConfigGateView(
                     title: "ChemVault Molecule is in maintenance",
@@ -31,6 +30,28 @@ struct RootView: View {
     }
 }
 
+private struct LaunchStatusView: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "atom")
+                .font(.system(size: 42, weight: .semibold))
+                .foregroundStyle(AppTheme.brand)
+            VStack(spacing: 6) {
+                Text("ChemVault Molecule")
+                    .font(.title2.weight(.semibold))
+                Text("Preparing native workspace")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            ProgressView()
+                .controlSize(.large)
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppTheme.workspaceBackground)
+    }
+}
+
 private struct RemoteConfigGateView: View {
     let title: String
     let message: String
@@ -40,7 +61,7 @@ private struct RemoteConfigGateView: View {
         VStack(spacing: 18) {
             Image(systemName: systemImage)
                 .font(.system(size: 44, weight: .semibold))
-                .foregroundStyle(.accent)
+                .foregroundStyle(AppTheme.brand)
             Text(title)
                 .font(.title2.weight(.bold))
             Text(message)
@@ -50,6 +71,6 @@ private struct RemoteConfigGateView: View {
         }
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color.accentColor.opacity(0.04))
+        .background(AppTheme.workspaceBackground)
     }
 }

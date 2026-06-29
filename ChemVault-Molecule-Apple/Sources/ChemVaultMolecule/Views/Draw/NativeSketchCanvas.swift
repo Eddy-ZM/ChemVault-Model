@@ -18,11 +18,12 @@ struct NativeSketchCanvas: View {
                     var path = Path()
                     path.move(to: CGPoint(x: start.x, y: start.y))
                     path.addLine(to: previewPoint)
-                    context.stroke(path, with: .color(.blue.opacity(0.45)), lineWidth: 2)
+                    context.stroke(path, with: .color(AppTheme.brand.opacity(0.45)), lineWidth: 2)
                 }
                 for atom in graph.atoms { drawAtom(atom, context: context) }
             }
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            .background(AppTheme.panelBackground, in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(AppTheme.subtleStroke))
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
@@ -104,7 +105,7 @@ struct NativeSketchCanvas: View {
         let length = max(1, hypot(dx, dy))
         let offset = CGPoint(x: -dy / length * 4, y: dx / length * 4)
         for line in 0..<bond.order {
-            let multiplier = Double(line) - Double(bond.order - 1) / 2.0
+            let multiplier = CGFloat(line) - CGFloat(bond.order - 1) / 2.0
             var path = Path()
             path.move(to: CGPoint(x: start.x + offset.x * multiplier, y: start.y + offset.y * multiplier))
             path.addLine(to: CGPoint(x: end.x + offset.x * multiplier, y: end.y + offset.y * multiplier))

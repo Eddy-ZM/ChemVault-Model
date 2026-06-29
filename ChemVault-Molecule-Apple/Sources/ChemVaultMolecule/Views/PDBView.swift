@@ -10,28 +10,39 @@ struct PDBView: View {
     private let examples = ["1CRN", "4HHB", "1BNA"]
 
     var body: some View {
-        ZStack {
+        Group {
             if !appState.permissions.allows(.pdbAccess) {
                 PermissionLockedView(permission: .pdbAccess, requiredTier: .free)
             } else {
-                Form {
-                    Section("RCSB PDB") {
+                WorkspaceScreen(
+                    title: "PDB Structure",
+                    subtitle: "Load protein or nucleic acid structures by four-character RCSB PDB ID.",
+                    systemImage: "atom"
+                ) {
+                    CVPanel("RCSB PDB", subtitle: "Use IDs such as 1CRN, 4HHB, or 1BNA.") {
                         TextField("PDB ID", text: $pdbID)
                             .textFieldStyle(.roundedBorder)
                             .onSubmit { Task { await load(pdbID) } }
-                        Button { Task { await load(pdbID) } } label: {
-                            LoadingButtonLabel(title: "Load PDB", isLoading: isLoading)
+                        HStack {
+                            Button { Task { await load(pdbID) } } label: {
+                                LoadingButtonLabel(title: "Load PDB", isLoading: isLoading)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(isLoading || pdbID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                            Button("Clear") { pdbID = "" }
+                                .buttonStyle(.bordered)
+                                .disabled(pdbID.isEmpty || isLoading)
                         }
-                        .disabled(isLoading || pdbID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
 
-                    Section("Examples") {
-                        ForEach(examples, id: \ .self) { example in
-                            Button(example) { Task { await load(example) } }
+                    CVPanel("Examples", subtitle: "Reference structures for quick validation.") {
+                        ExampleButtonGrid(examples: examples) { example in
+                            Task { await load(example) }
                         }
                     }
 
-                    if let errorMessage { Section { InlineErrorView(message: errorMessage) } }
+                    if let errorMessage { InlineErrorView(message: errorMessage) }
                 }
             }
         }

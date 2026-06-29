@@ -2,7 +2,7 @@ import Foundation
 
 struct MolfileParser: Sendable {
     func parse(_ text: String) throws -> Molecule3DModel {
-        let lines = text.split(whereSeparator: \ .isNewline).map(String.init)
+        let lines = text.split(whereSeparator: \.isNewline).map(String.init)
         guard lines.count >= 4 else { throw ChemVaultError.parserFailed("Molfile is too short.") }
         let countsLine = lines[3]
         let atomCount = fixedWidthInt(countsLine, 0, 3)

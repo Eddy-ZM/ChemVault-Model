@@ -2,7 +2,7 @@ import Foundation
 
 struct XYZParser: Sendable {
     func parse(_ text: String) throws -> Molecule3DModel {
-        let lines = text.split(whereSeparator: \ .isNewline).map(String.init)
+        let lines = text.split(whereSeparator: \.isNewline).map(String.init)
         guard let count = Int(lines.first?.trimmingCharacters(in: .whitespaces) ?? ""), lines.count >= count + 2 else {
             throw ChemVaultError.parserFailed("XYZ file is missing atom count or coordinates.")
         }

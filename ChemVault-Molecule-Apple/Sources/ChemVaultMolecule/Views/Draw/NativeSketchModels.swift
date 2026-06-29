@@ -14,8 +14,8 @@ enum DrawTool: String, CaseIterable, Identifiable {
 struct SketchAtom: Identifiable, Codable, Hashable {
     var id = UUID()
     var element: String
-    var x: Double
-    var y: Double
+    var x: CGFloat
+    var y: CGFloat
 }
 
 struct SketchBond: Identifiable, Codable, Hashable {

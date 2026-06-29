@@ -15,11 +15,22 @@ struct DrawView: View {
             if !appState.permissions.allows(.drawAccess) {
                 PermissionLockedView(permission: .drawAccess, requiredTier: .free)
             } else {
-                ViewThatFits {
-                    HStack(alignment: .top, spacing: 16) { sketchArea; controls.frame(width: 260) }
-                    VStack(spacing: 16) { sketchArea; controls }
+                WorkspaceScreen(
+                    title: "Native Sketcher",
+                    subtitle: "Create a basic 2D molecular graph, generate SMILES, and open the native 3D viewer.",
+                    systemImage: "pencil.and.outline"
+                ) {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .top, spacing: 16) {
+                            sketchArea
+                            controls.frame(width: 300)
+                        }
+                        VStack(spacing: 16) {
+                            sketchArea
+                            controls
+                        }
+                    }
                 }
-                .padding()
             }
         }
         .navigationDestination(item: $selectedMolecule) { summary in
@@ -28,8 +39,7 @@ struct DrawView: View {
     }
 
     private var sketchArea: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Native 2D Sketcher").font(.title2.bold())
+        CVPanel("Canvas", subtitle: "\(graph.atoms.count) atoms, \(graph.bonds.count) bonds") {
             NativeSketchCanvas(graph: $graph, selectedTool: $selectedTool, activeElement: $activeElement) { next in
                 undoStack.append(graph)
                 redoStack.removeAll()
@@ -40,26 +50,29 @@ struct DrawView: View {
     }
 
     private var controls: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 14) {
+            CVPanel("Tools") {
                 DrawingToolbar(selectedTool: $selectedTool)
-                ElementPicker(activeElement: $activeElement)
                 HStack {
                     Button("Undo") { undo() }.disabled(undoStack.isEmpty)
                     Button("Redo") { redo() }.disabled(redoStack.isEmpty)
                     Button("Clear", role: .destructive) { clear() }
                 }
                 .buttonStyle(.bordered)
+            }
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Generated SMILES").font(.headline)
-                    Text(graph.generateSMILES() ?? "SMILES generation is under development for this structure.")
-                        .font(.body.monospaced())
-                        .textSelection(.enabled)
-                        .foregroundStyle(graph.generateSMILES() == nil ? .secondary : .primary)
-                    Button("Generate 3D Model") { generate3D() }
-                        .buttonStyle(.borderedProminent)
-                }
+            CVPanel("Elements") {
+                ElementPicker(activeElement: $activeElement)
+            }
+
+            CVPanel("Generated SMILES") {
+                Text(graph.generateSMILES() ?? "SMILES is not available for this sketch. Use Search, SMILES, or Import for complex structures.")
+                    .font(.body.monospaced())
+                    .textSelection(.enabled)
+                    .foregroundStyle(graph.generateSMILES() == nil ? .secondary : .primary)
+                Button("Generate 3D Model") { generate3D() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(graph.generateSMILES()?.isEmpty ?? true)
             }
         }
     }
@@ -84,7 +97,7 @@ struct DrawView: View {
 
     private func generate3D() {
         guard let smiles = graph.generateSMILES(), !smiles.isEmpty else {
-            message = "SMILES generation is under development for this drawing. Use Search or SMILES for now."
+            message = "SMILES is not available for this drawing. Use Search, SMILES, or Import for complex structures."
             return
         }
         selectedMolecule = MoleculeSummary(name: "Drawn Molecule", canonicalSMILES: smiles, source: .draw)
@@ -96,12 +109,11 @@ struct DrawingToolbar: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Tools").font(.headline)
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 82))], spacing: 8) {
                 ForEach(DrawTool.allCases) { tool in
                     Button(tool.rawValue) { selectedTool = tool }
                         .buttonStyle(.bordered)
-                        .tint(selectedTool == tool ? .blue : .secondary)
+                        .tint(selectedTool == tool ? AppTheme.brand : .secondary)
                 }
             }
         }

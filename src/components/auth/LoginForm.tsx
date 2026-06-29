@@ -7,10 +7,25 @@ import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { OAuthProvider, buildOAuthUrl, buildRegisterUrl } from '@/lib/auth/chemvaultUserLinks';
 
-const oauthProviders: Array<{ id: OAuthProvider; label: string; mark: string }> = [
-  { id: 'apple', label: 'Apple', mark: 'A' },
-  { id: 'google', label: 'Google', mark: 'G' },
-  { id: 'github', label: 'GitHub', mark: 'GH' }
+const oauthProviders: Array<{ id: OAuthProvider; label: string; className: string; iconWrapClassName: string }> = [
+  {
+    id: 'apple',
+    label: 'Apple',
+    className: 'border-black bg-black text-white hover:bg-zinc-800 focus-visible:ring-zinc-300',
+    iconWrapClassName: 'bg-white text-black'
+  },
+  {
+    id: 'google',
+    label: 'Google',
+    className: 'border-slate-300 bg-white text-slate-800 hover:border-[#4285F4] hover:text-[#1a73e8] focus-visible:ring-[#4285F4]/30',
+    iconWrapClassName: 'bg-white text-slate-900'
+  },
+  {
+    id: 'github',
+    label: 'GitHub',
+    className: 'border-[#24292f] bg-[#24292f] text-white hover:bg-[#1f2328] focus-visible:ring-[#24292f]/30',
+    iconWrapClassName: 'bg-white text-[#24292f]'
+  }
 ];
 
 export function LoginForm() {
@@ -72,10 +87,10 @@ export function LoginForm() {
           <a
             key={provider.id}
             href={provider.href}
-            className="flex items-center justify-center gap-3 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition hover:border-sky-300 hover:text-sky-800"
+            className={`flex items-center justify-center gap-3 rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition focus-visible:outline-none focus-visible:ring-4 ${provider.className}`}
           >
-            <span className="grid h-6 min-w-6 place-items-center rounded-md border border-slate-200 bg-slate-50 px-1 text-[11px] font-bold">
-              {provider.mark}
+            <span className={`grid h-7 w-7 place-items-center rounded-lg ${provider.iconWrapClassName}`} aria-hidden="true">
+              <OAuthProviderIcon provider={provider.id} />
             </span>
             Continue with {provider.label}
           </a>
@@ -143,4 +158,31 @@ export function LoginForm() {
 function safeCallbackUrl(value: string | null): Route {
   if (value === '/profile' || value === '/molecules' || value === '/settings' || value === '/molecule') return value;
   return '/molecule';
+}
+
+function OAuthProviderIcon({ provider }: { provider: OAuthProvider }) {
+  if (provider === 'apple') {
+    return (
+      <svg viewBox="0 0 24 24" className="h-4 w-4 fill-current" focusable="false" aria-hidden="true">
+        <path d="M16.36 1.43c.02 1.07-.39 2.1-1.12 2.88-.78.86-2.06 1.52-3.1 1.43-.12-1.02.42-2.13 1.13-2.88.79-.84 2.17-1.49 3.09-1.43ZM20.5 17.27c-.45 1.04-.67 1.5-1.25 2.42-.81 1.23-1.95 2.77-3.36 2.78-1.26.01-1.58-.82-3.28-.81-1.7.01-2.06.82-3.32.81-1.42-.01-2.5-1.4-3.31-2.64-2.27-3.49-2.51-7.58-1.1-9.76 1-1.55 2.58-2.46 4.07-2.46 1.52 0 2.48.83 3.73.83 1.22 0 1.96-.84 3.72-.84 1.33 0 2.74.72 3.74 1.97-3.28 1.8-2.75 6.48.36 7.7Z" />
+      </svg>
+    );
+  }
+
+  if (provider === 'google') {
+    return (
+      <svg viewBox="0 0 24 24" className="h-4 w-4" focusable="false" aria-hidden="true">
+        <path fill="#4285F4" d="M21.6 12.23c0-.76-.07-1.49-.2-2.19H12v4.14h5.38a4.6 4.6 0 0 1-2 3.02v2.51h3.25c1.9-1.75 2.97-4.33 2.97-7.48Z" />
+        <path fill="#34A853" d="M12 22c2.7 0 4.97-.9 6.63-2.43l-3.25-2.51c-.9.6-2.05.96-3.38.96-2.6 0-4.8-1.75-5.59-4.11H3.06v2.59A10 10 0 0 0 12 22Z" />
+        <path fill="#FBBC05" d="M6.41 13.91a6.02 6.02 0 0 1 0-3.82V7.5H3.06a10 10 0 0 0 0 9l3.35-2.59Z" />
+        <path fill="#EA4335" d="M12 5.98c1.47 0 2.79.51 3.83 1.5l2.88-2.88C16.97 2.98 14.7 2 12 2a10 10 0 0 0-8.94 5.5l3.35 2.59C7.2 7.73 9.4 5.98 12 5.98Z" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" className="h-4 w-4 fill-current" focusable="false" aria-hidden="true">
+      <path d="M12 2C6.48 2 2 6.58 2 12.24c0 4.52 2.87 8.35 6.84 9.7.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.5-1.11-1.5-.91-.63.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.9 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.55-1.14-4.55-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.31.1-2.71 0 0 .84-.28 2.75 1.05A9.3 9.3 0 0 1 12 6.96c.85 0 1.7.12 2.5.34 1.9-1.33 2.74-1.05 2.74-1.05.55 1.4.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.93-2.34 4.8-4.57 5.05.36.32.68.94.68 1.9 0 1.37-.01 2.47-.01 2.8 0 .27.18.59.69.49A10.1 10.1 0 0 0 22 12.24C22 6.58 17.52 2 12 2Z" />
+    </svg>
+  );
 }

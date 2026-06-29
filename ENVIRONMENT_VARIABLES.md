@@ -8,6 +8,7 @@ Do not commit real keys, tokens, private keys, certificates or production `.env`
 | `MOLECULE_API_URL` | Optional | Optional RDKit/FastAPI backend base URL for molecule services. |
 | `NEXT_PUBLIC_MOLECULE_API_URL` | Optional | Public molecule API URL for hosted web deployments in this repository. |
 | `NEXT_PUBLIC_CHEMVAULT_USER_ORIGIN` | Optional | ChemVault User origin used by sign-in UI. Defaults to `https://user.chemvault.science`. |
+| `NEXT_PUBLIC_CHEMVAULT_MODEL_ORIGIN` | Optional | Public Molecule Studio origin used as the return target for ChemVault User OAuth/register redirects. Defaults to `https://model.chemvault.science`. |
 | `API_BASE_URL` | Optional | Future native app API base URL override if build settings are added. |
 | `REMOTE_CONFIG_URL` | Optional | Future override for `https://api.chemvault.science/app-config.json`. |
 | `SENTRY_DSN` | Optional | Crash/error reporting DSN if Sentry is added later. |

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { UserMenu } from '@/components/auth/UserMenu';
+import { buildRegisterUrl } from '@/lib/auth/chemvaultUserLinks';
 
 export function AuthButton() {
   const { ready, user, userOrigin } = useAuth();
@@ -13,6 +14,8 @@ export function AuthButton() {
 
   if (user) return <UserMenu user={user} />;
 
+  const registerUrl = buildRegisterUrl({ userOrigin, callbackPath: '/molecule' });
+
   return (
     <div className="flex items-center gap-2">
       <Link
@@ -22,7 +25,7 @@ export function AuthButton() {
         Sign in
       </Link>
       <a
-        href={`${userOrigin}/register`}
+        href={registerUrl}
         className="hidden rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white transition hover:bg-slate-800 sm:inline-flex"
       >
         Create account

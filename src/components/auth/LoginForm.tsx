@@ -3,18 +3,38 @@
 import type { Route } from 'next';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { FormEvent, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { OAuthProvider, buildOAuthUrl, buildRegisterUrl } from '@/lib/auth/chemvaultUserLinks';
+
+const oauthProviders: Array<{ id: OAuthProvider; label: string; mark: string }> = [
+  { id: 'apple', label: 'Apple', mark: 'A' },
+  { id: 'google', label: 'Google', mark: 'G' },
+  { id: 'github', label: 'GitHub', mark: 'GH' }
+];
 
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { login, loading, userOrigin } = useAuth();
+  const { login, loading, user, ready, userOrigin } = useAuth();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   const callbackUrl = safeCallbackUrl(searchParams.get('callbackUrl'));
+  const oauthLinks = useMemo(
+    () =>
+      oauthProviders.map((provider) => ({
+        ...provider,
+        href: buildOAuthUrl(provider.id, { userOrigin, callbackPath: callbackUrl })
+      })),
+    [callbackUrl, userOrigin]
+  );
+  const registerUrl = useMemo(() => buildRegisterUrl({ userOrigin, callbackPath: callbackUrl }), [callbackUrl, userOrigin]);
+
+  useEffect(() => {
+    if (ready && user) router.replace(callbackUrl);
+  }, [callbackUrl, ready, router, user]);
 
   const onSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -45,6 +65,27 @@ export function LoginForm() {
         <p className="mt-3 text-sm leading-6 text-slate-600">
           Use your ChemVault User account. Molecule Studio remains fully usable without signing in.
         </p>
+      </div>
+
+      <div className="mt-6 grid gap-2">
+        {oauthLinks.map((provider) => (
+          <a
+            key={provider.id}
+            href={provider.href}
+            className="flex items-center justify-center gap-3 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-800 transition hover:border-sky-300 hover:text-sky-800"
+          >
+            <span className="grid h-6 min-w-6 place-items-center rounded-md border border-slate-200 bg-slate-50 px-1 text-[11px] font-bold">
+              {provider.mark}
+            </span>
+            Continue with {provider.label}
+          </a>
+        ))}
+      </div>
+
+      <div className="mt-5 flex items-center gap-3">
+        <span className="h-px flex-1 bg-slate-200" />
+        <span className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">or</span>
+        <span className="h-px flex-1 bg-slate-200" />
       </div>
 
       <form onSubmit={onSubmit} className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -82,16 +123,10 @@ export function LoginForm() {
 
       <div className="mt-6 grid gap-3">
         <a
-          href={`${userOrigin}/register`}
+          href={registerUrl}
           className="rounded-xl border border-slate-300 px-4 py-3 text-center text-sm font-semibold text-slate-700 transition hover:border-sky-300"
         >
-          Create account in ChemVault User
-        </a>
-        <a
-          href={userOrigin}
-          className="rounded-xl border border-slate-300 px-4 py-3 text-center text-sm font-semibold text-slate-700 transition hover:border-sky-300"
-        >
-          Open ChemVault User Portal
+          Create ChemVault account
         </a>
       </div>
 

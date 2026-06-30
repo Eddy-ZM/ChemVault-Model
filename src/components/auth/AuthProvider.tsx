@@ -11,6 +11,11 @@ export type AuthUser = {
   avatarUrl?: string | null;
   role?: string | null;
   systemRole?: string | null;
+  membershipTier?: string | null;
+  provider?: string | null;
+  createdAt?: string | null;
+  updatedAt?: string | null;
+  lastLoginAt?: string | null;
   permissions?: string[];
   services?: string[];
   pages?: string[];

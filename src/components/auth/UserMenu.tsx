@@ -6,9 +6,9 @@ import { useEffect, useRef, useState } from 'react';
 import { AuthUser, useAuth } from '@/components/auth/AuthProvider';
 
 const menuItems: Array<{ label: string; href: Route; note: string }> = [
-  { label: 'Profile', href: '/profile', note: 'Coming soon' },
-  { label: 'My Molecules', href: '/molecules', note: 'Coming soon' },
-  { label: 'Settings', href: '/settings', note: 'Coming soon' }
+  { label: 'Profile', href: '/profile', note: 'Synced' },
+  { label: 'My Molecules', href: '/molecules', note: 'Library' },
+  { label: 'Settings', href: '/settings', note: 'Synced' }
 ];
 
 export function UserMenu({ user }: { user: AuthUser }) {

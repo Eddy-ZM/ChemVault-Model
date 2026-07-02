@@ -13,7 +13,7 @@ export function Header() {
           <Link href="/molecule" className="transition hover:text-sky-700">
             Molecule Studio
           </Link>
-          <a href="https://model.chemvault.science" className="transition hover:text-sky-700">
+          <a href="https://docs.chemvault.science/manual/molecule-studio/" target="_blank" rel="noopener noreferrer" className="transition hover:text-sky-700">
             Docs
           </a>
           <Link href="/" className="transition hover:text-sky-700">

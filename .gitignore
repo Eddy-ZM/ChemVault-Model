@@ -16,3 +16,17 @@ out/
 *.p12
 *.mobileprovision
 *.cer
+# ChemVault local secrets and build output
+.env
+.env.*
+!.env.example
+*.p8
+AuthKey_*.p8
+*.p12
+*.cer
+*.mobileprovision
+node_modules/
+dist/
+build/
+.wrangler/
+.DS_Store

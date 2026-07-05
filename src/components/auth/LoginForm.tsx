@@ -35,6 +35,7 @@ export function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState(false);
 
   const callbackUrl = safeCallbackUrl(searchParams.get('callbackUrl'));
   const oauthLinks = useMemo(
@@ -46,6 +47,7 @@ export function LoginForm() {
     [callbackUrl, userOrigin]
   );
   const registerUrl = useMemo(() => buildRegisterUrl({ userOrigin, callbackPath: callbackUrl }), [callbackUrl, userOrigin]);
+  const busy = loading || submitting;
 
   useEffect(() => {
     if (ready && user) router.replace(callbackUrl);
@@ -64,11 +66,14 @@ export function LoginForm() {
     }
 
     setError(null);
+    setSubmitting(true);
     try {
       await login({ email: nextEmail, password });
       router.push(callbackUrl);
     } catch (authError) {
       setError(authError instanceof Error ? authError.message : 'Sign in failed.');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -103,7 +108,15 @@ export function LoginForm() {
         <span className="h-px flex-1 bg-slate-200" />
       </div>
 
-      <form onSubmit={onSubmit} className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <form onSubmit={onSubmit} className="relative mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-busy={busy}>
+        {busy ? (
+          <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-white/55 backdrop-blur-[1px]">
+            <div className="flex items-center gap-3 rounded-full border border-sky-100 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">
+              <span className="h-4 w-4 animate-spin rounded-full border-2 border-sky-200 border-t-sky-700" aria-hidden="true" />
+              Connecting to ChemVault User
+            </div>
+          </div>
+        ) : null}
         <label className="block text-sm font-medium text-slate-700" htmlFor="auth-email">
           Email
         </label>
@@ -129,10 +142,11 @@ export function LoginForm() {
         {error ? <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
         <button
           type="submit"
-          disabled={loading}
-          className="mt-4 w-full rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          disabled={busy}
+          className="mt-4 flex w-full items-center justify-center gap-3 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
         >
-          {loading ? 'Signing in...' : 'Sign in'}
+          {busy ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" aria-hidden="true" /> : null}
+          {busy ? 'Signing in' : 'Sign in'}
         </button>
       </form>
 

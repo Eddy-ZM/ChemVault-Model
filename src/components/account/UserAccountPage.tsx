@@ -3,7 +3,7 @@
 import type { Route } from 'next';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AuthUser, useAuth } from '@/components/auth/AuthProvider';
+import { AuthUser, useAuth, userApiUrl } from '@/components/auth/AuthProvider';
 import { UserPortalSection, buildRegisterUrl, buildUserPortalUrl } from '@/lib/auth/chemvaultUserLinks';
 
 export type AccountPage = 'profile' | 'molecules' | 'settings';
@@ -76,7 +76,7 @@ export function UserAccountPage({ page }: { page: AccountPage }) {
 
     setEntitlementsLoading(true);
     try {
-      const response = await fetch(`${normalizeOrigin(userOrigin)}/api/apps/molecule/permissions`, {
+      const response = await fetch(userApiUrl('/api/apps/molecule/permissions'), {
         credentials: 'include'
       });
       if (!response.ok) throw new Error(`Permissions sync failed with ${response.status}.`);
@@ -93,7 +93,7 @@ export function UserAccountPage({ page }: { page: AccountPage }) {
     } finally {
       setEntitlementsLoading(false);
     }
-  }, [user, userOrigin]);
+  }, [user]);
 
   useEffect(() => {
     if (!ready) return;

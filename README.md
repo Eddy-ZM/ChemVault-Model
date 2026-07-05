@@ -53,10 +53,17 @@ The desktop API proxy defaults to:
 https://model.chemvault.science/api/chem
 ```
 
+Desktop sign-in requests are proxied to:
+
+```text
+https://user.chemvault.science
+```
+
 Override it when needed:
 
 ```powershell
 $env:CHEMVAULT_MODEL_API_URL="https://model.chemvault.science/api/chem"
+$env:CHEMVAULT_USER_ORIGIN="https://user.chemvault.science"
 npm run build:desktop
 ```
 

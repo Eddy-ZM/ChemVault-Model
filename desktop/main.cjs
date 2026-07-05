@@ -5,10 +5,12 @@ const path = require('node:path');
 
 const APP_TITLE = 'ChemVault Model';
 const DEFAULT_API_BASE = 'https://model.chemvault.science/api/chem';
+const DEFAULT_USER_ORIGIN = 'https://user.chemvault.science';
 const DEFAULT_START_PATH = '/molecule/';
 
 let mainWindow = null;
 let staticServer = null;
+const userCookieJar = new Map();
 
 app.setName(APP_TITLE);
 
@@ -135,6 +137,11 @@ function startDesktopServer(staticRoot) {
 
 async function handleDesktopRequest(staticRoot, request, response) {
   const requestUrl = new URL(request.url || '/', 'http://127.0.0.1');
+  if (requestUrl.pathname.startsWith('/desktop-user-api/')) {
+    await proxyUserApi(request, response, requestUrl);
+    return;
+  }
+
   if (requestUrl.pathname.startsWith('/api/chem/')) {
     await proxyChemApi(request, response, requestUrl);
     return;
@@ -175,6 +182,62 @@ async function proxyChemApi(request, response, requestUrl) {
   response.end(Buffer.from(arrayBuffer));
 }
 
+async function proxyUserApi(request, response, requestUrl) {
+  const userOrigin = normalizeOrigin(process.env.CHEMVAULT_USER_ORIGIN || process.env.NEXT_PUBLIC_CHEMVAULT_USER_ORIGIN || DEFAULT_USER_ORIGIN);
+  const targetPath = requestUrl.pathname.slice('/desktop-user-api'.length);
+  const targetUrl = `${userOrigin}${targetPath}${requestUrl.search}`;
+  const body = await readRequestBody(request);
+
+  const headers = sanitizeProxyHeaders(request.headers);
+  headers.origin = userOrigin;
+  headers.referer = `${userOrigin}/`;
+  headers['x-chemvault-client'] = 'desktop-windows';
+
+  const cookieHeader = desktopUserCookieHeader();
+  if (cookieHeader) {
+    headers.cookie = cookieHeader;
+  }
+
+  try {
+    const upstream = await fetch(targetUrl, {
+      method: request.method,
+      headers,
+      redirect: 'manual',
+      body: body.length > 0 && request.method !== 'GET' && request.method !== 'HEAD' ? body : undefined
+    });
+
+    rememberSetCookies(readSetCookieHeaders(upstream.headers));
+
+    const responseHeaders = {};
+    upstream.headers.forEach((value, key) => {
+      const lower = key.toLowerCase();
+      if (!['content-encoding', 'content-length', 'transfer-encoding', 'set-cookie'].includes(lower)) {
+        responseHeaders[key] = value;
+      }
+    });
+    responseHeaders['cache-control'] = 'no-store';
+    responseHeaders['content-type'] = responseHeaders['content-type'] || 'application/json; charset=utf-8';
+
+    response.writeHead(upstream.status, responseHeaders);
+    const arrayBuffer = await upstream.arrayBuffer();
+    response.end(Buffer.from(arrayBuffer));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'ChemVault User request failed.';
+    response.writeHead(502, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store'
+    });
+    response.end(
+      JSON.stringify({
+        error: {
+          code: 'DESKTOP_USER_PROXY_FAILED',
+          message: `Cannot reach ChemVault User service. ${message}`
+        }
+      })
+    );
+  }
+}
+
 function sanitizeProxyHeaders(source) {
   const headers = {};
   for (const [key, value] of Object.entries(source)) {
@@ -194,6 +257,59 @@ function normalizeApiBase(value) {
   if (/\/api\/chem$/iu.test(trimmed)) return trimmed;
   if (/\/api$/iu.test(trimmed)) return `${trimmed}/chem`;
   return `${trimmed}/api/chem`;
+}
+
+function normalizeOrigin(value) {
+  return String(value || DEFAULT_USER_ORIGIN).trim().replace(/\/+$/u, '');
+}
+
+function desktopUserCookieHeader() {
+  return Array.from(userCookieJar.entries())
+    .map(([name, value]) => `${name}=${value}`)
+    .join('; ');
+}
+
+function readSetCookieHeaders(headers) {
+  if (typeof headers.getSetCookie === 'function') {
+    return headers.getSetCookie();
+  }
+
+  const combined = headers.get('set-cookie');
+  if (!combined) return [];
+  return splitCombinedSetCookie(combined);
+}
+
+function splitCombinedSetCookie(value) {
+  const cookies = [];
+  let start = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    if (value[index] !== ',') continue;
+    const next = value.slice(index + 1).trimStart();
+    if (/^[^=;,\s]+=/.test(next)) {
+      cookies.push(value.slice(start, index).trim());
+      start = index + 1;
+    }
+  }
+  cookies.push(value.slice(start).trim());
+  return cookies.filter(Boolean);
+}
+
+function rememberSetCookies(cookies) {
+  for (const cookie of cookies) {
+    const [pair, ...attributes] = cookie.split(';').map((part) => part.trim());
+    const equalsIndex = pair.indexOf('=');
+    if (equalsIndex <= 0) continue;
+
+    const name = pair.slice(0, equalsIndex);
+    const value = pair.slice(equalsIndex + 1);
+    const expired = attributes.some((attribute) => /^max-age=0$/iu.test(attribute) || /^expires=/iu.test(attribute) && /1970|1969|Thu, 01 Jan/iu.test(attribute));
+
+    if (expired || value === '') {
+      userCookieJar.delete(name);
+    } else {
+      userCookieJar.set(name, value);
+    }
+  }
 }
 
 function readRequestBody(request) {

@@ -12,6 +12,7 @@ Do not commit real keys, tokens, private keys, certificates or production `.env`
 | `QUANTUM_API_TOKEN` | Optional | Bearer token for the professional quantum engine. Never expose it to the browser. |
 | `CHEMVAULT_QUANTUM_API_TOKEN` | Optional | Alternate name for `QUANTUM_API_TOKEN`. |
 | `CHEMVAULT_MODEL_API_URL` | Optional | Desktop EXE API proxy base URL. Defaults to `https://model.chemvault.science/api/chem`. |
+| `CHEMVAULT_USER_ORIGIN` | Optional | Desktop EXE ChemVault User proxy origin. Defaults to `https://user.chemvault.science`. |
 | `NEXT_PUBLIC_CHEMVAULT_USER_ORIGIN` | Optional | ChemVault User origin used by sign-in UI. Defaults to `https://user.chemvault.science`. |
 | `NEXT_PUBLIC_CHEMVAULT_MODEL_ORIGIN` | Optional | Public Molecule Studio origin used as the return target for ChemVault User OAuth/register redirects. Defaults to `https://model.chemvault.science`. |
 | `API_BASE_URL` | Optional | Future native app API base URL override if build settings are added. |

@@ -3,6 +3,7 @@
 import { createContext, ReactNode, useContext, useEffect, useMemo, useState } from 'react';
 
 const USER_ORIGIN = process.env.NEXT_PUBLIC_CHEMVAULT_USER_ORIGIN || 'https://user.chemvault.science';
+const DESKTOP_USER_API_PREFIX = '/desktop-user-api';
 
 export type AuthUser = {
   id: string;
@@ -117,11 +118,17 @@ async function userRequest<T>(path: string, init: RequestInit = {}): Promise<T> 
   const headers = new Headers(init.headers);
   if (init.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
 
-  const response = await fetch(`${USER_ORIGIN}${path}`, {
-    ...init,
-    headers,
-    credentials: 'include'
-  });
+  let response: Response;
+  try {
+    response = await fetch(userApiUrl(path), {
+      ...init,
+      headers,
+      credentials: 'include'
+    });
+  } catch (error) {
+    throw new Error(isDesktopRuntime() ? 'Desktop app could not reach ChemVault User. Check your network connection and try again.' : error instanceof Error ? error.message : 'ChemVault User request failed.');
+  }
+
   const body = (await response.json().catch(() => null)) as ApiErrorPayload | T | null;
 
   if (!response.ok) {
@@ -130,4 +137,14 @@ async function userRequest<T>(path: string, init: RequestInit = {}): Promise<T> 
   }
 
   return body as T;
+}
+
+export function userApiUrl(path: string) {
+  const safePath = path.startsWith('/') ? path : `/${path}`;
+  if (isDesktopRuntime()) return `${DESKTOP_USER_API_PREFIX}${safePath}`;
+  return `${USER_ORIGIN}${safePath}`;
+}
+
+function isDesktopRuntime() {
+  return typeof window !== 'undefined' && Boolean(window.chemVaultDesktop?.isDesktop);
 }

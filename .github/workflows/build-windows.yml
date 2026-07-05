@@ -1,4 +1,4 @@
-name: Build Windows EXE
+name: Build Windows Installer
 
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
       - name: Build web app
         run: npm run build
 
-      - name: Build Windows desktop app
+      - name: Build Windows installer
         run: npm run build:desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

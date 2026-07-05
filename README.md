@@ -1,6 +1,6 @@
 # ChemVault Molecule Studio
 
-## Windows Desktop EXE
+## Windows Desktop Installer
 
 ChemVault Model can also be packaged as a Windows desktop application with Electron.
 The desktop app keeps the existing Next.js web interface and serves the exported
@@ -34,17 +34,18 @@ This command builds the static web app, starts Electron, opens the desktop
 window at `/molecule/`, and proxies `/api/chem/*` requests to the configured
 model API.
 
-### Build Windows EXE
+### Build Windows Installer
 
 ```bash
 npm run build
 npm run build:desktop
 ```
 
-The Windows portable executable is written to:
+The Windows installer and portable executable are written to:
 
 ```text
-release/
+release/ChemVault-Model-Setup-0.1.0-win-x64.exe
+release/ChemVault-Model-Portable-0.1.0-win-x64.exe
 ```
 
 The desktop API proxy defaults to:
@@ -70,10 +71,41 @@ npm run build:desktop
 Windows EXE builds should be run on Windows. Non-Windows machines should use
 the included GitHub Actions workflow or run the build on a Windows computer.
 
+### Desktop Quantum Engine
+
+The website keeps the browser-side fast electrostatic estimate. The Windows
+desktop app can run a professional local quantum engine through xTB GFN2-xTB
+when xTB is available on the machine.
+
+The desktop app checks for xTB in this order:
+
+```text
+CHEMVAULT_XTB_PATH
+Bundled installer resource: desktop/quantum/xtb/
+System PATH
+```
+
+To ship xTB inside the installer, place the complete Windows xTB runtime under:
+
+```text
+desktop/quantum/xtb/
+```
+
+Then run:
+
+```bash
+npm run build:desktop
+```
+
+The professional calculation panel appears in the desktop app and reports
+GFN2-xTB total energy, partial charges, and molecular dipole moment for loaded
+3D structures. If xTB is not installed or bundled, the app shows the missing
+engine status instead of pretending to run a professional calculation.
+
 ### GitHub Actions
 
-`.github/workflows/build-windows.yml` builds the web app and Windows EXE on
-`windows-latest`, then uploads the executable artifacts as:
+`.github/workflows/build-windows.yml` builds the web app, Windows installer,
+and portable EXE on `windows-latest`, then uploads the executable artifacts as:
 
 ```text
 ChemVault-Model-Windows

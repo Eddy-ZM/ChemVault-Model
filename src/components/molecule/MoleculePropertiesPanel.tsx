@@ -1,8 +1,9 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ElectrostaticAnalysis } from '@/lib/chem/electrostaticAnalysis';
-import { analyzeElectrostatics } from '@/lib/chem/electrostaticAnalysis';
+import { analyzeElectrostatics, structureToXyz } from '@/lib/chem/electrostaticAnalysis';
+import type { QuantumCalculationResult, QuantumEngineStatus } from '@/lib/chem/quantumTypes';
 import { MoleculeProperties } from '@/lib/chem/types';
 import { formatValue } from '@/lib/chem/moleculeUtils';
 
@@ -52,6 +53,15 @@ export function MoleculePropertiesPanel({ metadata, properties, loading, onCopy 
     () => analyzeElectrostatics(metadata?.structureData, metadata?.structureFormat),
     [metadata?.structureData, metadata?.structureFormat]
   );
+  const quantumInput = useMemo(
+    () => structureToXyz(metadata?.structureData, metadata?.structureFormat),
+    [metadata?.structureData, metadata?.structureFormat]
+  );
+  const [desktopQuantum, setDesktopQuantum] = useState(false);
+
+  useEffect(() => {
+    setDesktopQuantum(Boolean(window.chemVaultDesktop?.isDesktop && window.chemVaultDesktop.runQuantumCalculation));
+  }, []);
 
   return (
     <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
@@ -91,7 +101,7 @@ export function MoleculePropertiesPanel({ metadata, properties, loading, onCopy 
         ))}
       </div>
 
-      <ElectrostaticPanel analysis={electrostatics} />
+      {desktopQuantum ? <ProfessionalQuantumPanel xyz={quantumInput} /> : <ElectrostaticPanel analysis={electrostatics} />}
     </section>
   );
 }
@@ -121,6 +131,201 @@ function Identifier({ label, value, onCopy }: { label: string; value: string; on
         </button>
       </div>
       <p className="mt-2 break-all rounded-2xl bg-white p-3 font-mono text-xs leading-5 text-slate-700">{value}</p>
+    </div>
+  );
+}
+
+function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
+  const [status, setStatus] = useState<QuantumEngineStatus | null>(null);
+  const [statusLoading, setStatusLoading] = useState(true);
+  const [running, setRunning] = useState(false);
+  const [charge, setCharge] = useState(0);
+  const [unpairedElectrons, setUnpairedElectrons] = useState(0);
+  const [result, setResult] = useState<QuantumCalculationResult | null>(null);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    const api = window.chemVaultDesktop;
+    if (!api?.getQuantumEngineStatus) {
+      setStatusLoading(false);
+      return;
+    }
+
+    setStatusLoading(true);
+    api.getQuantumEngineStatus()
+      .then((nextStatus) => {
+        if (!cancelled) setStatus(nextStatus);
+      })
+      .catch((statusError) => {
+        if (!cancelled) {
+          setStatus({
+            available: false,
+            engine: 'xTB',
+            method: 'GFN2-xTB',
+            message: statusError instanceof Error ? statusError.message : 'Could not inspect the quantum engine.'
+          });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setStatusLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    setResult(null);
+    setError('');
+  }, [xyz]);
+
+  const canRun = Boolean(xyz && status?.available && !running);
+
+  async function runCalculation() {
+    const api = window.chemVaultDesktop;
+    if (!api?.runQuantumCalculation || !xyz) return;
+
+    setRunning(true);
+    setError('');
+    try {
+      const nextResult = await api.runQuantumCalculation({
+        xyz,
+        charge,
+        unpairedElectrons,
+        method: 'gfn2',
+        timeoutMs: 180000
+      });
+      setResult(nextResult);
+      if (!nextResult.ok) {
+        setError(nextResult.error || 'Quantum calculation did not complete.');
+      }
+    } catch (runError) {
+      setError(runError instanceof Error ? runError.message : 'Quantum calculation failed.');
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  const strongestCharges = result?.charges
+    ? [...result.charges].sort((first, second) => Math.abs(second.charge) - Math.abs(first.charge)).slice(0, 8)
+    : [];
+
+  return (
+    <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h3 className="text-lg font-bold text-slate-950">Professional Quantum Calculation</h3>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Desktop GFN2-xTB calculation for total energy, partial charges, and molecular dipole moment.
+          </p>
+        </div>
+        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+          GFN2-xTB
+        </span>
+      </div>
+
+      <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${status?.available ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
+        {statusLoading ? 'Checking local quantum engine...' : status?.available ? `Engine ready${status.version ? `: ${status.version}` : ''}` : status?.message || 'xTB engine is not available.'}
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <span className="block text-xs font-medium text-slate-500">Total charge</span>
+          <input
+            type="number"
+            value={charge}
+            min={-20}
+            max={20}
+            step={1}
+            onChange={(event) => setCharge(Number(event.target.value))}
+            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-400"
+          />
+        </label>
+        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <span className="block text-xs font-medium text-slate-500">Unpaired electrons</span>
+          <input
+            type="number"
+            value={unpairedElectrons}
+            min={0}
+            max={20}
+            step={1}
+            onChange={(event) => setUnpairedElectrons(Number(event.target.value))}
+            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-400"
+          />
+        </label>
+        <button
+          type="button"
+          onClick={runCalculation}
+          disabled={!canRun}
+          className="self-end rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {running ? 'Calculating...' : 'Run Calculation'}
+        </button>
+      </div>
+
+      {!xyz ? (
+        <p className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+          Load a 3D SDF, MOL, XYZ, or PDB structure before running the desktop quantum engine.
+        </p>
+      ) : null}
+
+      {error ? (
+        <p className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-800">{error}</p>
+      ) : null}
+
+      {result ? (
+        <div className="mt-4 space-y-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Metric label="Total energy" value={result.energyHartree === null ? 'N/A' : `${formatNumber(result.energyHartree)} Eh`} />
+            <Metric label="Dipole magnitude" value={result.dipoleDebye ? `${formatNumber(result.dipoleDebye.total)} D` : 'N/A'} />
+            <Metric label="Partial charges" value={String(result.charges.length)} />
+            <Metric label="Elapsed time" value={`${(result.elapsedMs / 1000).toFixed(1)} s`} />
+          </div>
+
+          {result.dipoleDebye ? (
+            <VectorCard
+              title="Dipole vector"
+              subtitle="Debye components returned by the xTB calculation."
+              vector={result.dipoleDebye}
+              unit="D"
+            />
+          ) : null}
+
+          {strongestCharges.length > 0 ? (
+            <div className="overflow-hidden rounded-2xl border border-slate-200">
+              <div className="grid grid-cols-[72px_72px_minmax(100px,1fr)] bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                <span>Atom</span>
+                <span>Elem</span>
+                <span>xTB charge</span>
+              </div>
+              {strongestCharges.map((atom) => (
+                <div key={atom.index} className="grid grid-cols-[72px_72px_minmax(100px,1fr)] border-t border-slate-100 px-3 py-2 text-sm text-slate-700">
+                  <span className="font-mono text-xs">{atom.index}</span>
+                  <span className="font-semibold text-slate-950">{atom.element}</span>
+                  <span className={`font-mono text-xs ${atom.charge >= 0 ? 'text-rose-700' : 'text-sky-700'}`}>{formatSigned(atom.charge)} e</span>
+                </div>
+              ))}
+            </div>
+          ) : null}
+
+          {result.warnings.length > 0 ? (
+            <div className="rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+              {result.warnings.map((warning) => (
+                <p key={warning} className="text-xs leading-5 text-amber-800">{warning}</p>
+              ))}
+            </div>
+          ) : null}
+
+          {result.outputTail ? (
+            <details className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+              <summary className="cursor-pointer text-sm font-semibold text-slate-800">Calculation log</summary>
+              <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-3 text-xs leading-5 text-slate-700">{result.outputTail}</pre>
+            </details>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 }

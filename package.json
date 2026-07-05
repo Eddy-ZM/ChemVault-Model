@@ -56,11 +56,26 @@
       "public/favicon.ico",
       "package.json"
     ],
+    "extraResources": [
+      {
+        "from": "desktop/quantum",
+        "to": "quantum",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
     "asar": true,
     "win": {
       "icon": "public/favicon.ico",
       "signAndEditExecutable": false,
       "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
         {
           "target": "portable",
           "arch": [
@@ -68,6 +83,18 @@
           ]
         }
       ]
+    },
+    "nsis": {
+      "artifactName": "ChemVault-Model-Setup-${version}-${os}-${arch}.${ext}",
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ChemVault Model"
+    },
+    "portable": {
+      "artifactName": "ChemVault-Model-Portable-${version}-${os}-${arch}.${ext}"
     },
     "artifactName": "ChemVault-Model-${version}-${os}-${arch}.${ext}"
   }

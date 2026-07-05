@@ -751,8 +751,8 @@ export function MoleculeStudio() {
 
       {detailsOpen ? (
         <div className="fixed inset-0 z-40 flex items-center justify-center bg-slate-950/45 p-4" role="dialog" aria-modal="true">
-          <div className="max-h-[90vh] w-full max-w-5xl overflow-auto rounded-2xl border border-slate-200 bg-white p-4 shadow-2xl">
-            <div className="mb-4 flex items-center justify-between gap-4 border-b border-slate-200 pb-3">
+          <div className="flex max-h-[90vh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="sticky top-0 z-10 flex shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white px-4 py-3">
               <div>
                 <h2 className="text-lg font-bold text-slate-950">Structure Details</h2>
                 <p className="mt-1 text-xs text-slate-500">Identifiers, properties, and copied notations for the current structure.</p>
@@ -760,17 +760,19 @@ export function MoleculeStudio() {
               <button
                 type="button"
                 onClick={() => setDetailsOpen(false)}
-                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+                className="shrink-0 rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
               >
                 Close
               </button>
             </div>
-            <MoleculePropertiesPanel
-              metadata={currentMolecule}
-              properties={properties}
-              loading={loadingProperties}
-              onCopy={(value) => navigator.clipboard?.writeText(value).catch(() => {})}
-            />
+            <div className="min-h-0 overflow-y-auto p-4">
+              <MoleculePropertiesPanel
+                metadata={currentMolecule}
+                properties={properties}
+                loading={loadingProperties}
+                onCopy={(value) => navigator.clipboard?.writeText(value).catch(() => {})}
+              />
+            </div>
           </div>
         </div>
       ) : null}

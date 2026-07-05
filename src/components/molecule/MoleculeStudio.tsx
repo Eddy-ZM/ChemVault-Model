@@ -1,5 +1,6 @@
 'use client';
 
+import Image from 'next/image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MoleculeGenerationResponse, MoleculeProperties, PdbRecord } from '@/lib/chem/types';
 import { downloadText, fileNameForFormat, safeFileBaseName } from '@/lib/chem/fileExport';
@@ -618,7 +619,15 @@ export function MoleculeStudio() {
         <div className="mx-auto flex max-w-[1800px] flex-col gap-3 px-3 py-3 md:flex-row md:items-center md:justify-between md:px-4">
           <div className="flex items-center gap-3">
             <a href="/" className="flex items-center gap-2 text-base font-bold tracking-tight text-slate-950">
-              <img src="/brand/chemvault-logo.png" alt="ChemVault logo" className="h-8 w-8 rounded-md object-contain" />
+              <Image
+                src="/brand/chemvault-logo.png"
+                alt="ChemVault logo"
+                width={32}
+                height={32}
+                priority
+                unoptimized
+                className="h-8 w-8 rounded-md object-contain"
+              />
               <span>ChemVault</span>
             </a>
             <span className="h-5 w-px bg-slate-200" />

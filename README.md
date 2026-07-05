@@ -1,5 +1,89 @@
 # ChemVault Molecule Studio
 
+## Windows Desktop EXE
+
+ChemVault Model can also be packaged as a Windows desktop application with Electron.
+The desktop app keeps the existing Next.js web interface and serves the exported
+`out/` files from an internal local server. The app title is `ChemVault Model`.
+
+### Install
+
+```bash
+npm install
+```
+
+### Run The Web Version
+
+```bash
+npm run dev
+```
+
+For the Cloudflare Pages preview flow:
+
+```bash
+npm run preview
+```
+
+### Run The Desktop Version Locally
+
+```bash
+npm run dev:desktop
+```
+
+This command builds the static web app, starts Electron, opens the desktop
+window at `/molecule/`, and proxies `/api/chem/*` requests to the configured
+model API.
+
+### Build Windows EXE
+
+```bash
+npm run build
+npm run build:desktop
+```
+
+The Windows portable executable is written to:
+
+```text
+release/
+```
+
+The desktop API proxy defaults to:
+
+```text
+https://model.chemvault.science/api/chem
+```
+
+Override it when needed:
+
+```powershell
+$env:CHEMVAULT_MODEL_API_URL="https://model.chemvault.science/api/chem"
+npm run build:desktop
+```
+
+Windows EXE builds should be run on Windows. Non-Windows machines should use
+the included GitHub Actions workflow or run the build on a Windows computer.
+
+### GitHub Actions
+
+`.github/workflows/build-windows.yml` builds the web app and Windows EXE on
+`windows-latest`, then uploads the executable artifacts as:
+
+```text
+ChemVault-Model-Windows
+```
+
+### Desktop Notes
+
+- Electron is used because this repository is a Next.js static export and the
+  current Windows setup already uses Node/npm; Tauri would require an additional
+  Rust toolchain.
+- 3Dmol is copied from the npm package into `public/vendor/3Dmol-min.js` before
+  web or desktop builds, then exported into `out/vendor/`.
+- The existing browser file input, canvas drawing, WebGL viewer, navigation,
+  styling, and Cloudflare deployment flow are preserved.
+- Windows code signing and NSIS installer signing are not configured. Add a
+  signing certificate later if a signed installer is required.
+
 ChemVault Molecule Studio 是 ChemVault 的分子结构查看、建模输入和三维可视化工具。当前包含网站端 Molecule Studio，以及面向 iOS、iPadOS 和 macOS 的 Apple App。
 
 本文档仅说明网站和 App 的正式功能范围，不包含实现原理、代码结构、部署流程或开发配置。

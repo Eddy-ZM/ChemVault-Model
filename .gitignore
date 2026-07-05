@@ -28,5 +28,8 @@ AuthKey_*.p8
 node_modules/
 dist/
 build/
+release/
+dist_electron/
+public/vendor/3Dmol-min.js
 .wrangler/
 .DS_Store

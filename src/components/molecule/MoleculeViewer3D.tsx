@@ -23,6 +23,8 @@ type ThreeDMolViewer = {
 };
 type ThreeDMolApi = { createViewer: (element: HTMLElement, options: { defaultcolors: unknown }) => ThreeDMolViewer; rasmolElementColors: unknown; SurfaceType: SurfaceType };
 
+const THREE_DMOL_SOURCES = ['/vendor/3Dmol-min.js', 'https://unpkg.com/3dmol@2.5.5/build/3Dmol-min.js'];
+
 export type MoleculeViewerHandle = {
   loadModel: (modelData: string | null, format?: StructureFormat) => Promise<void>;
   exportPng: () => string | null;
@@ -71,18 +73,29 @@ function load3dmolScript(): Promise<void> {
       return;
     }
 
-    const script = document.createElement('script');
-    script.id = 'threedmol-script';
-    script.src = 'https://unpkg.com/3dmol@2.0.4/build/3Dmol-min.js';
-    script.async = true;
-    script.onload = () => {
-      script.dataset.loaded = '1';
-      resolve();
+    const loadSource = (sourceIndex: number) => {
+      const source = THREE_DMOL_SOURCES[sourceIndex];
+      if (!source) {
+        reject(new Error('Failed to load 3Dmol script.'));
+        return;
+      }
+
+      const script = document.createElement('script');
+      script.id = 'threedmol-script';
+      script.src = source;
+      script.async = true;
+      script.onload = () => {
+        script.dataset.loaded = '1';
+        resolve();
+      };
+      script.onerror = () => {
+        script.remove();
+        loadSource(sourceIndex + 1);
+      };
+      document.head.appendChild(script);
     };
-    script.onerror = () => {
-      reject(new Error('Failed to load 3Dmol script.'));
-    };
-    document.head.appendChild(script);
+
+    loadSource(0);
   });
 }
 

@@ -1,18 +1,27 @@
 {
   "name": "chemvault-molecule-studio",
   "private": true,
+  "description": "ChemVault Model molecular visualization and desktop app package.",
+  "author": "ChemVault",
   "license": "UNLICENSED",
   "version": "0.1.0",
   "type": "module",
+  "main": "desktop/main.cjs",
   "scripts": {
+    "predev": "node scripts/copy-vendor-assets.cjs",
     "dev": "next dev",
+    "dev:desktop": "npm run build && node scripts/ensure-electron-binary.cjs && electron .",
+    "prebuild": "node scripts/copy-vendor-assets.cjs",
     "build": "next build",
+    "build:desktop": "npm run build && node scripts/ensure-electron-binary.cjs && electron-builder --win --x64",
+    "dist:win": "npm run build:desktop",
     "start": "next start",
     "preview": "npm run build && npx --yes wrangler@4 pages dev out --compatibility-date=2026-06-23 --port 8788",
     "deploy": "npm run build && npx --yes wrangler@4 pages deploy out",
     "lint": "next lint"
   },
   "dependencies": {
+    "3dmol": "^2.5.5",
     "next": "^14.2.35",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
@@ -22,6 +31,8 @@
     "@types/react": "^18.3.18",
     "@types/react-dom": "^18.3.0",
     "autoprefixer": "^10.4.20",
+    "electron": "^43.0.0",
+    "electron-builder": "^26.15.3",
     "eslint": "^8.57.0",
     "eslint-config-next": "^14.2.5",
     "postcss": "^8.5.3",
@@ -30,5 +41,34 @@
   },
   "optionalDependencies": {
     "@next/swc-darwin-arm64": "^14.2.33"
+  },
+  "build": {
+    "appId": "science.chemvault.model",
+    "productName": "ChemVault Model",
+    "directories": {
+      "output": "release"
+    },
+    "electronVersion": "43.0.0",
+    "electronDist": "node_modules/electron/dist",
+    "files": [
+      "desktop/**/*",
+      "out/**/*",
+      "public/favicon.ico",
+      "package.json"
+    ],
+    "asar": true,
+    "win": {
+      "icon": "public/favicon.ico",
+      "signAndEditExecutable": false,
+      "target": [
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "artifactName": "ChemVault-Model-${version}-${os}-${arch}.${ext}"
   }
 }

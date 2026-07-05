@@ -82,6 +82,8 @@ export function MoleculeStudio() {
   const [showAtomLabels, setShowAtomLabels] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [pdbMeta, setPdbMeta] = useState<{ pdbId?: string; title?: string | null; resolution?: number | null; experimentalMethod?: string | null } | undefined>(undefined);
+  const allowCartoonRepresentation = activeMode === 'pdb' || structure.format === 'pdb' || structure.format === 'cif';
+  const effectiveRepresentation = allowCartoonRepresentation || representation !== 'cartoon' ? representation : 'ball-and-stick';
 
   const toast = useCallback((text: string, level: Toast['level'] = 'info') => {
     const id = Date.now() + Math.random();
@@ -524,7 +526,7 @@ export function MoleculeStudio() {
 
   useEffect(() => {
     viewerRef.current?.setStyleConfig({
-      representation,
+      representation: effectiveRepresentation,
       backgroundColor: background,
       showHydrogens,
       showAtomLabels
@@ -532,7 +534,13 @@ export function MoleculeStudio() {
     if (structure.data) {
       viewerRef.current?.loadModel(structure.data, structure.format);
     }
-  }, [background, representation, showAtomLabels, showHydrogens, structure.data, structure.format]);
+  }, [background, effectiveRepresentation, showAtomLabels, showHydrogens, structure.data, structure.format]);
+
+  useEffect(() => {
+    if (!allowCartoonRepresentation && representation === 'cartoon') {
+      setRepresentation('ball-and-stick');
+    }
+  }, [allowCartoonRepresentation, representation]);
 
   useEffect(() => {
     if (!initialPropertiesLoaded.current && smiles && !loadingProperties) {
@@ -662,7 +670,7 @@ export function MoleculeStudio() {
               loading={loading3D || loadingSearch || loadingPdb || loadingUpload}
               hasStructure={Boolean(structure.data)}
               sourceLabel={sourceLabel}
-              initialRepresentation={representation}
+              initialRepresentation={effectiveRepresentation}
               onReady={() => {
                 if (structure.data) {
                   viewerRef.current?.loadModel(structure.data, structure.format);
@@ -674,6 +682,7 @@ export function MoleculeStudio() {
                 background={background}
                 showHydrogens={showHydrogens}
                 showAtomLabels={showAtomLabels}
+                allowCartoonRepresentation={allowCartoonRepresentation}
                 loadingExport={loadingExport}
                 onRepresentationChange={setRepresentation}
                 onBackgroundChange={setBackground}

@@ -23,6 +23,7 @@ type Props = {
   background: string;
   showHydrogens: boolean;
   showAtomLabels: boolean;
+  allowCartoonRepresentation?: boolean;
   loadingExport?: boolean;
   onRepresentationChange: (value: Representation) => void;
   onBackgroundChange: (value: string) => void;
@@ -37,6 +38,7 @@ export function DisplayControls({
   background,
   showHydrogens,
   showAtomLabels,
+  allowCartoonRepresentation = true,
   loadingExport,
   onRepresentationChange,
   onBackgroundChange,
@@ -45,17 +47,22 @@ export function DisplayControls({
   onResetView,
   onExportPng
 }: Props) {
+  const representationOptions = allowCartoonRepresentation
+    ? REPRESENTATIONS
+    : REPRESENTATIONS.filter((entry) => entry.value !== 'cartoon');
+  const selectedRepresentation = allowCartoonRepresentation || representation !== 'cartoon' ? representation : 'ball-and-stick';
+
   return (
     <section aria-label="Display Controls" className="w-full rounded-lg border border-slate-200 bg-white/95 p-2 lg:max-w-[620px]">
       <div className="flex flex-wrap items-end justify-start gap-2 lg:justify-end">
         <label className="min-w-[150px] flex-1 space-y-1 text-xs font-medium text-slate-700 lg:flex-none">
           <span>Mode</span>
           <select
-            value={representation}
+            value={selectedRepresentation}
             onChange={(event) => onRepresentationChange(event.target.value as Representation)}
             className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
           >
-            {REPRESENTATIONS.map((entry) => (
+            {representationOptions.map((entry) => (
               <option key={entry.value} value={entry.value}>{entry.label}</option>
             ))}
           </select>

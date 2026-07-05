@@ -280,7 +280,7 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
           </div>
         ) : null}
       </div>
-      <div className="text-xs text-slate-500">Render powered by 3Dmol.js</div>
+      <div className="text-xs text-slate-500">High-fidelity molecular visualization engine</div>
       {children}
     </div>
   );

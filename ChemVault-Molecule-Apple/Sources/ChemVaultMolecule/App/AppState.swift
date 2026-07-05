@@ -6,6 +6,7 @@ import Observation
 final class AppState {
     var config: AppConfig
     var moleculeClient: MoleculeAPIClient
+    var quantumService: QuantumCalculationService
     var authService: AuthService
     var permissionsService: PermissionsService
     var libraryStore: LibraryStore
@@ -21,6 +22,7 @@ final class AppState {
     init(config: AppConfig = .production) {
         self.config = config
         self.moleculeClient = MoleculeAPIClient(baseURL: config.moleculeAPIBaseURL)
+        self.quantumService = QuantumCalculationService(baseURL: config.moleculeAPIBaseURL)
         self.authService = AuthService(config: config)
         self.permissionsService = PermissionsService(config: config)
         self.libraryStore = LibraryStore()

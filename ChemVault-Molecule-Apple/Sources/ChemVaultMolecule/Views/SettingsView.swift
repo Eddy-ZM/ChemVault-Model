@@ -13,6 +13,7 @@ struct SettingsView: View {
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 260), spacing: 12)], spacing: 12) {
                     MetricTile(title: "User API", value: appState.config.userAPIBaseURL.absoluteString)
                     MetricTile(title: "Molecule API", value: appState.config.moleculeAPIBaseURL.absoluteString)
+                    MetricTile(title: "Quantum API", value: appState.config.moleculeAPIBaseURL.appending(path: "quantum/calculate").absoluteString)
                     MetricTile(title: "Remote Config", value: appState.config.remoteConfigURL.absoluteString)
                 }
             }

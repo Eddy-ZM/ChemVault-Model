@@ -2,6 +2,10 @@ export type CloudflareChemEnv = {
   MOLECULE_API_URL?: string;
   NEXT_PUBLIC_MOLECULE_API_URL?: string;
   VITE_MOLECULE_API_URL?: string;
+  QUANTUM_API_URL?: string;
+  CHEMVAULT_QUANTUM_API_URL?: string;
+  QUANTUM_API_TOKEN?: string;
+  CHEMVAULT_QUANTUM_API_TOKEN?: string;
 };
 
 export type CloudflarePagesContext<Params extends Record<string, string | string[] | undefined> = Record<string, string | string[] | undefined>> = {
@@ -40,4 +44,12 @@ export function readStringParam(value: string | string[] | undefined) {
 
 export function moleculeBackendUrl(env: CloudflareChemEnv) {
   return env.MOLECULE_API_URL || env.NEXT_PUBLIC_MOLECULE_API_URL || env.VITE_MOLECULE_API_URL || '';
+}
+
+export function quantumBackendUrl(env: CloudflareChemEnv) {
+  return env.QUANTUM_API_URL || env.CHEMVAULT_QUANTUM_API_URL || '';
+}
+
+export function quantumBackendToken(env: CloudflareChemEnv) {
+  return env.QUANTUM_API_TOKEN || env.CHEMVAULT_QUANTUM_API_TOKEN || '';
 }

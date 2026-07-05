@@ -129,9 +129,9 @@ function ElectrostaticPanel({ analysis }: { analysis: ElectrostaticAnalysis | nu
   if (!analysis) {
     return (
       <div className="mt-5 rounded-3xl border border-dashed border-slate-300 bg-white px-4 py-5">
-        <p className="text-sm font-semibold text-slate-950">Electrostatic Approximation</p>
+        <p className="text-sm font-semibold text-slate-950">Fast Electrostatic Estimate</p>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          Load a 3D SDF, MOL, XYZ, or PDB structure to estimate partial charges and molecular charge vectors.
+          Load a 3D SDF, MOL, XYZ, or PDB structure to estimate partial charges and molecular charge vectors in the browser.
         </p>
       </div>
     );
@@ -145,9 +145,9 @@ function ElectrostaticPanel({ analysis }: { analysis: ElectrostaticAnalysis | nu
     <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-lg font-bold text-slate-950">Electrostatic Approximation</h3>
+          <h3 className="text-lg font-bold text-slate-950">Fast Electrostatic Estimate</h3>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Fast coordinate-based estimate for partial charges, dipole vector, and charge separation.
+            Browser-side estimate for partial charges, dipole vector, and charge separation.
           </p>
         </div>
         <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800">

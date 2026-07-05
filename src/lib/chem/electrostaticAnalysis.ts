@@ -122,10 +122,10 @@ export function analyzeElectrostatics(structureData: string | null | undefined, 
   const dipoleDebye = scaleVector(dipoleVector, DEBYE_PER_E_ANGSTROM);
   const centers = chargeCenters(atoms);
 
-  warnings.push('Approximate electrostatic model. Not a substitute for ab initio, DFT, or force-field charge assignment.');
+  warnings.push('Fast website estimate only. Not a substitute for ab initio, DFT, xTB, or force-field charge assignment.');
 
   return {
-    method: 'Electronegativity-weighted bond polarization',
+    method: 'Fast electronegativity estimate',
     atoms,
     bonds,
     centroid,

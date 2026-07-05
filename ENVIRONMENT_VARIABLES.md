@@ -7,6 +7,10 @@ Do not commit real keys, tokens, private keys, certificates or production `.env`
 | `APP_ENV` | Optional | Build/runtime environment name such as `development`, `staging` or `production`. |
 | `MOLECULE_API_URL` | Optional | Optional RDKit/FastAPI backend base URL for molecule services. |
 | `NEXT_PUBLIC_MOLECULE_API_URL` | Optional | Public molecule API URL for hosted web deployments in this repository. |
+| `QUANTUM_API_URL` | Optional | Professional quantum engine base URL. The `/api/chem/quantum/calculate` route forwards native app jobs to this service. |
+| `CHEMVAULT_QUANTUM_API_URL` | Optional | Alternate name for `QUANTUM_API_URL`. |
+| `QUANTUM_API_TOKEN` | Optional | Bearer token for the professional quantum engine. Never expose it to the browser. |
+| `CHEMVAULT_QUANTUM_API_TOKEN` | Optional | Alternate name for `QUANTUM_API_TOKEN`. |
 | `NEXT_PUBLIC_CHEMVAULT_USER_ORIGIN` | Optional | ChemVault User origin used by sign-in UI. Defaults to `https://user.chemvault.science`. |
 | `NEXT_PUBLIC_CHEMVAULT_MODEL_ORIGIN` | Optional | Public Molecule Studio origin used as the return target for ChemVault User OAuth/register redirects. Defaults to `https://model.chemvault.science`. |
 | `API_BASE_URL` | Optional | Future native app API base URL override if build settings are added. |

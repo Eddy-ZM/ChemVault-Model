@@ -63,12 +63,11 @@ type Props = {
   onUndo: () => void;
   onRedo: () => void;
   onClear: () => void;
-  onExportSmiles: () => void;
   loading?: boolean;
   error?: string | null;
 };
 
-export function DrawMode({ value, onValueChange, onGenerate3D, onClear, onExportSmiles, loading, error }: Props) {
+export function DrawMode({ value, onValueChange, onGenerate3D, onClear, loading, error }: Props) {
   const svgRef = useRef<SVGSVGElement>(null);
   const history = useRef<SketchState[]>([{ atoms: [], bonds: [] }]);
   const redoHistory = useRef<SketchState[]>([]);
@@ -638,15 +637,6 @@ export function DrawMode({ value, onValueChange, onGenerate3D, onClear, onExport
     }
   };
 
-  const downloadMolfile = () => {
-    if (atoms.length === 0) {
-      setSketchMessage('Draw a molecule before exporting a MOL file.');
-      return;
-    }
-    downloadText('chemvault-sketch.mol', buildMolfile(atoms, bonds), 'chemical/x-mdl-molfile');
-    setSketchMessage('MOL file exported.');
-  };
-
   const handleGenerate = async () => {
     if (!effectiveSmiles.trim()) {
       setSketchMessage('Draw a molecule first.');
@@ -814,16 +804,8 @@ export function DrawMode({ value, onValueChange, onGenerate3D, onClear, onExport
             >
               {loading ? 'Generating...' : 'Generate 3D Model'}
             </button>
-            <div className="grid grid-cols-2 gap-2">
-              <button type="button" onClick={copySmiles} disabled={!effectiveSmiles.trim()} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
-                Copy SMILES
-              </button>
-              <button type="button" onClick={downloadMolfile} disabled={atoms.length === 0} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
-                Download MOL
-              </button>
-            </div>
-            <button type="button" onClick={onExportSmiles} disabled={!effectiveSmiles.trim()} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
-              Send to Export Panel
+            <button type="button" onClick={copySmiles} disabled={!effectiveSmiles.trim()} className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+              Copy SMILES
             </button>
           </div>
 
@@ -1161,31 +1143,4 @@ function bondSymbol(order: BondOrder) {
 
 function formatAtomLabel(element: string) {
   return element.length === 1 ? element.toUpperCase() : element.charAt(0).toUpperCase() + element.slice(1);
-}
-
-function buildMolfile(atoms: AtomNode[], bonds: BondEdge[]) {
-  const counts = `${atoms.length.toString().padStart(3, ' ')}${bonds.length.toString().padStart(3, ' ')}  0  0  0  0            999 V2000`;
-  const atomLines = atoms.map((atom) => {
-    const x = ((atom.x - VIEWBOX_WIDTH / 2) / 40).toFixed(4).padStart(10, ' ');
-    const y = ((VIEWBOX_HEIGHT / 2 - atom.y) / 40).toFixed(4).padStart(10, ' ');
-    const symbol = formatAtomLabel(atom.element).padEnd(3, ' ');
-    return `${x}${y}    0.0000 ${symbol} 0  0  0  0  0  0  0  0  0  0  0  0`;
-  });
-  const bondLines = bonds.map((bond) => {
-    const from = atoms.findIndex((atom) => atom.id === bond.from) + 1;
-    const to = atoms.findIndex((atom) => atom.id === bond.to) + 1;
-    const order = bond.order === 'aromatic' ? 4 : bond.order === 2 ? 2 : bond.order === 3 ? 3 : 1;
-    return `${from.toString().padStart(3, ' ')}${to.toString().padStart(3, ' ')}${order.toString().padStart(3, ' ')}  0  0  0  0`;
-  });
-  return ['ChemVault Sketch', '  ChemVault', '', counts, ...atomLines, ...bondLines, 'M  END', ''].join('\n');
-}
-
-function downloadText(filename: string, content: string, type: string) {
-  const blob = new Blob([content], { type });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
 }

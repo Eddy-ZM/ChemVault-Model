@@ -6,6 +6,7 @@ type ExportAvailability = {
   smiles: boolean;
   structure: boolean;
   pdb: boolean;
+  image: boolean;
 };
 
 export type ExportNameSource = 'auto' | 'name' | 'smiles' | 'identifier' | 'source-file' | 'custom';
@@ -31,6 +32,7 @@ type Props = {
   onExportSdf: () => void;
   onExportXyz: () => void;
   onExportPdb: () => void;
+  onExportPng: () => void;
   onNameSourceChange: (value: ExportNameSource) => void;
 };
 
@@ -46,9 +48,10 @@ export function ExportPanel({
   onExportSdf,
   onExportXyz,
   onExportPdb,
+  onExportPng,
   onNameSourceChange
 }: Props) {
-  const hasAnything = available.smiles || available.structure || available.pdb;
+  const hasAnything = available.smiles || available.structure || available.pdb || available.image;
 
   return (
     <section className="flex min-w-max flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-white p-1 shadow-sm" aria-label="Export actions">
@@ -90,6 +93,7 @@ export function ExportPanel({
         <ExportButton disabled={!available.structure || loadingExport} onClick={onExportSdf}>SDF</ExportButton>
         <ExportButton disabled={!available.structure || loadingExport} onClick={onExportXyz}>XYZ</ExportButton>
         <ExportButton disabled={(!available.structure && !available.pdb) || loadingExport} onClick={onExportPdb}>PDB</ExportButton>
+        <ExportButton disabled={!available.image || loadingExport} onClick={onExportPng}>{loadingExport ? 'PNG...' : 'PNG'}</ExportButton>
       </div>
       {!hasAnything ? <span className="sr-only">Load a molecule before exporting structure files.</span> : null}
     </section>

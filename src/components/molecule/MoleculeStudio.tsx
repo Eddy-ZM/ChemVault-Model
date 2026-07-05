@@ -600,7 +600,8 @@ export function MoleculeStudio() {
     () => ({
       smiles: Boolean(smiles.trim()),
       structure: Boolean(structure.data),
-      pdb: structure.format === 'pdb' && Boolean(structure.data)
+      pdb: structure.format === 'pdb' && Boolean(structure.data),
+      image: Boolean(structure.data)
     }),
     [smiles, structure.data, structure.format]
   );
@@ -648,6 +649,7 @@ export function MoleculeStudio() {
               onExportSdf={exportSdf}
               onExportXyz={exportXyz}
               onExportPdb={exportPdb}
+              onExportPng={exportPng}
               onNameSourceChange={setExportNameSource}
             />
           </div>
@@ -682,7 +684,6 @@ export function MoleculeStudio() {
                 onUndo={handleUndo}
                 onRedo={handleRedo}
                 onClear={clearStudio}
-                onExportSmiles={exportSmiles}
                 loading={loading3D}
                 error={modeErrors.draw}
               />
@@ -728,13 +729,11 @@ export function MoleculeStudio() {
                 showHydrogens={showHydrogens}
                 showAtomLabels={showAtomLabels}
                 allowCartoonRepresentation={allowCartoonRepresentation}
-                loadingExport={loadingExport}
                 onRepresentationChange={setRepresentation}
                 onBackgroundChange={setBackground}
                 onToggleHydrogens={() => setShowHydrogens((value) => !value)}
                 onToggleAtomLabels={() => setShowAtomLabels((value) => !value)}
                 onResetView={() => viewerRef.current?.resetView()}
-                onExportPng={exportPng}
               />
             </ViewerPanel>
           </div>

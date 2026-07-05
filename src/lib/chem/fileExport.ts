@@ -23,7 +23,11 @@ export function inferFormatFromFilename(name: string): FileFormat {
   return 'sdf';
 }
 
-export function fileNameForFormat(format: 'sdf' | 'mol' | 'xyz' | 'pdb' | 'cif' | 'smi', smiles = 'molecule') {
-  const base = smiles.replace(/[^a-zA-Z0-9-_]/g, '_').slice(0, 48) || 'molecule';
+export function safeFileBaseName(value = 'molecule') {
+  return value.replace(/[^a-zA-Z0-9-_]/g, '_').replace(/_+/g, '_').replace(/^_+|_+$/g, '').slice(0, 64) || 'molecule';
+}
+
+export function fileNameForFormat(format: 'sdf' | 'mol' | 'xyz' | 'pdb' | 'cif' | 'smi' | 'png', baseName = 'molecule') {
+  const base = safeFileBaseName(baseName);
   return `${base}.${format === 'smi' ? 'smi' : format}`;
 }

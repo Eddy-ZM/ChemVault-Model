@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MoleculeGenerationResponse, MoleculeProperties, PdbRecord } from '@/lib/chem/types';
-import { downloadText, fileNameForFormat } from '@/lib/chem/fileExport';
+import { downloadText, fileNameForFormat, safeFileBaseName } from '@/lib/chem/fileExport';
 import { emptyProperties } from '@/lib/chem/moleculeUtils';
 import { normalizeSmiles } from '@/lib/chem/smiles';
 import { MoleculeViewerHandle } from '@/components/molecule/MoleculeViewer3D';
@@ -15,7 +15,7 @@ import { PdbMode } from '@/components/molecule/PdbMode';
 import { ViewerPanel } from '@/components/molecule/ViewerPanel';
 import { MoleculePropertiesPanel } from '@/components/molecule/MoleculePropertiesPanel';
 import { DisplayControls, Representation } from '@/components/molecule/DisplayControls';
-import { ExportPanel } from '@/components/molecule/ExportPanel';
+import { ExportNameSource, ExportPanel } from '@/components/molecule/ExportPanel';
 import { AuthButton } from '@/components/auth/AuthButton';
 
 type StructureFormat = 'sdf' | 'mol' | 'xyz' | 'pdb' | 'cif';
@@ -80,6 +80,8 @@ export function MoleculeStudio() {
   const [background, setBackground] = useState('white');
   const [showHydrogens, setShowHydrogens] = useState(true);
   const [showAtomLabels, setShowAtomLabels] = useState(false);
+  const [exportNameSource, setExportNameSource] = useState<ExportNameSource>('auto');
+  const [customExportName, setCustomExportName] = useState('');
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [pdbMeta, setPdbMeta] = useState<{ pdbId?: string; title?: string | null; resolution?: number | null; experimentalMethod?: string | null } | undefined>(undefined);
   const allowCartoonRepresentation = activeMode === 'pdb' || structure.format === 'pdb' || structure.format === 'cif';
@@ -462,6 +464,44 @@ export function MoleculeStudio() {
     [clearModeError, setModeError, syncViewer, toast]
   );
 
+  const exportBaseName = useMemo(() => {
+    const identifier = currentMolecule.pdbId
+      ? `PDB_${currentMolecule.pdbId}`
+      : currentMolecule.cid
+        ? `CID_${currentMolecule.cid}`
+        : currentMolecule.inchikey || '';
+    const sourceFileBaseName = stripFileExtension(currentMolecule.fileName);
+    const autoName =
+      firstExportValue(currentMolecule.name, identifier, currentMolecule.smiles, smiles, sourceFileBaseName) || 'molecule';
+
+    if (exportNameSource === 'custom') {
+      return safeFileBaseName(customExportName.trim() || autoName);
+    }
+    if (exportNameSource === 'name') {
+      return safeFileBaseName(currentMolecule.name || autoName);
+    }
+    if (exportNameSource === 'smiles') {
+      return safeFileBaseName(currentMolecule.smiles || smiles || autoName);
+    }
+    if (exportNameSource === 'identifier') {
+      return safeFileBaseName(identifier || autoName);
+    }
+    if (exportNameSource === 'source-file') {
+      return safeFileBaseName(sourceFileBaseName || autoName);
+    }
+    return safeFileBaseName(autoName);
+  }, [
+    currentMolecule.cid,
+    currentMolecule.fileName,
+    currentMolecule.inchikey,
+    currentMolecule.name,
+    currentMolecule.pdbId,
+    currentMolecule.smiles,
+    customExportName,
+    exportNameSource,
+    smiles
+  ]);
+
   const exportFile = useCallback(
     (content: string | null | undefined, format: 'smi' | StructureFormat) => {
       if (!content) {
@@ -469,9 +509,9 @@ export function MoleculeStudio() {
         return;
       }
       const ext = format === 'smi' ? 'smi' : format;
-      downloadText(fileNameForFormat(ext, currentMolecule.smiles ?? currentMolecule.name ?? 'molecule'), content, mimeForFormat(format));
+      downloadText(fileNameForFormat(ext, exportBaseName), content, mimeForFormat(format));
     },
-    [currentMolecule.name, currentMolecule.smiles, toast]
+    [exportBaseName, toast]
   );
 
   const exportSmiles = useCallback(() => exportFile(smiles, 'smi'), [exportFile, smiles]);
@@ -492,7 +532,7 @@ export function MoleculeStudio() {
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `${(currentMolecule.smiles ?? currentMolecule.name ?? 'molecule').replace(/[^a-zA-Z0-9-_]/g, '_')}.png`;
+        link.download = fileNameForFormat('png', exportBaseName);
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
@@ -503,7 +543,7 @@ export function MoleculeStudio() {
     } finally {
       setLoadingExport(false);
     }
-  }, [currentMolecule.name, currentMolecule.smiles, toast]);
+  }, [exportBaseName, toast]);
 
   useEffect(() => {
     const keyDown = (event: KeyboardEvent) => {
@@ -598,12 +638,17 @@ export function MoleculeStudio() {
           <div className="overflow-x-auto">
             <ExportPanel
               available={exportAvailability}
+              customName={customExportName}
+              namePreview={exportBaseName}
+              nameSource={exportNameSource}
               loadingExport={loadingExport}
+              onCustomNameChange={setCustomExportName}
               onExportSmiles={exportSmiles}
               onExportMol={exportMol}
               onExportSdf={exportSdf}
               onExportXyz={exportXyz}
               onExportPdb={exportPdb}
+              onNameSourceChange={setExportNameSource}
             />
           </div>
         </section>
@@ -739,4 +784,12 @@ function mimeForFormat(format: 'smi' | StructureFormat) {
   if (format === 'xyz') return 'chemical/x-xyz';
   if (format === 'pdb' || format === 'cif') return 'chemical/x-pdb';
   return 'text/plain';
+}
+
+function firstExportValue(...values: Array<string | null | undefined>) {
+  return values.find((value) => Boolean(value?.trim()))?.trim() || '';
+}
+
+function stripFileExtension(value?: string | null) {
+  return value?.replace(/\.[a-zA-Z0-9]{1,8}$/u, '') || '';
 }

@@ -1,12 +1,12 @@
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
+import { QuantumEngineSetupDialog, type QuantumSetupDialogMode } from '@/components/desktop/QuantumEngineSetupDialog';
 import type { ElectrostaticAnalysis } from '@/lib/chem/electrostaticAnalysis';
 import { analyzeElectrostatics, structureToXyz } from '@/lib/chem/electrostaticAnalysis';
 import type {
   CommercialQuantumEngineKind,
   ExternalQuantumEngineConfig,
-  LocalEngineInstallProgress,
   LocalEngineStatus,
   LocalOpenSourceEngineKind,
   QuantumCalculationMode,
@@ -185,11 +185,10 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
   const [configRevision, setConfigRevision] = useState(0);
   const [localEngines, setLocalEngines] = useState<LocalEngineStatus[]>([]);
   const [localEngineLoading, setLocalEngineLoading] = useState(false);
-  const [installingEngine, setInstallingEngine] = useState<LocalOpenSourceEngineKind | null>(null);
   const [localEngineMessage, setLocalEngineMessage] = useState('');
-  const [installProgress, setInstallProgress] = useState<LocalEngineInstallProgress | null>(null);
   const [setupRequestEngines, setSetupRequestEngines] = useState<LocalOpenSourceEngineKind[]>([]);
   const [setupPromptDismissed, setSetupPromptDismissed] = useState(false);
+  const [setupMode, setSetupMode] = useState<QuantumSetupDialogMode | null>(null);
   const [result, setResult] = useState<QuantumCalculationResult | null>(null);
   const [error, setError] = useState('');
 
@@ -259,13 +258,6 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
   useEffect(() => {
     void loadLocalEngines();
     void loadEngineSetupRequest();
-    const unsubscribe = window.chemVaultDesktop?.onLocalEngineInstallProgress?.((progress) => {
-      setInstallProgress(progress);
-    });
-
-    return () => {
-      unsubscribe?.();
-    };
   }, []);
 
   useEffect(() => {
@@ -312,41 +304,6 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
       }
     } catch {
       setSetupRequestEngines([]);
-    }
-  }
-
-  async function installLocalEngine(engine: LocalOpenSourceEngineKind) {
-    const api = window.chemVaultDesktop;
-    if (!api?.installLocalOpenSourceEngine) return;
-
-    setInstallingEngine(engine);
-    setLocalEngineMessage('');
-    setInstallProgress({
-      engine,
-      engineLabel: localEngineLabel(engine),
-      phase: 'checking',
-      percent: 5,
-      message: `Starting ${engine} setup.`
-    });
-    try {
-      const installResult = await api.installLocalOpenSourceEngine(engine);
-      setLocalEngineMessage(
-        installResult.ok
-          ? `${installResult.engineLabel} is ready.`
-          : installResult.error || `${installResult.engineLabel} installation did not complete.`
-      );
-      if (installResult.outputTail) {
-        setInstallProgress((progress) => progress ? { ...progress, outputTail: installResult.outputTail } : progress);
-      }
-      await loadLocalEngines();
-      setConfigRevision((value) => value + 1);
-      if (engine === 'pyscf' && installResult.ok) {
-        await clearEngineSetupRequest();
-      }
-    } catch (installError) {
-      setLocalEngineMessage(installError instanceof Error ? installError.message : 'Could not install the selected engine.');
-    } finally {
-      setInstallingEngine(null);
     }
   }
 
@@ -492,15 +449,23 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
       <LocalEngineManager
         engines={localEngines}
         loading={localEngineLoading}
-        installingEngine={installingEngine}
         message={localEngineMessage}
-        progress={installProgress}
         setupPromptDismissed={setupPromptDismissed}
         setupRequestEngines={setupRequestEngines}
         onDismissSetup={clearEngineSetupRequest}
-        onInstall={installLocalEngine}
+        onConfigureExisting={() => setSetupMode('configure')}
+        onInstall={() => setSetupMode('install')}
         onOpenFolder={openLocalEngineFolder}
         onRefresh={loadLocalEngines}
+      />
+
+      <QuantumEngineSetupDialog
+        mode={setupMode}
+        onClose={() => setSetupMode(null)}
+        onEnginesChanged={() => {
+          void loadLocalEngines();
+          setConfigRevision((value) => value + 1);
+        }}
       />
 
       {selectedEngine === 'pyscf' ? (
@@ -740,26 +705,24 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
 
 function LocalEngineManager({
   engines,
-  installingEngine,
   loading,
   message,
-  progress,
   setupPromptDismissed,
   setupRequestEngines,
+  onConfigureExisting,
   onDismissSetup,
   onInstall,
   onOpenFolder,
   onRefresh
 }: {
   engines: LocalEngineStatus[];
-  installingEngine: LocalOpenSourceEngineKind | null;
   loading: boolean;
   message: string;
-  progress: LocalEngineInstallProgress | null;
   setupPromptDismissed: boolean;
   setupRequestEngines: LocalOpenSourceEngineKind[];
+  onConfigureExisting: () => void;
   onDismissSetup: () => void;
-  onInstall: (engine: LocalOpenSourceEngineKind) => void;
+  onInstall: () => void;
   onOpenFolder: () => void;
   onRefresh: () => void;
 }) {
@@ -779,6 +742,20 @@ function LocalEngineManager({
         <div className="flex flex-wrap gap-2">
           <button
             type="button"
+            onClick={onInstall}
+            className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+          >
+            Install Engine
+          </button>
+          <button
+            type="button"
+            onClick={onConfigureExisting}
+            className="rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-white"
+          >
+            Configure Existing
+          </button>
+          <button
+            type="button"
             onClick={onRefresh}
             disabled={loading}
             className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
@@ -795,23 +772,6 @@ function LocalEngineManager({
         </div>
       </div>
 
-      {progress ? (
-        <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="text-sm font-semibold text-slate-900">{progress.engineLabel}: {progress.message}</p>
-            <span className="text-xs font-semibold text-slate-500">{progress.percent}%</span>
-          </div>
-          <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
-            <div className="h-full rounded-full bg-sky-700 transition-all" style={{ width: `${progress.percent}%` }} />
-          </div>
-          {progress.outputTail ? (
-            <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3 text-xs leading-5 text-slate-100">
-              {progress.outputTail}
-            </pre>
-          ) : null}
-        </div>
-      ) : null}
-
       {showSetupPrompt ? (
         <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -826,16 +786,14 @@ function LocalEngineManager({
             <div className="flex flex-wrap gap-2">
               <button
                 type="button"
-                onClick={() => onInstall('pyscf')}
-                disabled={Boolean(installingEngine)}
+                onClick={onInstall}
                 className="rounded-xl bg-sky-950 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-900 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
-                {installingEngine === 'pyscf' ? 'Installing...' : 'Install PySCF'}
+                Install PySCF
               </button>
               <button
                 type="button"
                 onClick={onDismissSetup}
-                disabled={Boolean(installingEngine)}
                 className="rounded-xl border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Not now
@@ -853,7 +811,6 @@ function LocalEngineManager({
         ) : (
           engines.map((engine) => {
             const canManagedInstall = engine.engine === 'pyscf';
-            const installing = installingEngine === engine.engine;
 
             return (
               <article key={engine.engine} className="rounded-2xl border border-slate-200 bg-white p-4">
@@ -887,11 +844,10 @@ function LocalEngineManager({
                 {canManagedInstall ? (
                   <button
                     type="button"
-                    onClick={() => onInstall(engine.engine)}
-                    disabled={Boolean(installingEngine)}
+                    onClick={onInstall}
                     className="mt-3 w-full rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
                   >
-                    {installing ? 'Installing...' : engine.available ? 'Update PySCF' : 'Install PySCF'}
+                    {engine.available ? 'Update PySCF' : 'Install PySCF'}
                   </button>
                 ) : null}
               </article>
@@ -1031,12 +987,6 @@ function engineLabel(engine: QuantumEngineKind) {
   if (engine === 'pyscf') return 'PySCF';
   if (engine === 'gaussian') return 'Gaussian';
   if (engine === 'orca') return 'ORCA';
-  return 'xTB';
-}
-
-function localEngineLabel(engine: LocalOpenSourceEngineKind) {
-  if (engine === 'pyscf') return 'PySCF';
-  if (engine === 'psi4') return 'Psi4';
   return 'xTB';
 }
 

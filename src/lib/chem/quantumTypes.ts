@@ -17,7 +17,7 @@ export type QuantumEngineStatus = {
   message?: string;
 };
 
-export type LocalEngineInstallMode = 'managed' | 'manual' | 'detected';
+export type LocalEngineInstallMode = 'managed' | 'manual' | 'detected' | 'configured';
 
 export type LocalEngineStatus = {
   available: boolean;
@@ -39,6 +39,16 @@ export type LocalEngineInstallResult = {
   status: LocalEngineStatus;
   outputTail: string;
   error?: string;
+};
+
+export type LocalEngineSelectResult = {
+  ok: boolean;
+  canceled: boolean;
+  engine: LocalOpenSourceEngineKind;
+  engineLabel: string;
+  executablePath?: string;
+  status?: LocalEngineStatus;
+  message?: string;
 };
 
 export type LocalEngineInstallProgress = {

@@ -13,6 +13,7 @@ const QUANTUM_TIMEOUT_MS = 180000;
 const MAX_QUANTUM_INPUT_BYTES = 2 * 1024 * 1024;
 const VERSION_CHECK_TIMEOUT_MS = 8000;
 const EXTERNAL_ENGINE_CONFIG_FILE = 'quantum-engines.json';
+const LOCAL_ENGINE_CONFIG_FILE = 'local-quantum-engines.json';
 const ENGINE_SETUP_REQUEST_FILE = 'engine-setup-request.json';
 const QUANTUM_ENGINE_LABELS = {
   xtb: 'xTB',
@@ -76,6 +77,7 @@ ipcMain.handle('quantum:local-engines:list', async () => getLocalOpenSourceEngin
 ipcMain.handle('quantum:local-engine:install', async (event, engine) => installLocalOpenSourceEngine(engine, (progress) => {
   event.sender.send('quantum:local-engine:install-progress', progress);
 }));
+ipcMain.handle('quantum:local-engine:select', async (_event, engine) => selectLocalOpenSourceEngineExecutable(engine));
 ipcMain.handle('quantum:local-engines:open-folder', async () => openLocalEngineFolder());
 ipcMain.handle('quantum:engine-setup-request:get', async () => readEngineSetupRequest());
 ipcMain.handle('quantum:engine-setup-request:clear', async () => clearEngineSetupRequest());
@@ -941,6 +943,22 @@ async function getXtbLocalStatus() {
 
 async function getPyscfStatus() {
   const template = LOCAL_OPEN_SOURCE_ENGINES.pyscf;
+  const configured = await resolveConfiguredPyscfPythonCommand();
+  if (configured) {
+    return {
+      ...template,
+      available: configured.probe.available,
+      installed: configured.probe.available,
+      installMode: 'configured',
+      executable: configured.executable,
+      installPath: configured.installPath,
+      version: configured.probe.version,
+      message: configured.probe.available
+        ? 'Configured Python with PySCF is ready for local DFT/HF single-point calculations.'
+        : `Configured Python was selected, but PySCF could not be imported. ${configured.probe.message}`
+    };
+  }
+
   const resolved = await resolvePyscfPythonCommand();
 
   if (resolved?.installMode === 'managed') {
@@ -980,6 +998,11 @@ async function getPyscfStatus() {
 }
 
 async function resolvePyscfPythonCommand() {
+  const configured = await resolveConfiguredPyscfPythonCommand();
+  if (configured?.probe.available) {
+    return configured;
+  }
+
   const managedPython = pyscfPythonExecutable();
   if (isReadableFile(managedPython)) {
     const probe = await probePyscf(managedPython, []);
@@ -1007,9 +1030,24 @@ async function resolvePyscfPythonCommand() {
   };
 }
 
+async function resolveConfiguredPyscfPythonCommand() {
+  const executable = configuredLocalEngineExecutable('pyscf');
+  if (!executable) return null;
+
+  const probe = await probePyscf(executable, []);
+  return {
+    executable,
+    argsPrefix: [],
+    installMode: 'configured',
+    installPath: path.dirname(executable),
+    probe
+  };
+}
+
 async function getPsi4Status() {
   const template = LOCAL_OPEN_SOURCE_ENGINES.psi4;
-  const executable = discoverPsi4Executable();
+  const configuredExecutable = configuredLocalEngineExecutable('psi4');
+  const executable = configuredExecutable || discoverPsi4Executable();
   if (!executable) {
     return {
       ...template,
@@ -1025,7 +1063,7 @@ async function getPsi4Status() {
     ...template,
     available: versionResult.exitCode === 0,
     installed: versionResult.exitCode === 0,
-    installMode: 'detected',
+    installMode: configuredExecutable ? 'configured' : 'detected',
     executable,
     installPath: path.dirname(executable),
     version: extractVersion(output),
@@ -1051,6 +1089,55 @@ async function installLocalOpenSourceEngine(engineValue, onProgress = () => {}) 
     status,
     outputTail: '',
     error: `${engineLabel} requires a manual system installation. ${LOCAL_OPEN_SOURCE_ENGINES[engine].installCommand}`
+  };
+}
+
+async function selectLocalOpenSourceEngineExecutable(engineValue) {
+  const engine = normalizeLocalOpenSourceEngineKind(engineValue);
+  const engineLabel = QUANTUM_ENGINE_LABELS[engine] || engine;
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: engine === 'pyscf' ? 'Select Python executable with PySCF installed' : `Select ${engineLabel} executable`,
+    properties: ['openFile'],
+    filters: [
+      {
+        name: engine === 'pyscf' ? 'Python executable' : `${engineLabel} executable`,
+        extensions: ['exe', 'bat', 'cmd']
+      },
+      { name: 'All files', extensions: ['*'] }
+    ]
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return { ok: false, canceled: true, engine, engineLabel };
+  }
+
+  const executablePath = result.filePaths[0];
+  const configs = await readLocalEngineConfigs();
+  configs[engine] = {
+    engine,
+    executablePath,
+    selectedAt: new Date().toISOString()
+  };
+  const configPath = localEngineConfigPath();
+  await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.promises.writeFile(configPath, JSON.stringify(configs, null, 2), 'utf8');
+
+  const status = engine === 'xtb'
+    ? await getXtbLocalStatus()
+    : engine === 'pyscf'
+      ? await getPyscfStatus()
+      : await getPsi4Status();
+
+  return {
+    ok: status.available,
+    canceled: false,
+    engine,
+    engineLabel,
+    executablePath,
+    status,
+    message: status.available
+      ? `${engineLabel} was selected and verified.`
+      : `${engineLabel} was selected, but ChemVault could not verify it yet.`
   };
 }
 
@@ -1292,8 +1379,10 @@ async function runPyscfCalculation(request) {
 
 function resolveXtbEngine() {
   const envCandidate = normalizeExecutableCandidate(process.env.CHEMVAULT_XTB_PATH, 'environment');
+  const configuredCandidate = normalizeExecutableCandidate(configuredLocalEngineExecutable('xtb'), 'configured');
   const candidates = [
     envCandidate,
+    configuredCandidate,
     ...bundledXtbCandidates(),
     ...pathXtbCandidates()
   ].filter(Boolean);
@@ -1447,6 +1536,10 @@ function externalEngineConfigPath() {
   return path.join(app.getPath('userData'), EXTERNAL_ENGINE_CONFIG_FILE);
 }
 
+function localEngineConfigPath() {
+  return path.join(app.getPath('userData'), LOCAL_ENGINE_CONFIG_FILE);
+}
+
 function engineSetupRequestPath() {
   return path.join(app.getPath('userData'), ENGINE_SETUP_REQUEST_FILE);
 }
@@ -1459,6 +1552,33 @@ function pyscfPythonExecutable() {
   return process.platform === 'win32'
     ? path.join(localEnginesRoot(), 'pyscf', 'Scripts', 'python.exe')
     : path.join(localEnginesRoot(), 'pyscf', 'bin', 'python');
+}
+
+async function readLocalEngineConfigs() {
+  try {
+    const content = await fs.promises.readFile(localEngineConfigPath(), 'utf8');
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function readLocalEngineConfigsSync() {
+  try {
+    const content = fs.readFileSync(localEngineConfigPath(), 'utf8');
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function configuredLocalEngineExecutable(engine) {
+  const configs = readLocalEngineConfigsSync();
+  const executablePath = configs?.[engine]?.executablePath;
+  const normalized = String(executablePath || '').trim();
+  return normalized && isReadableFile(normalized) ? normalized : '';
 }
 
 function normalizeExternalEngineConfig(value) {

@@ -64,3 +64,186 @@ button {
   background-size: 200% 100%;
   animation: pulseSlow 1.2s infinite;
 }
+
+.cv-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.56);
+  backdrop-filter: blur(10px);
+  animation: cvBackdropIn 180ms ease-out;
+}
+
+.cv-modal-panel {
+  overflow: hidden;
+  border-radius: 18px;
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  background: #ffffff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.28);
+  animation: cvPanelIn 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.cv-engine-spinner {
+  position: relative;
+  width: 54px;
+  height: 54px;
+  flex: 0 0 auto;
+}
+
+.cv-engine-spinner::before {
+  position: absolute;
+  inset: 18px;
+  content: '';
+  border-radius: 999px;
+  background: #0f172a;
+}
+
+.cv-engine-spinner span {
+  position: absolute;
+  inset: 7px;
+  border: 2px solid #0369a1;
+  border-radius: 999px;
+  opacity: 0.72;
+  animation: cvEngineOrbit 1.7s linear infinite;
+}
+
+.cv-engine-spinner span:nth-child(2) {
+  transform: rotate(60deg);
+  animation-duration: 2.1s;
+}
+
+.cv-engine-spinner span:nth-child(3) {
+  transform: rotate(120deg);
+  animation-duration: 2.5s;
+}
+
+.cv-progress-fill {
+  position: relative;
+  min-width: 8px;
+  transition: width 260ms ease;
+}
+
+.cv-progress-fill::after {
+  position: absolute;
+  inset: 0;
+  content: '';
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent);
+  animation: cvProgressSweep 1.15s ease-in-out infinite;
+}
+
+.cv-scan-line {
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e2e8f0;
+}
+
+.cv-scan-line::before {
+  display: block;
+  width: 36%;
+  height: 100%;
+  content: '';
+  border-radius: inherit;
+  background: #0369a1;
+  animation: cvScanLine 1.2s ease-in-out infinite;
+}
+
+.cv-later-arrow {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border-radius: 14px;
+  border: 1px solid #f59e0b;
+  background: #ffffff;
+  animation: cvLaterPulse 1.8s ease-in-out infinite;
+}
+
+.cv-later-arrow::before,
+.cv-later-arrow::after {
+  position: absolute;
+  content: '';
+  background: #92400e;
+}
+
+.cv-later-arrow::before {
+  left: 26px;
+  top: 13px;
+  width: 4px;
+  height: 28px;
+  border-radius: 999px;
+}
+
+.cv-later-arrow::after {
+  left: 18px;
+  top: 31px;
+  width: 20px;
+  height: 20px;
+  border-right: 4px solid #92400e;
+  border-bottom: 4px solid #92400e;
+  background: transparent;
+  transform: rotate(45deg);
+}
+
+@keyframes cvBackdropIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes cvPanelIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes cvEngineOrbit {
+  from {
+    transform: rotate(0deg) scaleX(1.35);
+  }
+  to {
+    transform: rotate(360deg) scaleX(1.35);
+  }
+}
+
+@keyframes cvProgressSweep {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(100%);
+  }
+}
+
+@keyframes cvScanLine {
+  0% {
+    transform: translateX(-120%);
+  }
+  50% {
+    transform: translateX(95%);
+  }
+  100% {
+    transform: translateX(280%);
+  }
+}
+
+@keyframes cvLaterPulse {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(5px);
+  }
+}

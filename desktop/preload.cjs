@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld('chemVaultDesktop', {
   clearEngineSetupRequest: () => ipcRenderer.invoke('quantum:engine-setup-request:clear'),
   getLocalOpenSourceEngines: () => ipcRenderer.invoke('quantum:local-engines:list'),
   installLocalOpenSourceEngine: (engine) => ipcRenderer.invoke('quantum:local-engine:install', engine),
+  selectLocalOpenSourceEngineExecutable: (engine) => ipcRenderer.invoke('quantum:local-engine:select', engine),
   onLocalEngineInstallProgress: (handler) => {
     const listener = (_event, progress) => handler(progress);
     ipcRenderer.on('quantum:local-engine:install-progress', listener);

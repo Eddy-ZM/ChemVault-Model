@@ -6,6 +6,7 @@ import type {
   ExternalQuantumEngineConfig,
   LocalEngineInstallProgress,
   LocalEngineInstallResult,
+  LocalEngineSelectResult,
   LocalEngineStatus,
   LocalOpenSourceEngineKind,
   QuantumCalculationRequest,
@@ -52,6 +53,7 @@ declare global {
       clearEngineSetupRequest: () => Promise<{ ok: boolean }>;
       getLocalOpenSourceEngines: () => Promise<LocalEngineStatus[]>;
       installLocalOpenSourceEngine: (engine: LocalOpenSourceEngineKind) => Promise<LocalEngineInstallResult>;
+      selectLocalOpenSourceEngineExecutable: (engine: LocalOpenSourceEngineKind) => Promise<LocalEngineSelectResult>;
       onLocalEngineInstallProgress: (handler: (progress: LocalEngineInstallProgress) => void) => () => void;
       openLocalEngineFolder: () => Promise<{ ok: boolean; path: string; error?: string }>;
       getExternalQuantumConfig: (engine: CommercialQuantumEngineKind) => Promise<ExternalQuantumEngineConfig>;

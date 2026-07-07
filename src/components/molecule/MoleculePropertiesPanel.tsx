@@ -4,7 +4,10 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ElectrostaticAnalysis } from '@/lib/chem/electrostaticAnalysis';
 import { analyzeElectrostatics, structureToXyz } from '@/lib/chem/electrostaticAnalysis';
 import type {
+  CommercialQuantumEngineKind,
   ExternalQuantumEngineConfig,
+  LocalEngineStatus,
+  LocalOpenSourceEngineKind,
   QuantumCalculationMode,
   QuantumCalculationResult,
   QuantumEngineKind,
@@ -51,11 +54,12 @@ const cards: Array<{ key: keyof MoleculeProperties; label: string; unit?: string
 
 const engineOptions: Array<{ value: QuantumEngineKind; label: string; description: string }> = [
   { value: 'xtb', label: 'xTB GFN2', description: 'Local semiempirical engine' },
+  { value: 'pyscf', label: 'PySCF DFT/HF', description: 'Local open-source ab initio engine' },
   { value: 'gaussian', label: 'Gaussian', description: 'External licensed engine' },
   { value: 'orca', label: 'ORCA', description: 'External licensed engine' }
 ];
 
-const defaultExternalConfigs: Record<Exclude<QuantumEngineKind, 'xtb'>, ExternalQuantumEngineConfig> = {
+const defaultExternalConfigs: Record<CommercialQuantumEngineKind, ExternalQuantumEngineConfig> = {
   gaussian: {
     engine: 'gaussian',
     executablePath: '',
@@ -173,9 +177,15 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
   const [unpairedElectrons, setUnpairedElectrons] = useState(0);
   const [calculationMode, setCalculationMode] = useState<QuantumCalculationMode>('single-point');
   const [externalConfig, setExternalConfig] = useState<ExternalQuantumEngineConfig>(defaultExternalConfigs.gaussian);
+  const [pyscfMethod, setPyscfMethod] = useState('B3LYP');
+  const [pyscfBasisSet, setPyscfBasisSet] = useState('6-31G');
   const [configLoading, setConfigLoading] = useState(false);
   const [configMessage, setConfigMessage] = useState('');
   const [configRevision, setConfigRevision] = useState(0);
+  const [localEngines, setLocalEngines] = useState<LocalEngineStatus[]>([]);
+  const [localEngineLoading, setLocalEngineLoading] = useState(false);
+  const [installingEngine, setInstallingEngine] = useState<LocalOpenSourceEngineKind | null>(null);
+  const [localEngineMessage, setLocalEngineMessage] = useState('');
   const [result, setResult] = useState<QuantumCalculationResult | null>(null);
   const [error, setError] = useState('');
 
@@ -198,7 +208,11 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
             available: false,
             engine: selectedEngine,
             engineLabel: engineLabel(selectedEngine),
-            method: selectedEngine === 'xtb' ? 'GFN2-xTB' : externalMethodLabel(externalConfig),
+            method: selectedEngine === 'xtb'
+              ? 'GFN2-xTB'
+              : selectedEngine === 'pyscf'
+                ? `${pyscfMethod}/${pyscfBasisSet}`
+                : externalMethodLabel(externalConfig),
             message: statusError instanceof Error ? statusError.message : 'Could not inspect the quantum engine.'
           });
         }
@@ -210,12 +224,12 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
     return () => {
       cancelled = true;
     };
-  }, [configRevision, externalConfig, selectedEngine]);
+  }, [configRevision, externalConfig, pyscfBasisSet, pyscfMethod, selectedEngine]);
 
   useEffect(() => {
     let cancelled = false;
     const api = window.chemVaultDesktop;
-    if (selectedEngine === 'xtb' || !api?.getExternalQuantumConfig) return;
+    if (!isCommercialEngine(selectedEngine) || !api?.getExternalQuantumConfig) return;
 
     setConfigLoading(true);
     setConfigMessage('');
@@ -239,15 +253,74 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
   }, [selectedEngine]);
 
   useEffect(() => {
+    void loadLocalEngines();
+  }, []);
+
+  useEffect(() => {
     setResult(null);
     setError('');
-  }, [xyz, selectedEngine, charge, unpairedElectrons, calculationMode, externalConfig.method, externalConfig.basisSet, externalConfig.routeOptions]);
+  }, [
+    xyz,
+    selectedEngine,
+    charge,
+    unpairedElectrons,
+    calculationMode,
+    externalConfig.method,
+    externalConfig.basisSet,
+    externalConfig.routeOptions,
+    pyscfMethod,
+    pyscfBasisSet
+  ]);
 
-  const canRun = Boolean(xyz && status?.available && !running);
+  const canRun = Boolean(xyz && status?.available && !running && (selectedEngine !== 'pyscf' || calculationMode === 'single-point'));
+
+  async function loadLocalEngines() {
+    const api = window.chemVaultDesktop;
+    if (!api?.getLocalOpenSourceEngines) return;
+
+    setLocalEngineLoading(true);
+    try {
+      setLocalEngines(await api.getLocalOpenSourceEngines());
+    } catch (loadError) {
+      setLocalEngineMessage(loadError instanceof Error ? loadError.message : 'Could not inspect local open-source engines.');
+    } finally {
+      setLocalEngineLoading(false);
+    }
+  }
+
+  async function installLocalEngine(engine: LocalOpenSourceEngineKind) {
+    const api = window.chemVaultDesktop;
+    if (!api?.installLocalOpenSourceEngine) return;
+
+    setInstallingEngine(engine);
+    setLocalEngineMessage('');
+    try {
+      const installResult = await api.installLocalOpenSourceEngine(engine);
+      setLocalEngineMessage(
+        installResult.ok
+          ? `${installResult.engineLabel} is ready.`
+          : installResult.error || `${installResult.engineLabel} installation did not complete.`
+      );
+      await loadLocalEngines();
+      setConfigRevision((value) => value + 1);
+    } catch (installError) {
+      setLocalEngineMessage(installError instanceof Error ? installError.message : 'Could not install the selected engine.');
+    } finally {
+      setInstallingEngine(null);
+    }
+  }
+
+  async function openLocalEngineFolder() {
+    const api = window.chemVaultDesktop;
+    if (!api?.openLocalEngineFolder) return;
+
+    const result = await api.openLocalEngineFolder();
+    setLocalEngineMessage(result.ok ? `Engine folder opened: ${result.path}` : result.error || 'Could not open the engine folder.');
+  }
 
   async function saveExternalConfig(nextConfig = externalConfig) {
     const api = window.chemVaultDesktop;
-    if (selectedEngine === 'xtb' || !api?.saveExternalQuantumConfig) return;
+    if (!isCommercialEngine(selectedEngine) || !api?.saveExternalQuantumConfig) return;
 
     setConfigLoading(true);
     setConfigMessage('');
@@ -265,7 +338,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
 
   async function chooseExternalExecutable() {
     const api = window.chemVaultDesktop;
-    if (selectedEngine === 'xtb' || !api?.selectQuantumEngineExecutable) return;
+    if (!isCommercialEngine(selectedEngine) || !api?.selectQuantumEngineExecutable) return;
 
     const selectedPath = await api.selectQuantumEngineExecutable(selectedEngine);
     if (!selectedPath) return;
@@ -282,17 +355,17 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
     setRunning(true);
     setError('');
     try {
-      const isExternalEngine = selectedEngine !== 'xtb';
+      const commercialEngine = isCommercialEngine(selectedEngine);
       const nextResult = await api.runQuantumCalculation({
         xyz,
         engine: selectedEngine,
         charge,
         unpairedElectrons,
-        method: isExternalEngine ? externalConfig.method : 'gfn2',
-        basisSet: isExternalEngine ? externalConfig.basisSet : undefined,
-        routeOptions: isExternalEngine ? externalConfig.routeOptions : undefined,
+        method: commercialEngine ? externalConfig.method : selectedEngine === 'pyscf' ? pyscfMethod : 'gfn2',
+        basisSet: commercialEngine ? externalConfig.basisSet : selectedEngine === 'pyscf' ? pyscfBasisSet : undefined,
+        routeOptions: commercialEngine ? externalConfig.routeOptions : undefined,
         calculationMode,
-        timeoutMs: calculationMode === 'geometry-optimization' ? 600000 : 180000
+        timeoutMs: selectedEngine === 'pyscf' ? 600000 : calculationMode === 'geometry-optimization' ? 600000 : 180000
       });
       setResult(nextResult);
       if (!nextResult.ok) {
@@ -315,7 +388,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
         <div>
           <h3 className="text-lg font-bold text-slate-950">Professional Quantum Calculation</h3>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Windows desktop calculation port for local semiempirical xTB and user-licensed external quantum engines.
+            Windows desktop calculation port for local open-source engines and user-licensed external quantum engines.
           </p>
         </div>
         <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
@@ -323,7 +396,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
         </span>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
         {engineOptions.map((option) => (
           <button
             key={option.value}
@@ -349,7 +422,57 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
             : status?.message || 'Selected quantum engine is not available.'}
       </div>
 
-      {selectedEngine !== 'xtb' ? (
+      <LocalEngineManager
+        engines={localEngines}
+        loading={localEngineLoading}
+        installingEngine={installingEngine}
+        message={localEngineMessage}
+        onInstall={installLocalEngine}
+        onOpenFolder={openLocalEngineFolder}
+        onRefresh={loadLocalEngines}
+      />
+
+      {selectedEngine === 'pyscf' ? (
+        <div className="mt-4 rounded-3xl border border-slate-200 bg-slate-50 p-4">
+          <div>
+            <h4 className="text-sm font-bold text-slate-950">Open-Source DFT/HF Runner</h4>
+            <p className="mt-1 text-xs leading-5 text-slate-600">
+              Runs PySCF locally through a managed Python environment or an existing system Python with PySCF installed.
+            </p>
+          </div>
+
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            <label className="min-w-0">
+              <span className="block text-xs font-medium text-slate-500">Method</span>
+              <input
+                type="text"
+                value={pyscfMethod}
+                onChange={(event) => setPyscfMethod(event.target.value)}
+                placeholder="B3LYP, PBE, HF"
+                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-400"
+              />
+            </label>
+            <label className="min-w-0">
+              <span className="block text-xs font-medium text-slate-500">Basis set</span>
+              <input
+                type="text"
+                value={pyscfBasisSet}
+                onChange={(event) => setPyscfBasisSet(event.target.value)}
+                placeholder="6-31G, def2-SVP, cc-pVDZ"
+                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-400"
+              />
+            </label>
+          </div>
+
+          {calculationMode !== 'single-point' ? (
+            <p className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-800">
+              PySCF in this desktop runner supports single-point DFT/HF analysis. Use xTB or Gaussian/ORCA for geometry optimization.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+
+      {isCommercialEngine(selectedEngine) ? (
         <div className="mt-4 rounded-3xl border border-slate-200 bg-slate-50 p-4">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
@@ -536,6 +659,111 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
   );
 }
 
+function LocalEngineManager({
+  engines,
+  installingEngine,
+  loading,
+  message,
+  onInstall,
+  onOpenFolder,
+  onRefresh
+}: {
+  engines: LocalEngineStatus[];
+  installingEngine: LocalOpenSourceEngineKind | null;
+  loading: boolean;
+  message: string;
+  onInstall: (engine: LocalOpenSourceEngineKind) => void;
+  onOpenFolder: () => void;
+  onRefresh: () => void;
+}) {
+  return (
+    <div className="mt-4 rounded-3xl border border-slate-200 bg-slate-50 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h4 className="text-sm font-bold text-slate-950">Local Open-Source Engines</h4>
+          <p className="mt-1 text-xs leading-5 text-slate-600">
+            Manage local open-source engines for desktop calculations without bundling commercial software.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Refresh
+          </button>
+          <button
+            type="button"
+            onClick={onOpenFolder}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Engine Folder
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-3">
+        {engines.length === 0 ? (
+          <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600">
+            {loading ? 'Checking local engines...' : 'Local engine status is not available.'}
+          </p>
+        ) : (
+          engines.map((engine) => {
+            const canManagedInstall = engine.engine === 'pyscf';
+            const installing = installingEngine === engine.engine;
+
+            return (
+              <article key={engine.engine} className="rounded-2xl border border-slate-200 bg-white p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-sm font-bold text-slate-950">{engine.engineLabel}</p>
+                    <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                      {engine.available ? 'Ready' : engine.installMode === 'managed' ? 'Installable' : 'Manual setup'}
+                    </p>
+                  </div>
+                  <span
+                    className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                      engine.available ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'
+                    }`}
+                  >
+                    {engine.installMode}
+                  </span>
+                </div>
+
+                <p className="mt-3 min-h-10 text-xs leading-5 text-slate-600">{engine.message}</p>
+
+                {engine.version ? <p className="mt-2 break-words text-xs text-slate-500">{engine.version}</p> : null}
+                {engine.executable ? <p className="mt-2 break-all font-mono text-[11px] leading-5 text-slate-500">{engine.executable}</p> : null}
+
+                {!engine.available && engine.installCommand ? (
+                  <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 font-mono text-[11px] leading-5 text-slate-600">
+                    {engine.installCommand}
+                  </p>
+                ) : null}
+
+                {canManagedInstall ? (
+                  <button
+                    type="button"
+                    onClick={() => onInstall(engine.engine)}
+                    disabled={Boolean(installingEngine)}
+                    className="mt-3 w-full rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    {installing ? 'Installing...' : engine.available ? 'Update PySCF' : 'Install PySCF'}
+                  </button>
+                ) : null}
+              </article>
+            );
+          })
+        )}
+      </div>
+
+      {message ? <p className="mt-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600">{message}</p> : null}
+    </div>
+  );
+}
+
 function ElectrostaticPanel({ analysis }: { analysis: ElectrostaticAnalysis | null }) {
   if (!analysis) {
     return (
@@ -659,9 +887,14 @@ function formatSigned(value: number) {
 }
 
 function engineLabel(engine: QuantumEngineKind) {
+  if (engine === 'pyscf') return 'PySCF';
   if (engine === 'gaussian') return 'Gaussian';
   if (engine === 'orca') return 'ORCA';
   return 'xTB';
+}
+
+function isCommercialEngine(engine: QuantumEngineKind): engine is CommercialQuantumEngineKind {
+  return engine === 'gaussian' || engine === 'orca';
 }
 
 function externalMethodLabel(config: ExternalQuantumEngineConfig) {

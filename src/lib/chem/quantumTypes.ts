@@ -1,4 +1,8 @@
-export type QuantumEngineKind = 'xtb' | 'gaussian' | 'orca';
+export type QuantumEngineKind = 'xtb' | 'pyscf' | 'gaussian' | 'orca';
+
+export type CommercialQuantumEngineKind = 'gaussian' | 'orca';
+
+export type LocalOpenSourceEngineKind = 'xtb' | 'pyscf' | 'psi4';
 
 export type QuantumCalculationMode = 'single-point' | 'geometry-optimization';
 
@@ -13,8 +17,32 @@ export type QuantumEngineStatus = {
   message?: string;
 };
 
+export type LocalEngineInstallMode = 'managed' | 'manual' | 'detected';
+
+export type LocalEngineStatus = {
+  available: boolean;
+  installed: boolean;
+  engine: LocalOpenSourceEngineKind;
+  engineLabel: string;
+  installMode: LocalEngineInstallMode;
+  executable?: string;
+  installPath?: string;
+  installCommand?: string;
+  version?: string;
+  message: string;
+};
+
+export type LocalEngineInstallResult = {
+  ok: boolean;
+  engine: LocalOpenSourceEngineKind;
+  engineLabel: string;
+  status: LocalEngineStatus;
+  outputTail: string;
+  error?: string;
+};
+
 export type ExternalQuantumEngineConfig = {
-  engine: Exclude<QuantumEngineKind, 'xtb'>;
+  engine: CommercialQuantumEngineKind;
   executablePath: string;
   method: string;
   basisSet: string;

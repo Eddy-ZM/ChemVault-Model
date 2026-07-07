@@ -11,6 +11,7 @@ const DEFAULT_START_PATH = '/molecule/';
 const QUANTUM_TIMEOUT_MS = 180000;
 const MAX_QUANTUM_INPUT_BYTES = 2 * 1024 * 1024;
 const EXTERNAL_ENGINE_CONFIG_FILE = 'quantum-engines.json';
+const ENGINE_SETUP_REQUEST_FILE = 'engine-setup-request.json';
 const QUANTUM_ENGINE_LABELS = {
   xtb: 'xTB',
   pyscf: 'PySCF',
@@ -65,10 +66,13 @@ ipcMain.handle('quantum:engine-status', async (_event, engine) => getQuantumEngi
 ipcMain.handle('quantum:run', async (_event, request) => runQuantumCalculation(request));
 ipcMain.handle('quantum:external-config:get', async (_event, engine) => getExternalQuantumConfig(engine));
 ipcMain.handle('quantum:external-config:save', async (_event, config) => saveExternalQuantumConfig(config));
+ipcMain.handle('quantum:external-config:discover', async (_event, engine) => discoverAndSaveExternalQuantumConfig(engine));
 ipcMain.handle('quantum:select-executable', async (_event, engine) => selectQuantumEngineExecutable(engine));
 ipcMain.handle('quantum:local-engines:list', async () => getLocalOpenSourceEngines());
 ipcMain.handle('quantum:local-engine:install', async (_event, engine) => installLocalOpenSourceEngine(engine));
 ipcMain.handle('quantum:local-engines:open-folder', async () => openLocalEngineFolder());
+ipcMain.handle('quantum:engine-setup-request:get', async () => readEngineSetupRequest());
+ipcMain.handle('quantum:engine-setup-request:clear', async () => clearEngineSetupRequest());
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -598,7 +602,7 @@ async function getExternalEngineStatus(engineKind) {
       engine: engineKind,
       engineLabel,
       method: methodLabel,
-      message: `${engineLabel} executable is not configured. Select a licensed local installation before running this engine.`
+      message: `${engineLabel} executable is not configured and was not found during automatic discovery. Select a licensed local installation before running this engine.`
     };
   }
 
@@ -826,7 +830,7 @@ async function resolvePyscfPythonCommand() {
 
 async function getPsi4Status() {
   const template = LOCAL_OPEN_SOURCE_ENGINES.psi4;
-  const executable = findPathExecutable(process.platform === 'win32' ? ['psi4.exe', 'psi4.bat', 'psi4.cmd'] : ['psi4']);
+  const executable = discoverPsi4Executable();
   if (!executable) {
     return {
       ...template,
@@ -938,6 +942,29 @@ async function openLocalEngineFolder() {
   await fs.promises.mkdir(root, { recursive: true });
   const error = await shell.openPath(root);
   return { ok: !error, path: root, error: error || undefined };
+}
+
+async function readEngineSetupRequest() {
+  try {
+    const content = await fs.promises.readFile(engineSetupRequestPath(), 'utf8');
+    const parsed = JSON.parse(content);
+    const engines = Array.isArray(parsed?.engines)
+      ? parsed.engines.map(normalizeLocalOpenSourceEngineKind).filter((engine, index, list) => list.indexOf(engine) === index)
+      : [];
+    return {
+      pending: engines.length > 0,
+      engines,
+      source: parsed?.source === 'installer' ? 'installer' : 'application',
+      message: typeof parsed?.message === 'string' ? parsed.message : undefined
+    };
+  } catch {
+    return { pending: false, engines: [] };
+  }
+}
+
+async function clearEngineSetupRequest() {
+  await fs.promises.rm(engineSetupRequestPath(), { force: true }).catch(() => {});
+  return { ok: true };
 }
 
 async function runPyscfCalculation(request) {
@@ -1073,9 +1100,16 @@ function bundledXtbCandidates() {
 
 function pathXtbCandidates() {
   const names = process.platform === 'win32' ? ['xtb.exe', 'xtb.cmd', 'xtb.bat'] : ['xtb'];
-  return String(process.env.PATH || '')
+  const pathCandidates = String(process.env.PATH || '')
     .split(path.delimiter)
     .flatMap((directory) => names.map((name) => ({ executable: path.join(directory, name), root: directory, source: 'path' })));
+  const discoveredCandidates = xtbDiscoveryRoots()
+    .flatMap((directory) => names.flatMap((name) => [
+      { executable: path.join(directory, name), root: directory, source: 'discovered' },
+      { executable: path.join(directory, 'bin', name), root: directory, source: 'discovered' }
+    ]));
+
+  return [...pathCandidates, ...discoveredCandidates];
 }
 
 function normalizeExecutableCandidate(value, source) {
@@ -1126,9 +1160,12 @@ function buildXtbEnv(engine) {
 async function getExternalQuantumConfig(engineValue) {
   const engine = normalizeExternalEngineKind(engineValue);
   const configs = await readExternalEngineConfigs();
+  const savedConfig = configs[engine] || {};
+  const discoveredPath = savedConfig.executablePath ? '' : discoverExternalEngineExecutable(engine);
   return normalizeExternalEngineConfig({
     ...DEFAULT_EXTERNAL_ENGINE_CONFIG[engine],
-    ...(configs[engine] || {})
+    ...savedConfig,
+    ...(discoveredPath ? { executablePath: discoveredPath, discovered: true } : {})
   });
 }
 
@@ -1140,6 +1177,29 @@ async function saveExternalQuantumConfig(config) {
   await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
   await fs.promises.writeFile(configPath, JSON.stringify(configs, null, 2), 'utf8');
   return normalized;
+}
+
+async function discoverAndSaveExternalQuantumConfig(engineValue) {
+  const engine = normalizeExternalEngineKind(engineValue);
+  const discoveredPath = discoverExternalEngineExecutable(engine);
+  const current = await getExternalQuantumConfig(engine);
+  const nextConfig = normalizeExternalEngineConfig({
+    ...current,
+    executablePath: discoveredPath || current.executablePath,
+    discovered: Boolean(discoveredPath)
+  });
+
+  if (discoveredPath) {
+    await saveExternalQuantumConfig(nextConfig);
+  }
+
+  return {
+    config: nextConfig,
+    found: Boolean(discoveredPath),
+    message: discoveredPath
+      ? `${QUANTUM_ENGINE_LABELS[engine]} was found and saved.`
+      : `${QUANTUM_ENGINE_LABELS[engine]} was not found in common Windows locations or PATH.`
+  };
 }
 
 async function selectQuantumEngineExecutable(engineValue) {
@@ -1173,6 +1233,10 @@ async function readExternalEngineConfigs() {
 
 function externalEngineConfigPath() {
   return path.join(app.getPath('userData'), EXTERNAL_ENGINE_CONFIG_FILE);
+}
+
+function engineSetupRequestPath() {
+  return path.join(app.getPath('userData'), ENGINE_SETUP_REQUEST_FILE);
 }
 
 function localEnginesRoot() {
@@ -1243,6 +1307,9 @@ function systemPythonCandidates() {
     for (const executable of findPathExecutables(['py.exe'])) {
       candidates.push({ executable, argsPrefix: ['-3'] });
     }
+    for (const executable of discoverPythonExecutables()) {
+      candidates.push({ executable, argsPrefix: [] });
+    }
   }
 
   const seen = new Set();
@@ -1281,7 +1348,161 @@ function findPathExecutables(names) {
       if (isReadableFile(candidate)) found.push(candidate);
     }
   }
-  return found;
+  return uniquePaths(found);
+}
+
+function discoverExternalEngineExecutable(engine) {
+  const names = engine === 'orca' ? ['orca.exe', 'orca.bat', 'orca.cmd'] : ['g16.exe', 'g09.exe', 'g03.exe'];
+  const roots = engine === 'orca' ? orcaDiscoveryRoots() : gaussianDiscoveryRoots();
+  return findReadableCandidate([
+    ...findPathExecutables(names),
+    ...roots.flatMap((root) => names.flatMap((name) => [
+      path.join(root, name),
+      path.join(root, 'bin', name),
+      path.join(root, 'wbin', name)
+    ]))
+  ]);
+}
+
+function discoverPsi4Executable() {
+  const names = process.platform === 'win32' ? ['psi4.exe', 'psi4.bat', 'psi4.cmd'] : ['psi4'];
+  return findReadableCandidate([
+    ...findPathExecutables(names),
+    ...psi4DiscoveryRoots().flatMap((root) => names.flatMap((name) => [
+      path.join(root, name),
+      path.join(root, 'bin', name),
+      path.join(root, 'Scripts', name),
+      path.join(root, 'Library', 'bin', name)
+    ]))
+  ]);
+}
+
+function discoverPythonExecutables() {
+  return findReadableCandidates(
+    pythonDiscoveryRoots().flatMap((root) => [
+      path.join(root, 'python.exe'),
+      path.join(root, 'python3.exe'),
+      path.join(root, 'Scripts', 'python.exe'),
+      path.join(root, 'bin', 'python.exe')
+    ])
+  );
+}
+
+function xtbDiscoveryRoots() {
+  return [
+    ...windowsProgramRoots(['xTB', 'xtb', 'GrimmeLab\\xtb']),
+    path.join(userHome(), 'scoop', 'apps', 'xtb', 'current'),
+    path.join(localAppData(), 'Programs', 'xtb'),
+    path.join('C:\\', 'xtb'),
+    path.join('C:\\', 'ProgramData', 'chocolatey', 'bin')
+  ];
+}
+
+function gaussianDiscoveryRoots() {
+  return [
+    path.join('C:\\', 'G16W'),
+    path.join('C:\\', 'G16'),
+    path.join('C:\\', 'G09W'),
+    path.join('C:\\', 'G09'),
+    path.join('C:\\', 'Gaussian'),
+    ...windowsProgramRoots(['Gaussian', 'Gaussian\\G16W', 'Gaussian\\G16', 'Gaussian\\G09W', 'Gaussian\\G09'])
+  ];
+}
+
+function orcaDiscoveryRoots() {
+  return [
+    path.join('C:\\', 'ORCA'),
+    path.join('C:\\', 'orca'),
+    ...windowsProgramRoots(['ORCA', 'orca']),
+    path.join(userHome(), 'scoop', 'apps', 'orca', 'current')
+  ];
+}
+
+function psi4DiscoveryRoots() {
+  return [
+    ...condaEnvironmentRoots('psi4'),
+    ...windowsProgramRoots(['Psi4', 'psi4']),
+    path.join(userHome(), 'scoop', 'apps', 'psi4', 'current')
+  ];
+}
+
+function pythonDiscoveryRoots() {
+  return [
+    path.join(localAppData(), 'Programs', 'Python', 'Python313'),
+    path.join(localAppData(), 'Programs', 'Python', 'Python312'),
+    path.join(localAppData(), 'Programs', 'Python', 'Python311'),
+    path.join(localAppData(), 'Programs', 'Python', 'Python310'),
+    path.join(localAppData(), 'Microsoft', 'WindowsApps'),
+    ...condaRootCandidates(),
+    ...windowsProgramRoots(['Python313', 'Python312', 'Python311', 'Python310', 'Python'])
+  ];
+}
+
+function condaEnvironmentRoots(envName) {
+  return condaRootCandidates().flatMap((root) => [
+    path.join(root, 'envs', envName),
+    path.join(root, 'envs', envName.toLowerCase()),
+    path.join(root, 'envs', envName.toUpperCase())
+  ]);
+}
+
+function condaRootCandidates() {
+  return [
+    process.env.CONDA_PREFIX || '',
+    process.env.MAMBA_ROOT_PREFIX || '',
+    path.join(userHome(), 'miniconda3'),
+    path.join(userHome(), 'mambaforge'),
+    path.join(userHome(), 'miniforge3'),
+    path.join(userHome(), 'anaconda3'),
+    path.join(localAppData(), 'miniconda3'),
+    path.join(localAppData(), 'mambaforge'),
+    path.join(localAppData(), 'miniforge3'),
+    path.join('C:\\', 'ProgramData', 'miniconda3'),
+    path.join('C:\\', 'ProgramData', 'mambaforge'),
+    path.join('C:\\', 'ProgramData', 'miniforge3'),
+    path.join('C:\\', 'ProgramData', 'Anaconda3')
+  ].filter(Boolean);
+}
+
+function windowsProgramRoots(names) {
+  const roots = [
+    process.env.ProgramFiles || '',
+    process.env['ProgramFiles(x86)'] || '',
+    process.env.ProgramW6432 || ''
+  ].filter(Boolean);
+  return roots.flatMap((root) => names.map((name) => path.join(root, name)));
+}
+
+function userHome() {
+  return process.env.USERPROFILE || process.env.HOME || '';
+}
+
+function localAppData() {
+  return process.env.LOCALAPPDATA || path.join(userHome(), 'AppData', 'Local');
+}
+
+function findReadableCandidate(candidates) {
+  return findReadableCandidates(candidates)[0] || '';
+}
+
+function findReadableCandidates(candidates) {
+  return uniquePaths(candidates)
+    .map((candidate) => String(candidate || '').trim())
+    .filter((candidate) => candidate && isReadableFile(candidate));
+}
+
+function uniquePaths(paths) {
+  const seen = new Set();
+  const unique = [];
+  for (const value of paths) {
+    const normalized = String(value || '').trim();
+    if (!normalized) continue;
+    const key = process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(normalized);
+  }
+  return unique;
 }
 
 async function probePyscf(executable, argsPrefix) {

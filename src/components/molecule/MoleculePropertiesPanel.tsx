@@ -186,6 +186,8 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
   const [localEngineLoading, setLocalEngineLoading] = useState(false);
   const [installingEngine, setInstallingEngine] = useState<LocalOpenSourceEngineKind | null>(null);
   const [localEngineMessage, setLocalEngineMessage] = useState('');
+  const [setupRequestEngines, setSetupRequestEngines] = useState<LocalOpenSourceEngineKind[]>([]);
+  const [setupPromptDismissed, setSetupPromptDismissed] = useState(false);
   const [result, setResult] = useState<QuantumCalculationResult | null>(null);
   const [error, setError] = useState('');
 
@@ -254,6 +256,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
 
   useEffect(() => {
     void loadLocalEngines();
+    void loadEngineSetupRequest();
   }, []);
 
   useEffect(() => {
@@ -288,6 +291,21 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
     }
   }
 
+  async function loadEngineSetupRequest() {
+    const api = window.chemVaultDesktop;
+    if (!api?.getEngineSetupRequest) return;
+
+    try {
+      const request = await api.getEngineSetupRequest();
+      if (request.pending) {
+        setSetupRequestEngines(request.engines);
+        setSetupPromptDismissed(false);
+      }
+    } catch {
+      setSetupRequestEngines([]);
+    }
+  }
+
   async function installLocalEngine(engine: LocalOpenSourceEngineKind) {
     const api = window.chemVaultDesktop;
     if (!api?.installLocalOpenSourceEngine) return;
@@ -303,10 +321,22 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
       );
       await loadLocalEngines();
       setConfigRevision((value) => value + 1);
+      if (engine === 'pyscf' && installResult.ok) {
+        await clearEngineSetupRequest();
+      }
     } catch (installError) {
       setLocalEngineMessage(installError instanceof Error ? installError.message : 'Could not install the selected engine.');
     } finally {
       setInstallingEngine(null);
+    }
+  }
+
+  async function clearEngineSetupRequest() {
+    const api = window.chemVaultDesktop;
+    setSetupRequestEngines([]);
+    setSetupPromptDismissed(true);
+    if (api?.clearEngineSetupRequest) {
+      await api.clearEngineSetupRequest();
     }
   }
 
@@ -346,6 +376,24 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
     const nextConfig = { ...externalConfig, engine: selectedEngine, executablePath: selectedPath };
     setExternalConfig(nextConfig);
     await saveExternalConfig(nextConfig);
+  }
+
+  async function discoverExternalExecutable() {
+    const api = window.chemVaultDesktop;
+    if (!isCommercialEngine(selectedEngine) || !api?.discoverExternalQuantumConfig) return;
+
+    setConfigLoading(true);
+    setConfigMessage('');
+    try {
+      const discovery = await api.discoverExternalQuantumConfig(selectedEngine);
+      setExternalConfig(discovery.config);
+      setConfigMessage(discovery.message);
+      setConfigRevision((value) => value + 1);
+    } catch (discoverError) {
+      setConfigMessage(discoverError instanceof Error ? discoverError.message : 'Could not run automatic engine discovery.');
+    } finally {
+      setConfigLoading(false);
+    }
   }
 
   async function runCalculation() {
@@ -427,6 +475,9 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
         loading={localEngineLoading}
         installingEngine={installingEngine}
         message={localEngineMessage}
+        setupPromptDismissed={setupPromptDismissed}
+        setupRequestEngines={setupRequestEngines}
+        onDismissSetup={clearEngineSetupRequest}
         onInstall={installLocalEngine}
         onOpenFolder={openLocalEngineFolder}
         onRefresh={loadLocalEngines}
@@ -488,6 +539,14 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
               className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               Browse
+            </button>
+            <button
+              type="button"
+              onClick={discoverExternalExecutable}
+              disabled={configLoading}
+              className="rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-sm font-semibold text-sky-800 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Auto Detect
             </button>
           </div>
 
@@ -664,6 +723,9 @@ function LocalEngineManager({
   installingEngine,
   loading,
   message,
+  setupPromptDismissed,
+  setupRequestEngines,
+  onDismissSetup,
   onInstall,
   onOpenFolder,
   onRefresh
@@ -672,10 +734,17 @@ function LocalEngineManager({
   installingEngine: LocalOpenSourceEngineKind | null;
   loading: boolean;
   message: string;
+  setupPromptDismissed: boolean;
+  setupRequestEngines: LocalOpenSourceEngineKind[];
+  onDismissSetup: () => void;
   onInstall: (engine: LocalOpenSourceEngineKind) => void;
   onOpenFolder: () => void;
   onRefresh: () => void;
 }) {
+  const missingPyscf = engines.some((engine) => engine.engine === 'pyscf' && !engine.available);
+  const installerRequestedPyscf = setupRequestEngines.includes('pyscf');
+  const showSetupPrompt = missingPyscf && !setupPromptDismissed;
+
   return (
     <div className="mt-4 rounded-3xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -703,6 +772,39 @@ function LocalEngineManager({
           </button>
         </div>
       </div>
+
+      {showSetupPrompt ? (
+        <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-sky-950">
+                {installerRequestedPyscf ? 'Installer requested local engine setup' : 'PySCF local engine is not installed'}
+              </p>
+              <p className="mt-1 text-xs leading-5 text-sky-800">
+                Install PySCF into the ChemVault managed engine folder to enable local open-source DFT/HF calculations. Python 3 and network access are required.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => onInstall('pyscf')}
+                disabled={Boolean(installingEngine)}
+                className="rounded-xl bg-sky-950 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-900 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                {installingEngine === 'pyscf' ? 'Installing...' : 'Install PySCF'}
+              </button>
+              <button
+                type="button"
+                onClick={onDismissSetup}
+                disabled={Boolean(installingEngine)}
+                className="rounded-xl border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-100 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                Not now
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       <div className="mt-4 grid gap-3 lg:grid-cols-3">
         {engines.length === 0 ? (

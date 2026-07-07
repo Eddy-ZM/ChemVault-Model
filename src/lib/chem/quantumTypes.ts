@@ -12,7 +12,7 @@ export type QuantumEngineStatus = {
   engineLabel: string;
   method: string;
   executable?: string;
-  source?: 'bundled' | 'environment' | 'path' | 'configured';
+  source?: 'bundled' | 'environment' | 'path' | 'configured' | 'discovered';
   version?: string;
   message?: string;
 };
@@ -39,6 +39,13 @@ export type LocalEngineInstallResult = {
   status: LocalEngineStatus;
   outputTail: string;
   error?: string;
+};
+
+export type EngineSetupRequest = {
+  pending: boolean;
+  engines: LocalOpenSourceEngineKind[];
+  source?: 'installer' | 'application';
+  message?: string;
 };
 
 export type ExternalQuantumEngineConfig = {

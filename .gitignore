@@ -27,7 +27,9 @@ AuthKey_*.p8
 *.mobileprovision
 node_modules/
 dist/
-build/
+build/*
+!build/
+!build/installer.nsh
 release/
 dist_electron/
 public/vendor/3Dmol-min.js

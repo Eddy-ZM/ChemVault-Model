@@ -46,7 +46,7 @@
     "appId": "science.chemvault.model",
     "productName": "ChemVault Model",
     "directories": {
-      "output": "release"
+      "output": "release/windows/v0.1.0"
     },
     "electronVersion": "43.0.0",
     "electronDist": "node_modules/electron/dist",

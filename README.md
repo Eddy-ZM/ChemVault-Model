@@ -44,8 +44,8 @@ npm run build:desktop
 The Windows installer and portable executable are written to:
 
 ```text
-release/ChemVault-Model-Setup-0.1.0-win-x64.exe
-release/ChemVault-Model-Portable-0.1.0-win-x64.exe
+release/windows/v0.1.0/ChemVault-Model-Setup-0.1.0-win-x64.exe
+release/windows/v0.1.0/ChemVault-Model-Portable-0.1.0-win-x64.exe
 ```
 
 The desktop API proxy defaults to:

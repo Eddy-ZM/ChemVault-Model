@@ -1,9 +1,17 @@
 !include LogicLib.nsh
 !include nsDialogs.nsh
+!include WinMessages.nsh
+
+ManifestDPIAware true
 
 !ifndef BUILD_UNINSTALLER
 Var ChemVaultEngineSetupCheckbox
 Var ChemVaultEngineSetupState
+Var ChemVaultEngineSetupTitle
+Var ChemVaultEngineSetupBody
+Var ChemVaultEngineSetupNote
+Var ChemVaultEngineSetupTitleFont
+Var ChemVaultEngineSetupBodyFont
 
 !macro customPageAfterChangeDir
   Page custom ChemVaultEngineSetupPageCreate ChemVaultEngineSetupPageLeave
@@ -16,15 +24,28 @@ Function ChemVaultEngineSetupPageCreate
     Abort
   ${EndIf}
 
-  ${NSD_CreateLabel} 0 0 100% 26u "Local quantum engine setup"
-  Pop $0
-  ${NSD_CreateLabel} 0 28u 100% 34u "ChemVault Model can search this computer for installed quantum engines after setup. Open-source PySCF can be installed into ChemVault's managed engine folder from the app."
-  Pop $0
-  ${NSD_CreateCheckbox} 0 72u 100% 18u "Ask to install the local open-source PySCF engine on first launch"
+  CreateFont $ChemVaultEngineSetupTitleFont "Segoe UI" 12 700
+  CreateFont $ChemVaultEngineSetupBodyFont "Segoe UI" 10 400
+
+  ${NSD_CreateLabel} 0 0 100% 20u "Local quantum engine setup"
+  Pop $ChemVaultEngineSetupTitle
+  SendMessage $ChemVaultEngineSetupTitle ${WM_SETFONT} $ChemVaultEngineSetupTitleFont 1
+  SetCtlColors $ChemVaultEngineSetupTitle 0x111827 transparent
+
+  ${NSD_CreateLabel} 0 28u 100% 42u "ChemVault Model can scan this computer for installed quantum engines after setup. PySCF can be installed into a managed local folder from the app."
+  Pop $ChemVaultEngineSetupBody
+  SendMessage $ChemVaultEngineSetupBody ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
+  SetCtlColors $ChemVaultEngineSetupBody 0x1F2937 transparent
+
+  ${NSD_CreateCheckbox} 0 78u 100% 18u "Ask to install PySCF on first launch"
   Pop $ChemVaultEngineSetupCheckbox
+  SendMessage $ChemVaultEngineSetupCheckbox ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
   ${NSD_SetState} $ChemVaultEngineSetupCheckbox ${BST_CHECKED}
-  ${NSD_CreateLabel} 0 96u 100% 30u "Commercial engines such as Gaussian or ORCA are not installed by this setup. The app will only search for existing licensed installations and let you choose their executable paths."
-  Pop $0
+
+  ${NSD_CreateLabel} 0 106u 100% 32u "Gaussian and ORCA are not installed by this setup. ChemVault only detects existing licensed installations and lets you choose their executable paths."
+  Pop $ChemVaultEngineSetupNote
+  SendMessage $ChemVaultEngineSetupNote ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
+  SetCtlColors $ChemVaultEngineSetupNote 0x374151 transparent
 
   nsDialogs::Show
 FunctionEnd

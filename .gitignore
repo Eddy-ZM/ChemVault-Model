@@ -33,5 +33,6 @@ build/*
 release/
 dist_electron/
 public/vendor/3Dmol-min.js
+public/app-version.json
 .wrangler/
 .DS_Store

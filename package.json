@@ -8,10 +8,11 @@
   "type": "module",
   "main": "desktop/main.cjs",
   "scripts": {
-    "predev": "node scripts/copy-vendor-assets.cjs",
+    "prepare:assets": "node scripts/copy-vendor-assets.cjs && node scripts/write-version-manifest.cjs",
+    "predev": "npm run prepare:assets",
     "dev": "next dev",
     "dev:desktop": "npm run build && node scripts/ensure-electron-binary.cjs && electron .",
-    "prebuild": "node scripts/copy-vendor-assets.cjs",
+    "prebuild": "npm run prepare:assets",
     "build": "next build",
     "build:desktop": "npm run build && node scripts/ensure-electron-binary.cjs && electron-builder --win --x64",
     "dist:win": "npm run build:desktop",

@@ -4,6 +4,9 @@ import Observation
 @MainActor
 @Observable
 final class AppState {
+    private let updateDeferralUntilKey = "chemvault.molecule.update.deferUntil"
+    private let updateDeferralPairKey = "chemvault.molecule.update.deferPair"
+
     var config: AppConfig
     var moleculeClient: MoleculeAPIClient
     var quantumService: QuantumCalculationService
@@ -18,6 +21,8 @@ final class AppState {
     var isBootstrapping = true
     var hasEnteredApp = false
     var offlineMessage: String?
+    var updateDeferredUntil: Date?
+    var updateDeferredPair: String?
 
     init(config: AppConfig = .production) {
         self.config = config
@@ -26,6 +31,41 @@ final class AppState {
         self.authService = AuthService(config: config)
         self.permissionsService = PermissionsService(config: config)
         self.libraryStore = LibraryStore()
+        self.updateDeferredUntil = UserDefaults.standard.object(forKey: updateDeferralUntilKey) as? Date
+        self.updateDeferredPair = UserDefaults.standard.string(forKey: updateDeferralPairKey)
+    }
+
+    var requiresImmediateVersionUpdate: Bool {
+        !remoteConfig.supportsCurrentAppVersion()
+    }
+
+    var hasNewerVersionAvailable: Bool {
+        !remoteConfig.isCurrentAppLatestVersion()
+    }
+
+    var canTemporarilyContinueWithoutLatestVersion: Bool {
+        hasNewerVersionAvailable && !requiresImmediateVersionUpdate
+    }
+
+    var shouldShowVersionUpdatePrompt: Bool {
+        if requiresImmediateVersionUpdate {
+            return true
+        }
+
+        if !canTemporarilyContinueWithoutLatestVersion {
+            return false
+        }
+
+        return !isVersionUpdateDeferred
+    }
+
+    private var isVersionUpdateDeferred: Bool {
+        guard updateDeferredPair == remoteConfig.updatePairIdentifier,
+              let updateDeferredUntil else {
+            return false
+        }
+
+        return updateDeferredUntil > Date()
     }
 
     func bootstrap() async {
@@ -55,6 +95,38 @@ final class AppState {
             remoteConfig = .fallback
             remoteConfigError = error.localizedDescription
         }
+        clearExpiredVersionUpdateDeferral()
+    }
+
+    func runRemoteConfigMonitor() async {
+        while !Task.isCancelled {
+            let seconds = max(60, remoteConfig.updateCheckIntervalSeconds)
+            try? await Task.sleep(nanoseconds: UInt64(seconds) * 1_000_000_000)
+            if Task.isCancelled { return }
+            await refreshRemoteConfig()
+        }
+    }
+
+    func deferVersionUpdateTemporarily() {
+        guard canTemporarilyContinueWithoutLatestVersion else { return }
+        let hours = max(1, min(168, remoteConfig.updateGracePeriodHours))
+        let until = Date().addingTimeInterval(TimeInterval(hours * 60 * 60))
+        updateDeferredUntil = until
+        updateDeferredPair = remoteConfig.updatePairIdentifier
+        UserDefaults.standard.set(until, forKey: updateDeferralUntilKey)
+        UserDefaults.standard.set(remoteConfig.updatePairIdentifier, forKey: updateDeferralPairKey)
+    }
+
+    private func clearExpiredVersionUpdateDeferral() {
+        guard let updateDeferredUntil else { return }
+        if updateDeferredPair == remoteConfig.updatePairIdentifier, updateDeferredUntil > Date() {
+            return
+        }
+
+        self.updateDeferredUntil = nil
+        self.updateDeferredPair = nil
+        UserDefaults.standard.removeObject(forKey: updateDeferralUntilKey)
+        UserDefaults.standard.removeObject(forKey: updateDeferralPairKey)
     }
 
     func refreshPermissions() async {

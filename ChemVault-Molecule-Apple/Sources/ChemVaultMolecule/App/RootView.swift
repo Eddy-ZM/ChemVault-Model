@@ -15,12 +15,10 @@ struct RootView: View {
                         : appState.remoteConfig.announcementMessage,
                     systemImage: "wrench.and.screwdriver"
                 )
-            } else if !appState.remoteConfig.supportsCurrentAppVersion() {
-                RemoteConfigGateView(
-                    title: "Update ChemVault Molecule",
-                    message: "This version is no longer supported. Minimum supported version: \(appState.remoteConfig.minimumSupportedVersion).",
-                    systemImage: "arrow.down.app"
-                )
+            } else if appState.requiresImmediateVersionUpdate {
+                VersionUpdateGateView(required: true)
+            } else if appState.shouldShowVersionUpdatePrompt {
+                VersionUpdateGateView(required: false)
             } else if appState.hasEnteredApp {
                 MainTabView()
             } else {
@@ -72,5 +70,64 @@ private struct RemoteConfigGateView: View {
         .padding()
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(AppTheme.workspaceBackground)
+    }
+}
+
+private struct VersionUpdateGateView: View {
+    @Environment(AppState.self) private var appState
+    @Environment(\.openURL) private var openURL
+    @State private var isChecking = false
+
+    let required: Bool
+
+    var body: some View {
+        VStack(spacing: 18) {
+            Image(systemName: "arrow.down.app")
+                .font(.system(size: 44, weight: .semibold))
+                .foregroundStyle(AppTheme.brand)
+            Text(required ? "Update required" : "Update available")
+                .font(.title2.weight(.bold))
+            Text(message)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 480)
+            HStack(spacing: 12) {
+                if appState.canTemporarilyContinueWithoutLatestVersion {
+                    Button("Continue briefly") {
+                        appState.deferVersionUpdateTemporarily()
+                    }
+                    .buttonStyle(.bordered)
+                }
+                Button(isChecking ? "Checking" : "Check again") {
+                    Task {
+                        isChecking = true
+                        await appState.refreshRemoteConfig()
+                        isChecking = false
+                    }
+                }
+                .buttonStyle(.bordered)
+                .disabled(isChecking)
+                Button("Update now") {
+                    if let updateURL = appState.remoteConfig.updateDownloadURL {
+                        openURL(updateURL)
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(appState.remoteConfig.updateDownloadURL == nil)
+            }
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(AppTheme.workspaceBackground)
+    }
+
+    private var message: String {
+        if !appState.remoteConfig.updateMessage.isEmpty {
+            return appState.remoteConfig.updateMessage
+        }
+
+        return required
+            ? "This app build is below the supported release line. Update before continuing."
+            : "A newer ChemVault Molecule release is available. You can continue briefly and update soon."
     }
 }

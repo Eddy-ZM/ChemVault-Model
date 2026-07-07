@@ -62,7 +62,32 @@ Desktop sign-in requests are proxied to:
 https://user.chemvault.science
 ```
 
-Override it when needed:
+### Desktop Version Enforcement
+
+Desktop builds include an implicit version manifest generated from
+`package.json` and the current git commit. The version is used internally by
+the Windows app and is not shown as primary interface text.
+
+At runtime, the Windows desktop app checks:
+
+```text
+https://model.chemvault.science/app-version.json
+```
+
+The manifest can set `platforms.windows.latestVersion`,
+`platforms.windows.minimumSupportedVersion`, `downloadUrl`,
+`updateCheckIntervalSeconds`, and `allowDeferralHours`. If the current EXE is
+below `minimumSupportedVersion`, the app blocks use until the user opens the
+update location. If the current EXE is only behind `latestVersion`, the user can
+continue briefly and will be prompted again after the deferral window.
+
+Override the manifest endpoint when needed:
+
+```powershell
+$env:CHEMVAULT_APP_VERSION_URL="https://model.chemvault.science/app-version.json"
+```
+
+Override the API endpoints when needed:
 
 ```powershell
 $env:CHEMVAULT_MODEL_API_URL="https://model.chemvault.science/api/chem"

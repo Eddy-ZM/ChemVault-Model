@@ -8,8 +8,10 @@ const APP_TITLE = 'ChemVault Model';
 const DEFAULT_API_BASE = 'https://model.chemvault.science/api/chem';
 const DEFAULT_USER_ORIGIN = 'https://user.chemvault.science';
 const DEFAULT_START_PATH = '/';
+const DEFAULT_VERSION_MANIFEST_URL = 'https://model.chemvault.science/app-version.json';
 const QUANTUM_TIMEOUT_MS = 180000;
 const MAX_QUANTUM_INPUT_BYTES = 2 * 1024 * 1024;
+const VERSION_CHECK_TIMEOUT_MS = 8000;
 const EXTERNAL_ENGINE_CONFIG_FILE = 'quantum-engines.json';
 const ENGINE_SETUP_REQUEST_FILE = 'engine-setup-request.json';
 const QUANTUM_ENGINE_LABELS = {
@@ -62,6 +64,8 @@ const userCookieJar = new Map();
 
 app.setName(APP_TITLE);
 
+ipcMain.handle('app:version-status', async () => getAppVersionStatus());
+ipcMain.handle('app:open-update-url', async (_event, url) => openUpdateUrl(url));
 ipcMain.handle('quantum:engine-status', async (_event, engine) => getQuantumEngineStatus(engine));
 ipcMain.handle('quantum:run', async (_event, request) => runQuantumCalculation(request));
 ipcMain.handle('quantum:external-config:get', async (_event, engine) => getExternalQuantumConfig(engine));
@@ -169,6 +173,179 @@ function normalizeStartPath(value) {
   const trimmed = String(value || DEFAULT_START_PATH).trim();
   if (!trimmed || /^https?:\/\//iu.test(trimmed)) return DEFAULT_START_PATH;
   return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+}
+
+async function getAppVersionStatus() {
+  const checkedAt = new Date().toISOString();
+  const localManifest = readLocalVersionManifest();
+  const localConfig = platformVersionConfig(localManifest, 'windows');
+  const currentVersion = String(app.getVersion() || localConfig.version || '0.0.0');
+  const currentBuildId = String(localConfig.buildId || localManifest?.generatedFrom?.commit || currentVersion);
+  const currentReleaseId = String(localConfig.releaseId || `windows-v${currentVersion}`);
+  const sourceUrl = versionManifestUrl();
+
+  try {
+    const remoteManifest = await fetchVersionManifest(sourceUrl);
+    const remoteConfig = platformVersionConfig(remoteManifest, 'windows');
+    const latestVersion = String(remoteConfig.latestVersion || remoteConfig.version || currentVersion);
+    const minimumSupportedVersion = String(remoteConfig.minimumSupportedVersion || '0.0.0');
+    const updateRequired = compareVersions(currentVersion, minimumSupportedVersion) < 0 || Boolean(remoteConfig.forceUpdate);
+    const updateAvailable = updateRequired || compareVersions(currentVersion, latestVersion) < 0;
+    const canDefer = updateAvailable && !updateRequired;
+
+    return {
+      ok: true,
+      appName: APP_TITLE,
+      platform: 'windows',
+      status: updateRequired ? 'required' : updateAvailable ? 'available' : 'current',
+      currentVersion,
+      currentBuildId,
+      currentReleaseId,
+      latestVersion,
+      latestBuildId: String(remoteConfig.buildId || ''),
+      minimumSupportedVersion,
+      updateAvailable,
+      updateRequired,
+      canDefer,
+      deferralHours: boundedInteger(remoteConfig.allowDeferralHours, 24, 1, 168),
+      checkIntervalSeconds: boundedInteger(remoteConfig.updateCheckIntervalSeconds, 300, 60, 86400),
+      checkedAt,
+      sourceUrl,
+      downloadUrl: validExternalUrl(remoteConfig.downloadUrl) || 'https://github.com/Eddy-ZM/ChemVault-Model/releases/latest',
+      releaseNotesUrl: validExternalUrl(remoteConfig.releaseNotesUrl) || '',
+      message: String(remoteConfig.message || (updateRequired
+        ? 'This ChemVault Model desktop build must be updated before continuing.'
+        : updateAvailable
+          ? 'A newer ChemVault Model desktop build is available.'
+          : 'ChemVault Model is current.'))
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      appName: APP_TITLE,
+      platform: 'windows',
+      status: 'offline',
+      currentVersion,
+      currentBuildId,
+      currentReleaseId,
+      latestVersion: currentVersion,
+      latestBuildId: '',
+      minimumSupportedVersion: '0.0.0',
+      updateAvailable: false,
+      updateRequired: false,
+      canDefer: false,
+      deferralHours: 24,
+      checkIntervalSeconds: 300,
+      checkedAt,
+      sourceUrl,
+      downloadUrl: 'https://github.com/Eddy-ZM/ChemVault-Model/releases/latest',
+      releaseNotesUrl: '',
+      message: 'Could not verify whether ChemVault Model is the latest release. The app will keep checking in the background.',
+      error: error instanceof Error ? error.message : 'Version check failed.'
+    };
+  }
+}
+
+async function openUpdateUrl(value) {
+  const url = validExternalUrl(value) || 'https://github.com/Eddy-ZM/ChemVault-Model/releases/latest';
+  await shell.openExternal(url);
+  return { ok: true, url };
+}
+
+function versionManifestUrl() {
+  return String(
+    process.env.CHEMVAULT_APP_VERSION_URL ||
+      process.env.CHEMVAULT_MODEL_VERSION_URL ||
+      process.env.NEXT_PUBLIC_CHEMVAULT_APP_VERSION_URL ||
+      DEFAULT_VERSION_MANIFEST_URL
+  ).trim() || DEFAULT_VERSION_MANIFEST_URL;
+}
+
+async function fetchVersionManifest(manifestUrl) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), VERSION_CHECK_TIMEOUT_MS);
+
+  try {
+    const target = new URL(manifestUrl);
+    target.searchParams.set('t', String(Date.now()));
+    const response = await fetch(target.toString(), {
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/json',
+        'Cache-Control': 'no-cache'
+      }
+    });
+
+    if (!response.ok) {
+      throw new Error(`Version manifest returned HTTP ${response.status}.`);
+    }
+
+    return await response.json();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function readLocalVersionManifest() {
+  const candidates = [
+    path.join(app.getAppPath(), 'out', 'app-version.json'),
+    path.join(process.resourcesPath || '', 'app-version.json')
+  ];
+
+  for (const candidate of candidates) {
+    if (!candidate || !isReadableFile(candidate)) continue;
+    try {
+      return JSON.parse(fs.readFileSync(candidate, 'utf8'));
+    } catch {
+      return {};
+    }
+  }
+
+  return {};
+}
+
+function platformVersionConfig(manifest, platform) {
+  if (!manifest || typeof manifest !== 'object') return {};
+  return (
+    manifest.platforms?.[platform] ||
+    manifest.apps?.model?.platforms?.[platform] ||
+    manifest.apps?.['chemvault-model']?.platforms?.[platform] ||
+    manifest.model?.platforms?.[platform] ||
+    manifest.model?.[platform] ||
+    manifest[platform] ||
+    {}
+  );
+}
+
+function compareVersions(left, right) {
+  const a = versionParts(left);
+  const b = versionParts(right);
+  const length = Math.max(a.length, b.length);
+
+  for (let index = 0; index < length; index += 1) {
+    const leftPart = a[index] || 0;
+    const rightPart = b[index] || 0;
+    if (leftPart > rightPart) return 1;
+    if (leftPart < rightPart) return -1;
+  }
+
+  return 0;
+}
+
+function versionParts(value) {
+  return String(value || '0')
+    .split(/[.+-]/u)
+    .map((part) => Number.parseInt(part, 10))
+    .filter((part) => Number.isFinite(part));
+}
+
+function validExternalUrl(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    return ['http:', 'https:'].includes(url.protocol) ? url.toString() : '';
+  } catch {
+    return '';
+  }
 }
 
 function startDesktopServer(staticRoot) {

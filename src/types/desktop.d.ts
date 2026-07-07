@@ -15,12 +15,38 @@ import type {
 } from '@/lib/chem/quantumTypes';
 
 declare global {
+  type DesktopVersionStatus = {
+    ok: boolean;
+    appName: string;
+    platform: 'windows';
+    status: 'current' | 'available' | 'required' | 'offline';
+    currentVersion: string;
+    currentBuildId: string;
+    currentReleaseId: string;
+    latestVersion: string;
+    latestBuildId: string;
+    minimumSupportedVersion: string;
+    updateAvailable: boolean;
+    updateRequired: boolean;
+    canDefer: boolean;
+    deferralHours: number;
+    checkIntervalSeconds: number;
+    checkedAt: string;
+    sourceUrl: string;
+    downloadUrl: string;
+    releaseNotesUrl: string;
+    message: string;
+    error?: string;
+  };
+
   interface Window {
     chemVaultDesktop?: {
       appName: string;
       isDesktop: boolean;
       userApiPrefix: string;
       platform: string;
+      getVersionStatus: () => Promise<DesktopVersionStatus>;
+      openUpdateUrl: (url?: string) => Promise<{ ok: boolean; url: string }>;
       getQuantumEngineStatus: (engine?: QuantumEngineKind) => Promise<QuantumEngineStatus>;
       getEngineSetupRequest: () => Promise<EngineSetupRequest>;
       clearEngineSetupRequest: () => Promise<{ ok: boolean }>;

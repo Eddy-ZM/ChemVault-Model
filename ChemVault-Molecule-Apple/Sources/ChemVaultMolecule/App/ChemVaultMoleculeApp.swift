@@ -8,7 +8,10 @@ struct ChemVaultMoleculeApp: App {
         WindowGroup {
             RootView()
                 .environment(appState)
-                .task { await appState.bootstrap() }
+                .task {
+                    await appState.bootstrap()
+                    await appState.runRemoteConfigMonitor()
+                }
         }
 #if os(macOS)
         Settings {

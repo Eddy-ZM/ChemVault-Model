@@ -31,30 +31,30 @@ Function ChemVaultEngineSetupPageCreate
   CreateFont $ChemVaultEngineSetupTitleFont "Segoe UI" 12 700
   CreateFont $ChemVaultEngineSetupBodyFont "Segoe UI" 10 400
 
-  ${NSD_CreateLabel} 0 0 100% 20u "Local quantum engine setup"
+  ${NSD_CreateLabel} 0 0 100% 18u "Local quantum engine setup"
   Pop $ChemVaultEngineSetupTitle
   SendMessage $ChemVaultEngineSetupTitle ${WM_SETFONT} $ChemVaultEngineSetupTitleFont 1
   SetCtlColors $ChemVaultEngineSetupTitle 0x111827 transparent
 
-  ${NSD_CreateLabel} 0 28u 100% 30u "ChemVault Model can scan this computer for installed quantum engines after setup. PySCF can be installed into a managed local folder from the app."
+  ${NSD_CreateLabel} 0 24u 100% 28u "ChemVault Model scans existing engines after setup. PySCF can be installed later with visible progress in the app."
   Pop $ChemVaultEngineSetupBody
   SendMessage $ChemVaultEngineSetupBody ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
   SetCtlColors $ChemVaultEngineSetupBody 0x1F2937 transparent
 
-  ${NSD_CreateLabel} 0 62u 100% 34u "This setup installs: ChemVault Model desktop app, local web UI assets, 3D viewer runtime, shortcuts, and the engine setup request."
+  ${NSD_CreateLabel} 0 58u 100% 18u "Included: desktop app, local UI assets, 3D viewer runtime, shortcuts."
   Pop $ChemVaultEngineSetupDetails
   SendMessage $ChemVaultEngineSetupDetails ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
   SetCtlColors $ChemVaultEngineSetupDetails 0x1F2937 transparent
 
-  ${NSD_CreateCheckbox} 0 104u 100% 18u "Ask to install PySCF on first launch"
-  Pop $ChemVaultEngineSetupCheckbox
-  SendMessage $ChemVaultEngineSetupCheckbox ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
-  ${NSD_SetState} $ChemVaultEngineSetupCheckbox ${BST_CHECKED}
-
-  ${NSD_CreateLabel} 0 130u 100% 36u "Not installed here: PySCF packages, xTB, Psi4, Gaussian, or ORCA binaries. The app shows progress when PySCF is installed later."
+  ${NSD_CreateLabel} 0 82u 100% 18u "Not included: PySCF, xTB, Psi4, Gaussian, or ORCA binaries."
   Pop $ChemVaultEngineSetupCommercial
   SendMessage $ChemVaultEngineSetupCommercial ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
   SetCtlColors $ChemVaultEngineSetupCommercial 0x374151 transparent
+
+  ${NSD_CreateCheckbox} 0 106u 100% 18u "Prompt for PySCF setup on first launch"
+  Pop $ChemVaultEngineSetupCheckbox
+  SendMessage $ChemVaultEngineSetupCheckbox ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
+  ${NSD_SetState} $ChemVaultEngineSetupCheckbox ${BST_CHECKED}
 
   nsDialogs::Show
 FunctionEnd

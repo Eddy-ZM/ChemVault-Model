@@ -5,7 +5,11 @@
 ManifestDPIAware true
 ShowInstDetails show
 ShowUninstDetails show
-!define MUI_INSTFILESPAGE_SHOWDETAILS
+
+!macro customHeader
+  ShowInstDetails show
+  ShowUninstDetails show
+!macroend
 
 !ifndef BUILD_UNINSTALLER
 Var ChemVaultEngineSetupCheckbox
@@ -19,6 +23,7 @@ Var ChemVaultEngineSetupBodyFont
 
 !macro customPageAfterChangeDir
   Page custom ChemVaultEngineSetupPageCreate ChemVaultEngineSetupPageLeave
+  !define MUI_PAGE_CUSTOMFUNCTION_SHOW ChemVaultInstFilesPageShow
 !macroend
 
 Function ChemVaultEngineSetupPageCreate
@@ -31,17 +36,17 @@ Function ChemVaultEngineSetupPageCreate
   CreateFont $ChemVaultEngineSetupTitleFont "Segoe UI" 12 700
   CreateFont $ChemVaultEngineSetupBodyFont "Segoe UI" 10 400
 
-  ${NSD_CreateLabel} 0 0 100% 18u "Local quantum engine setup"
+  ${NSD_CreateLabel} 0 0 100% 18u "Install details and quantum setup"
   Pop $ChemVaultEngineSetupTitle
   SendMessage $ChemVaultEngineSetupTitle ${WM_SETFONT} $ChemVaultEngineSetupTitleFont 1
   SetCtlColors $ChemVaultEngineSetupTitle 0x111827 transparent
 
-  ${NSD_CreateLabel} 0 24u 100% 28u "ChemVault Model scans existing engines after setup. PySCF can be installed later with visible progress in the app."
+  ${NSD_CreateLabel} 0 24u 100% 28u "This setup installs ChemVault Model, the local desktop interface, molecular viewer assets, shortcuts, and update metadata."
   Pop $ChemVaultEngineSetupBody
   SendMessage $ChemVaultEngineSetupBody ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
   SetCtlColors $ChemVaultEngineSetupBody 0x1F2937 transparent
 
-  ${NSD_CreateLabel} 0 58u 100% 18u "Included: desktop app, local UI assets, 3D viewer runtime, shortcuts."
+  ${NSD_CreateLabel} 0 58u 100% 18u "Install progress details are expanded on the next page."
   Pop $ChemVaultEngineSetupDetails
   SendMessage $ChemVaultEngineSetupDetails ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
   SetCtlColors $ChemVaultEngineSetupDetails 0x1F2937 transparent
@@ -61,6 +66,17 @@ FunctionEnd
 
 Function ChemVaultEngineSetupPageLeave
   ${NSD_GetState} $ChemVaultEngineSetupCheckbox $ChemVaultEngineSetupState
+FunctionEnd
+
+Function ChemVaultInstFilesPageShow
+  SetDetailsView show
+  SetDetailsPrint both
+  DetailPrint "ChemVault Model installation details:"
+  DetailPrint "Desktop application files"
+  DetailPrint "Local web interface assets"
+  DetailPrint "3D molecule viewer runtime"
+  DetailPrint "Shortcuts and application registration"
+  DetailPrint "Quantum engine setup preference"
 FunctionEnd
 
 !macro customInstall

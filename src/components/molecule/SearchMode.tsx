@@ -23,7 +23,7 @@ export function SearchMode({ onSearch, loading, error }: Props) {
       <div className="max-w-3xl">
         <h2 className="text-2xl font-bold text-slate-950">Search by Name / CID</h2>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          Query PubChem by compound name or CID. Results load into the shared 3D viewer and property panel.
+          Query PubChem by compound name, synonym, close spelling, SMILES-like input, or CID. When multiple matches are found, choose the exact substance before loading.
         </p>
       </div>
 
@@ -32,7 +32,7 @@ export function SearchMode({ onSearch, loading, error }: Props) {
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           className="min-w-0 rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
-          placeholder="caffeine, aspirin, benzene, or 2244"
+          placeholder="caffeine, aspirn, acetylsalicylic acid, or 2244"
         />
         <button
           type="submit"

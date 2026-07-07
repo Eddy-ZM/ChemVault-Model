@@ -5,13 +5,24 @@ struct MoleculeAPIClient: Sendable {
     var session: URLSession = .chemVault
 
     func searchCompound(query: String) async throws -> MoleculeSummary {
+        guard let first = try await searchCompoundCandidates(query: query).first else {
+            throw ChemVaultError.missingData("No PubChem result was returned.")
+        }
+        return first
+    }
+
+    func searchCompoundCandidates(query: String) async throws -> [MoleculeSummary] {
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw ChemVaultError.invalidInput("Enter a molecule name, SMILES, or PubChem CID.") }
-        let url = baseURL.appending(path: "pubchem/search").appending(queryItems: [URLQueryItem(name: "query", value: trimmed)])
+        let url = baseURL.appending(path: "pubchem/search").appending(queryItems: [
+            URLQueryItem(name: "query", value: trimmed),
+            URLQueryItem(name: "limit", value: "8")
+        ])
         let data = try await fetchData(url)
         let response = try JSONDecoder().decode(PubChemSearchEnvelope.self, from: data)
-        guard let result = response.firstResult else { throw ChemVaultError.missingData("No PubChem result was returned.") }
-        return result.summary(source: .search)
+        let results = response.allResults.map { $0.summary(source: .search) }
+        guard !results.isEmpty else { throw ChemVaultError.missingData("No PubChem result was returned.") }
+        return results
     }
 
     func getCompoundProperties(smiles: String) async throws -> MoleculeProperties {
@@ -97,6 +108,11 @@ private struct PubChemSearchEnvelope: Decodable {
     var compounds: [CompoundDTO]?
 
     var firstResult: CompoundDTO? { result ?? results?.first ?? compounds?.first }
+    var allResults: [CompoundDTO] {
+        if let results, !results.isEmpty { return results }
+        if let compounds, !compounds.isEmpty { return compounds }
+        return firstResult.map { [$0] } ?? []
+    }
 }
 
 private struct CompoundDTO: Decodable {
@@ -113,10 +129,13 @@ private struct CompoundDTO: Decodable {
     var inchikey: String?
     var inchiKey: String?
     var iupacName: String?
+    var matchedName: String?
+    var matchType: String?
+    var matchScore: FlexibleDouble?
 
     func summary(source: MoleculeSource) -> MoleculeSummary {
         MoleculeSummary(
-            name: name ?? iupacName ?? "PubChem Compound",
+            name: name ?? matchedName ?? iupacName ?? "PubChem Compound",
             cid: cid?.value,
             canonicalSMILES: canonicalSMILES ?? canonicalSmiles ?? smiles,
             formula: formula ?? molecularFormula,

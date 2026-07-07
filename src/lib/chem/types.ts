@@ -7,6 +7,10 @@ export type MoleculeApiPayload = {
   inchi?: string;
   inchikey?: string;
   canonicalSmiles?: string;
+  iupacName?: string;
+  matchedName?: string;
+  matchType?: 'cid' | 'inchikey' | 'smiles' | 'exact-name' | 'normalized-name' | 'autocomplete';
+  matchScore?: number;
 };
 
 export type MoleculeProperties = {

@@ -2,7 +2,7 @@
 
 import Image from 'next/image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { MoleculeGenerationResponse, MoleculeProperties, PdbRecord } from '@/lib/chem/types';
+import { MoleculeApiPayload, MoleculeGenerationResponse, MoleculeProperties, PdbRecord } from '@/lib/chem/types';
 import { downloadText, fileNameForFormat, safeFileBaseName } from '@/lib/chem/fileExport';
 import { emptyProperties } from '@/lib/chem/moleculeUtils';
 import { normalizeSmiles } from '@/lib/chem/smiles';
@@ -22,6 +22,8 @@ import { AuthButton } from '@/components/auth/AuthButton';
 type StructureFormat = 'sdf' | 'mol' | 'xyz' | 'pdb' | 'cif';
 type MoleculeSource = 'search' | 'smiles' | 'draw' | 'upload' | 'pdb';
 type Toast = { id: number; text: string; level: 'error' | 'success' | 'info' };
+type SearchCandidate = MoleculeApiPayload;
+type SearchCandidateState = { query: string; candidates: SearchCandidate[] };
 
 type CurrentMolecule = {
   name?: string;
@@ -69,6 +71,7 @@ export function MoleculeStudio() {
   const [structure, setStructure] = useState<StructureState>({ data: null, format: 'sdf' });
   const [modeErrors, setModeErrors] = useState<Record<MoleculeMode, string | null>>(initialModeErrors);
   const [toastMessages, setToastMessages] = useState<Toast[]>([]);
+  const [searchCandidateState, setSearchCandidateState] = useState<SearchCandidateState | null>(null);
 
   const [loadingSearch, setLoadingSearch] = useState(false);
   const [loading3D, setLoading3D] = useState(false);
@@ -263,11 +266,58 @@ export function MoleculeStudio() {
     [clearModeError, loadProperties, pushSmilesHistory, setModeError, syncViewer, toast]
   );
 
+  const loadSearchResult = useCallback(
+    async (result: SearchCandidate, fallbackName: string) => {
+      const nextSmiles = result.smiles || result.canonicalSmiles || '';
+      if (!nextSmiles) {
+        throw new Error('PubChem did not return a SMILES string for this query.');
+      }
+
+      setSmiles(nextSmiles);
+      pushSmilesHistory(nextSmiles);
+      setCurrentMolecule({
+        source: 'search',
+        name: result.name || result.matchedName || fallbackName,
+        smiles: nextSmiles,
+        inchi: result.inchi ?? null,
+        inchikey: result.inchikey ?? null,
+        formula: result.formula ?? null,
+        molecularWeight: result.molecularWeight ?? null,
+        cid: result.cid ?? null,
+        structureData: null,
+        structureFormat: 'sdf'
+      });
+
+      const nextProperties = await loadProperties(nextSmiles);
+      setCurrentMolecule((prev) => ({
+        ...prev,
+        formula: prev.formula ?? nextProperties?.formula ?? null,
+        molecularWeight: prev.molecularWeight ?? nextProperties?.molecularWeight ?? null
+      }));
+
+      if (result.cid) {
+        const structureResp = await fetch(`/api/chem/pubchem/structure?cid=${encodeURIComponent(result.cid)}&format=sdf3d`);
+        const structurePayload = (await structureResp.json()) as { error?: string; data?: string };
+        if (!structureResp.ok || !structurePayload.data) {
+          throw new Error(structurePayload.error || 'PubChem structure fetch failed');
+        }
+        syncViewer(structurePayload.data, 'sdf');
+        setCurrentMolecule((prev) => ({ ...prev, structureData: structurePayload.data ?? null, structureFormat: 'sdf' }));
+      } else {
+        await generate3DFromSmiles(nextSmiles, 'search', { name: result.name || result.matchedName || fallbackName, cid: result.cid ?? null }, 'search');
+      }
+
+      setPdbMeta(undefined);
+      toast('PubChem result loaded.', 'success');
+    },
+    [generate3DFromSmiles, loadProperties, pushSmilesHistory, syncViewer, toast]
+  );
+
   const loadByQuery = useCallback(
     async (query: string) => {
       const trimmed = query.trim();
       if (!trimmed) {
-        const message = 'Enter a molecule name or PubChem CID.';
+        const message = 'Enter a molecule name, synonym, fuzzy spelling, or PubChem CID.';
         setModeError('search', message);
         return;
       }
@@ -275,63 +325,30 @@ export function MoleculeStudio() {
       clearModeError('search');
       setLoadingSearch(true);
       try {
-        const response = await fetch(`/api/chem/pubchem/search?query=${encodeURIComponent(trimmed)}`);
-        const result = (await response.json()) as {
+        const response = await fetch(`/api/chem/pubchem/search?query=${encodeURIComponent(trimmed)}&limit=8`);
+        const payload = (await response.json()) as SearchCandidate & {
           error?: string;
-          name?: string;
-          cid?: string | null;
-          smiles?: string | null;
-          canonicalSmiles?: string | null;
-          formula?: string | null;
-          molecularWeight?: number | null;
-          inchi?: string | null;
-          inchikey?: string | null;
+          result?: SearchCandidate;
+          results?: SearchCandidate[];
+          needsSelection?: boolean;
         };
         if (!response.ok) {
-          throw new Error(result.error || 'Search failed');
+          throw new Error(payload.error || 'Search failed');
         }
 
-        const nextSmiles = result.smiles || result.canonicalSmiles || '';
-        if (!nextSmiles) {
-          throw new Error('PubChem did not return a SMILES string for this query.');
+        const candidates = (payload.results?.length ? payload.results : payload.result ? [payload.result] : [payload]).filter(
+          (candidate) => candidate && (candidate.smiles || candidate.canonicalSmiles || candidate.cid)
+        );
+        if (candidates.length === 0) {
+          throw new Error('PubChem did not return a usable molecule for this query.');
+        }
+        if (payload.needsSelection || candidates.length > 1) {
+          setSearchCandidateState({ query: trimmed, candidates });
+          toast(`${candidates.length} possible PubChem matches found. Choose one to load.`, 'info');
+          return;
         }
 
-        setSmiles(nextSmiles);
-        pushSmilesHistory(nextSmiles);
-        setCurrentMolecule({
-          source: 'search',
-          name: result.name || trimmed,
-          smiles: nextSmiles,
-          inchi: result.inchi ?? null,
-          inchikey: result.inchikey ?? null,
-          formula: result.formula ?? null,
-          molecularWeight: result.molecularWeight ?? null,
-          cid: result.cid ?? null,
-          structureData: null,
-          structureFormat: 'sdf'
-        });
-
-        const nextProperties = await loadProperties(nextSmiles);
-        setCurrentMolecule((prev) => ({
-          ...prev,
-          formula: prev.formula ?? nextProperties?.formula ?? null,
-          molecularWeight: prev.molecularWeight ?? nextProperties?.molecularWeight ?? null
-        }));
-
-        if (result.cid) {
-          const structureResp = await fetch(`/api/chem/pubchem/structure?cid=${encodeURIComponent(result.cid)}&format=sdf3d`);
-          const structurePayload = (await structureResp.json()) as { error?: string; data?: string };
-          if (!structureResp.ok || !structurePayload.data) {
-            throw new Error(structurePayload.error || 'PubChem structure fetch failed');
-          }
-          syncViewer(structurePayload.data, 'sdf');
-          setCurrentMolecule((prev) => ({ ...prev, structureData: structurePayload.data ?? null, structureFormat: 'sdf' }));
-        } else {
-          await generate3DFromSmiles(nextSmiles, 'search', { name: result.name || trimmed, cid: result.cid ?? null }, 'search');
-        }
-
-        setPdbMeta(undefined);
-        toast('PubChem result loaded.', 'success');
+        await loadSearchResult(candidates[0], trimmed);
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Search failed';
         setModeError('search', message);
@@ -340,7 +357,26 @@ export function MoleculeStudio() {
         setLoadingSearch(false);
       }
     },
-    [clearModeError, generate3DFromSmiles, loadProperties, pushSmilesHistory, setModeError, syncViewer, toast]
+    [clearModeError, loadSearchResult, setModeError, toast]
+  );
+
+  const selectSearchCandidate = useCallback(
+    async (candidate: SearchCandidate) => {
+      const query = searchCandidateState?.query || candidate.name || candidate.matchedName || 'PubChem result';
+      setSearchCandidateState(null);
+      clearModeError('search');
+      setLoadingSearch(true);
+      try {
+        await loadSearchResult(candidate, query);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Search failed';
+        setModeError('search', message);
+        toast(message, 'error');
+      } finally {
+        setLoadingSearch(false);
+      }
+    },
+    [clearModeError, loadSearchResult, searchCandidateState?.query, setModeError, toast]
   );
 
   const loadSmiles = useCallback(
@@ -777,6 +813,65 @@ export function MoleculeStudio() {
         </div>
       ) : null}
 
+      {searchCandidateState ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/50 p-4" role="dialog" aria-modal="true" aria-labelledby="search-candidates-title">
+          <div className="flex max-h-[88vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-2xl">
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-200 px-5 py-4">
+              <div>
+                <h2 id="search-candidates-title" className="text-lg font-bold text-slate-950">Choose a PubChem compound</h2>
+                <p className="mt-1 text-sm text-slate-600">
+                  Search is now tolerant of aliases and close spellings. Select the exact substance for{' '}
+                  <span className="font-semibold text-slate-800">{searchCandidateState.query}</span>.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setSearchCandidateState(null)}
+                className="rounded-md border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Close
+              </button>
+            </div>
+            <div className="min-h-0 overflow-y-auto p-4">
+              <div className="grid gap-3">
+                {searchCandidateState.candidates.map((candidate, index) => (
+                  <button
+                    key={`${candidate.cid || candidate.inchikey || candidate.name || index}-${index}`}
+                    type="button"
+                    onClick={() => selectSearchCandidate(candidate)}
+                    disabled={loadingSearch}
+                    className="group rounded-2xl border border-slate-200 bg-white p-4 text-left transition hover:border-sky-300 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h3 className="text-base font-bold text-slate-950">{candidate.name || candidate.matchedName || `CID ${candidate.cid}`}</h3>
+                          {candidate.matchType ? (
+                            <span className="rounded-full bg-sky-100 px-2 py-1 text-xs font-semibold text-sky-700">{matchTypeLabel(candidate.matchType)}</span>
+                          ) : null}
+                        </div>
+                        {candidate.iupacName && candidate.iupacName !== candidate.name ? (
+                          <p className="mt-1 line-clamp-2 text-sm text-slate-600">{candidate.iupacName}</p>
+                        ) : null}
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs text-slate-600">
+                          {candidate.cid ? <span className="rounded-md bg-slate-100 px-2 py-1">CID {candidate.cid}</span> : null}
+                          {candidate.formula ? <span className="rounded-md bg-slate-100 px-2 py-1">{candidate.formula}</span> : null}
+                          {candidate.molecularWeight ? <span className="rounded-md bg-slate-100 px-2 py-1">{candidate.molecularWeight.toFixed(2)} g/mol</span> : null}
+                          {candidate.matchScore ? <span className="rounded-md bg-slate-100 px-2 py-1">{Math.round(candidate.matchScore * 100)}% match</span> : null}
+                        </div>
+                      </div>
+                      <span className="rounded-xl bg-slate-950 px-3 py-2 text-sm font-semibold text-white group-hover:bg-sky-700">
+                        Load
+                      </span>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="pointer-events-none fixed right-4 top-4 z-50 flex flex-col gap-2 md:right-6">
         {toastMessages.map((item) => (
           <div key={item.id} className={`toast pointer-events-auto max-w-[min(80vw,360px)] border ${toastClass(item.level)} bg-white/95`}>
@@ -802,4 +897,13 @@ function firstExportValue(...values: Array<string | null | undefined>) {
 
 function stripFileExtension(value?: string | null) {
   return value?.replace(/\.[a-zA-Z0-9]{1,8}$/u, '') || '';
+}
+
+function matchTypeLabel(type: SearchCandidate['matchType']) {
+  if (type === 'cid') return 'CID';
+  if (type === 'inchikey') return 'InChIKey';
+  if (type === 'smiles') return 'SMILES';
+  if (type === 'autocomplete') return 'Suggested';
+  if (type === 'normalized-name') return 'Fuzzy';
+  return 'Name match';
 }

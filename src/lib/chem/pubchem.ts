@@ -5,6 +5,8 @@ import { fetchWithTimeout } from './http';
 const PUBCHEM = 'https://pubchem.ncbi.nlm.nih.gov/rest/pug';
 
 const supportedPropertyKeys = [
+  'Title',
+  'IUPACName',
   'MolecularFormula',
   'MolecularWeight',
   'ExactMass',
@@ -21,6 +23,36 @@ const supportedPropertyKeys = [
   'InChI',
   'InChIKey'
 ] as const;
+
+type CandidateMatchType = NonNullable<MoleculeSearchResult['matchType']>;
+
+type CandidateSeed = {
+  value: string;
+  matchType: CandidateMatchType;
+  score: number;
+  matchedName?: string;
+};
+
+const commonNameAliases = new Map<string, string[]>([
+  ['acetylsalicylic acid', ['aspirin']],
+  ['acetyl salicylic acid', ['aspirin']],
+  ['paracetamol', ['acetaminophen']],
+  ['acetaminophen', ['paracetamol']],
+  ['ethyl alcohol', ['ethanol']],
+  ['methyl alcohol', ['methanol']],
+  ['isopropyl alcohol', ['isopropanol']],
+  ['vitamin c', ['ascorbic acid']],
+  ['table salt', ['sodium chloride']],
+  ['baking soda', ['sodium bicarbonate']]
+]);
+
+const greekLetterReplacements: Array<[RegExp, string]> = [
+  [/\u03b1/giu, 'alpha'],
+  [/\u03b2/giu, 'beta'],
+  [/\u03b3/giu, 'gamma'],
+  [/\u03b4/giu, 'delta'],
+  [/\u03bc/giu, 'micro']
+];
 
 export type PubChemStructureResult = {
   data: string;
@@ -48,6 +80,13 @@ async function fetchText(url: string): Promise<string> {
 async function getCidFromName(name: string): Promise<string | null> {
   const res = await fetchJson<{ IdentifierList?: { CID?: number[] } }>(`${PUBCHEM}/compound/name/${encodeURIComponent(name)}/cids/JSON`);
   return res.IdentifierList?.CID?.[0]?.toString() ?? null;
+}
+
+async function getAutocompleteTerms(query: string, limit: number): Promise<string[]> {
+  if (!query || /^\d+$/.test(query)) return [];
+  const url = `https://pubchem.ncbi.nlm.nih.gov/rest/autocomplete/compound/${encodeURIComponent(query)}/JSON?limit=${limit}`;
+  const data = await fetchJson<{ dictionary_terms?: { compound?: string[] } }>(url);
+  return [...new Set(data.dictionary_terms?.compound?.map((item) => item.trim()).filter(Boolean) ?? [])];
 }
 
 async function getCidFromSmiles(smiles: string): Promise<string | null> {
@@ -95,22 +134,29 @@ function getMolecularWeight(props: Record<string, unknown>) {
 function toSearchResult(
   query: string,
   props: Record<string, unknown>,
-  fallbackCid?: string | null
+  fallbackCid?: string | null,
+  options: { matchType?: CandidateMatchType; matchScore?: number; matchedName?: string } = {}
 ): MoleculeSearchResult | null {
   const smiles = getSmiles(props);
   const cid = typeof props.CID === 'number' || typeof props.CID === 'string' ? String(props.CID) : fallbackCid ?? null;
+  const title = typeof props.Title === 'string' ? props.Title : undefined;
+  const iupacName = typeof props.IUPACName === 'string' ? props.IUPACName : undefined;
 
   if (!cid && !smiles && !props.MolecularFormula) return null;
 
   return {
     cid,
-    name: query,
+    name: title || options.matchedName || iupacName || query,
     smiles,
     formula: typeof props.MolecularFormula === 'string' ? props.MolecularFormula : undefined,
     molecularWeight: getMolecularWeight(props),
     inchi: typeof props.InChI === 'string' ? props.InChI : undefined,
     inchikey: typeof props.InChIKey === 'string' ? props.InChIKey : undefined,
-    canonicalSmiles: smiles
+    iupacName,
+    canonicalSmiles: smiles,
+    matchedName: options.matchedName,
+    matchType: options.matchType,
+    matchScore: options.matchScore
   };
 }
 
@@ -123,18 +169,109 @@ export async function getCompoundByNameOrIdentifier(query: string): Promise<Mole
 
   if (isInchiKey) {
     const props = await fetchProperties(normalized.toUpperCase(), 'inchikey').catch(() => ({}));
-    const result = toSearchResult(normalized, props);
+    const result = toSearchResult(normalized, props, null, { matchType: 'inchikey', matchScore: 1 });
     return result ? { ...result, inchikey: normalized.toUpperCase() } : null;
   }
 
   const cid = isCid ? normalized : await resolveCid(normalized);
   if (cid) {
     const props = await fetchProperties(cid, 'cid');
-    return toSearchResult(normalized, props, cid);
+    return toSearchResult(normalized, props, cid, { matchType: isCid ? 'cid' : 'exact-name', matchScore: isCid ? 1 : 0.96, matchedName: isCid ? `CID ${cid}` : normalized });
   }
 
   const propsByName = await fetchProperties(normalized, 'name').catch(() => ({}));
-  return toSearchResult(normalized, propsByName);
+  return toSearchResult(normalized, propsByName, null, { matchType: 'exact-name', matchScore: 0.9, matchedName: normalized });
+}
+
+export async function searchCompoundsByNameOrIdentifier(query: string, limit = 8): Promise<MoleculeSearchResult[]> {
+  const normalized = normalizeSearchQuery(query);
+  if (!normalized) return [];
+  const boundedLimit = Math.max(1, Math.min(limit, 12));
+  const seeds = await buildCandidateSeeds(normalized, boundedLimit);
+  const results: MoleculeSearchResult[] = [];
+  const seen = new Set<string>();
+
+  for (const seed of seeds) {
+    const result = await getCompoundByNameOrIdentifier(seed.value).catch(() => null);
+    if (!result) continue;
+    const key = result.cid ? `cid:${result.cid}` : result.inchikey ? `inchikey:${result.inchikey}` : result.canonicalSmiles ? `smiles:${result.canonicalSmiles}` : `name:${normalizeSearchQuery(result.name || seed.value)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    results.push({
+      ...result,
+      name: result.name || seed.matchedName || seed.value,
+      matchedName: seed.matchedName || seed.value,
+      matchType: result.matchType === 'cid' || result.matchType === 'inchikey' || result.matchType === 'smiles' ? result.matchType : seed.matchType,
+      matchScore: Math.max(seed.score, result.matchScore ?? 0)
+    });
+    if (results.length >= boundedLimit) break;
+  }
+
+  return results.sort((a, b) => (b.matchScore ?? 0) - (a.matchScore ?? 0));
+}
+
+export function normalizeSearchQuery(value: string): string {
+  let normalized = value.normalize('NFKC').trim();
+  for (const [pattern, replacement] of greekLetterReplacements) {
+    normalized = normalized.replace(pattern, replacement);
+  }
+  return normalized
+    .replace(/^cid\s*[:#-]?\s*/i, '')
+    .replace(/\s*\([^)]*\)\s*/g, ' ')
+    .replace(/[_/|]+/g, ' ')
+    .replace(/[\u2010-\u2015\u2212]+/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+async function buildCandidateSeeds(query: string, limit: number): Promise<CandidateSeed[]> {
+  const seeds: CandidateSeed[] = [];
+  const variants = searchVariants(query);
+
+  for (const [index, variant] of variants.entries()) {
+    seeds.push({
+      value: variant,
+      matchType: index === 0 ? 'exact-name' : 'normalized-name',
+      score: index === 0 ? 0.98 : 0.86 - index * 0.02,
+      matchedName: variant
+    });
+  }
+
+  for (const variant of variants.slice(0, 3)) {
+    const terms = await getAutocompleteTerms(variant, limit).catch(() => []);
+    terms.forEach((term, index) => {
+      seeds.push({
+        value: term,
+        matchType: 'autocomplete',
+        score: 0.82 - index * 0.025,
+        matchedName: term
+      });
+    });
+  }
+
+  return uniqueSeeds(seeds).slice(0, Math.max(limit * 2, 8));
+}
+
+function searchVariants(query: string): string[] {
+  const lower = query.toLowerCase();
+  const compact = lower.replace(/[^a-z0-9]+/g, '');
+  const dePunctuated = lower.replace(/[-,.;:]+/g, ' ').replace(/\s+/g, ' ').trim();
+  const variants = [query, lower, dePunctuated];
+
+  if (compact && compact !== lower) variants.push(compact);
+  for (const alias of commonNameAliases.get(lower) ?? []) variants.push(alias);
+  for (const alias of commonNameAliases.get(dePunctuated) ?? []) variants.push(alias);
+  return [...new Set(variants.filter(Boolean))];
+}
+
+function uniqueSeeds(seeds: CandidateSeed[]): CandidateSeed[] {
+  const best = new Map<string, CandidateSeed>();
+  for (const seed of seeds) {
+    const key = normalizeSearchQuery(seed.value).toLowerCase();
+    const current = best.get(key);
+    if (!current || seed.score > current.score) best.set(key, seed);
+  }
+  return [...best.values()].sort((a, b) => b.score - a.score);
 }
 
 export async function fetchSmilesProperties(smiles: string): Promise<Record<string, unknown>> {

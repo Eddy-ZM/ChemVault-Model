@@ -1,6 +1,12 @@
 export {};
 
-import type { QuantumCalculationRequest, QuantumCalculationResult, QuantumEngineStatus } from '@/lib/chem/quantumTypes';
+import type {
+  ExternalQuantumEngineConfig,
+  QuantumCalculationRequest,
+  QuantumCalculationResult,
+  QuantumEngineKind,
+  QuantumEngineStatus
+} from '@/lib/chem/quantumTypes';
 
 declare global {
   interface Window {
@@ -9,7 +15,10 @@ declare global {
       isDesktop: boolean;
       userApiPrefix: string;
       platform: string;
-      getQuantumEngineStatus: () => Promise<QuantumEngineStatus>;
+      getQuantumEngineStatus: (engine?: QuantumEngineKind) => Promise<QuantumEngineStatus>;
+      getExternalQuantumConfig: (engine: Exclude<QuantumEngineKind, 'xtb'>) => Promise<ExternalQuantumEngineConfig>;
+      saveExternalQuantumConfig: (config: ExternalQuantumEngineConfig) => Promise<ExternalQuantumEngineConfig>;
+      selectQuantumEngineExecutable: (engine: Exclude<QuantumEngineKind, 'xtb'>) => Promise<string | null>;
       runQuantumCalculation: (request: QuantumCalculationRequest) => Promise<QuantumCalculationResult>;
     };
   }

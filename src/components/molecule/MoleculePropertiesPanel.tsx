@@ -3,7 +3,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { ElectrostaticAnalysis } from '@/lib/chem/electrostaticAnalysis';
 import { analyzeElectrostatics, structureToXyz } from '@/lib/chem/electrostaticAnalysis';
-import type { QuantumCalculationResult, QuantumEngineStatus } from '@/lib/chem/quantumTypes';
+import type {
+  ExternalQuantumEngineConfig,
+  QuantumCalculationMode,
+  QuantumCalculationResult,
+  QuantumEngineKind,
+  QuantumEngineStatus
+} from '@/lib/chem/quantumTypes';
 import { MoleculeProperties } from '@/lib/chem/types';
 import { formatValue } from '@/lib/chem/moleculeUtils';
 
@@ -42,6 +48,29 @@ const cards: Array<{ key: keyof MoleculeProperties; label: string; unit?: string
   { key: 'heavyAtomCount', label: 'Heavy Atom Count' },
   { key: 'formalCharge', label: 'Formal Charge' }
 ];
+
+const engineOptions: Array<{ value: QuantumEngineKind; label: string; description: string }> = [
+  { value: 'xtb', label: 'xTB GFN2', description: 'Local semiempirical engine' },
+  { value: 'gaussian', label: 'Gaussian', description: 'External licensed engine' },
+  { value: 'orca', label: 'ORCA', description: 'External licensed engine' }
+];
+
+const defaultExternalConfigs: Record<Exclude<QuantumEngineKind, 'xtb'>, ExternalQuantumEngineConfig> = {
+  gaussian: {
+    engine: 'gaussian',
+    executablePath: '',
+    method: 'B3LYP',
+    basisSet: '6-31G(d)',
+    routeOptions: 'Pop=Full'
+  },
+  orca: {
+    engine: 'orca',
+    executablePath: '',
+    method: 'B3LYP',
+    basisSet: 'def2-SVP',
+    routeOptions: 'TightSCF'
+  }
+};
 
 export function MoleculePropertiesPanel({ metadata, properties, loading, onCopy }: Props) {
   const smiles = metadata?.smiles?.trim() || 'N/A';
@@ -139,9 +168,14 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
   const [status, setStatus] = useState<QuantumEngineStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [running, setRunning] = useState(false);
+  const [selectedEngine, setSelectedEngine] = useState<QuantumEngineKind>('xtb');
   const [charge, setCharge] = useState(0);
   const [unpairedElectrons, setUnpairedElectrons] = useState(0);
-  const [calculationMode, setCalculationMode] = useState<'single-point' | 'geometry-optimization'>('single-point');
+  const [calculationMode, setCalculationMode] = useState<QuantumCalculationMode>('single-point');
+  const [externalConfig, setExternalConfig] = useState<ExternalQuantumEngineConfig>(defaultExternalConfigs.gaussian);
+  const [configLoading, setConfigLoading] = useState(false);
+  const [configMessage, setConfigMessage] = useState('');
+  const [configRevision, setConfigRevision] = useState(0);
   const [result, setResult] = useState<QuantumCalculationResult | null>(null);
   const [error, setError] = useState('');
 
@@ -154,7 +188,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
     }
 
     setStatusLoading(true);
-    api.getQuantumEngineStatus()
+    api.getQuantumEngineStatus(selectedEngine)
       .then((nextStatus) => {
         if (!cancelled) setStatus(nextStatus);
       })
@@ -162,8 +196,9 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
         if (!cancelled) {
           setStatus({
             available: false,
-            engine: 'xTB',
-            method: 'GFN2-xTB',
+            engine: selectedEngine,
+            engineLabel: engineLabel(selectedEngine),
+            method: selectedEngine === 'xtb' ? 'GFN2-xTB' : externalMethodLabel(externalConfig),
             message: statusError instanceof Error ? statusError.message : 'Could not inspect the quantum engine.'
           });
         }
@@ -175,14 +210,70 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [configRevision, externalConfig, selectedEngine]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const api = window.chemVaultDesktop;
+    if (selectedEngine === 'xtb' || !api?.getExternalQuantumConfig) return;
+
+    setConfigLoading(true);
+    setConfigMessage('');
+    api.getExternalQuantumConfig(selectedEngine)
+      .then((config) => {
+        if (!cancelled) setExternalConfig(config);
+      })
+      .catch((configError) => {
+        if (!cancelled) {
+          setExternalConfig(defaultExternalConfigs[selectedEngine]);
+          setConfigMessage(configError instanceof Error ? configError.message : 'Could not load external engine settings.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setConfigLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedEngine]);
 
   useEffect(() => {
     setResult(null);
     setError('');
-  }, [xyz, charge, unpairedElectrons, calculationMode]);
+  }, [xyz, selectedEngine, charge, unpairedElectrons, calculationMode, externalConfig.method, externalConfig.basisSet, externalConfig.routeOptions]);
 
   const canRun = Boolean(xyz && status?.available && !running);
+
+  async function saveExternalConfig(nextConfig = externalConfig) {
+    const api = window.chemVaultDesktop;
+    if (selectedEngine === 'xtb' || !api?.saveExternalQuantumConfig) return;
+
+    setConfigLoading(true);
+    setConfigMessage('');
+    try {
+      const saved = await api.saveExternalQuantumConfig({ ...nextConfig, engine: selectedEngine });
+      setExternalConfig(saved);
+      setConfigMessage('External engine settings saved.');
+      setConfigRevision((value) => value + 1);
+    } catch (saveError) {
+      setConfigMessage(saveError instanceof Error ? saveError.message : 'Could not save external engine settings.');
+    } finally {
+      setConfigLoading(false);
+    }
+  }
+
+  async function chooseExternalExecutable() {
+    const api = window.chemVaultDesktop;
+    if (selectedEngine === 'xtb' || !api?.selectQuantumEngineExecutable) return;
+
+    const selectedPath = await api.selectQuantumEngineExecutable(selectedEngine);
+    if (!selectedPath) return;
+
+    const nextConfig = { ...externalConfig, engine: selectedEngine, executablePath: selectedPath };
+    setExternalConfig(nextConfig);
+    await saveExternalConfig(nextConfig);
+  }
 
   async function runCalculation() {
     const api = window.chemVaultDesktop;
@@ -191,11 +282,15 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
     setRunning(true);
     setError('');
     try {
+      const isExternalEngine = selectedEngine !== 'xtb';
       const nextResult = await api.runQuantumCalculation({
         xyz,
+        engine: selectedEngine,
         charge,
         unpairedElectrons,
-        method: 'gfn2',
+        method: isExternalEngine ? externalConfig.method : 'gfn2',
+        basisSet: isExternalEngine ? externalConfig.basisSet : undefined,
+        routeOptions: isExternalEngine ? externalConfig.routeOptions : undefined,
         calculationMode,
         timeoutMs: calculationMode === 'geometry-optimization' ? 600000 : 180000
       });
@@ -220,12 +315,30 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
         <div>
           <h3 className="text-lg font-bold text-slate-950">Professional Quantum Calculation</h3>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Windows desktop GFN2-xTB engine for energy, population charges, and molecular dipole moment.
+            Windows desktop calculation port for local semiempirical xTB and user-licensed external quantum engines.
           </p>
         </div>
         <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
-          GFN2-xTB
+          {status?.engineLabel || engineLabel(selectedEngine)}
         </span>
+      </div>
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        {engineOptions.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            onClick={() => setSelectedEngine(option.value)}
+            className={`rounded-2xl border px-4 py-3 text-left transition ${
+              selectedEngine === option.value
+                ? 'border-sky-400 bg-sky-50 text-sky-950'
+                : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300'
+            }`}
+          >
+            <span className="block text-sm font-bold">{option.label}</span>
+            <span className="mt-1 block text-xs leading-5 text-slate-500">{option.description}</span>
+          </button>
+        ))}
       </div>
 
       <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${status?.available ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
@@ -233,8 +346,83 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
           ? 'Checking local quantum engine...'
           : status?.available
             ? `Engine ready${status.source ? ` (${status.source})` : ''}${status.version ? `: ${status.version}` : ''}`
-            : status?.message || 'xTB engine is not available.'}
+            : status?.message || 'Selected quantum engine is not available.'}
       </div>
+
+      {selectedEngine !== 'xtb' ? (
+        <div className="mt-4 rounded-3xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <h4 className="text-sm font-bold text-slate-950">External Commercial Engine Port</h4>
+              <p className="mt-1 text-xs leading-5 text-slate-600">
+                Connect a locally installed, properly licensed {engineLabel(selectedEngine)} executable. ChemVault generates input files and parses output; it does not ship the commercial engine.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={chooseExternalExecutable}
+              disabled={configLoading}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              Browse
+            </button>
+          </div>
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
+            <label className="min-w-0">
+              <span className="block text-xs font-medium text-slate-500">Executable path</span>
+              <input
+                type="text"
+                value={externalConfig.executablePath}
+                onChange={(event) => setExternalConfig((config) => ({ ...config, engine: selectedEngine, executablePath: event.target.value }))}
+                placeholder={selectedEngine === 'gaussian' ? 'C:\\G16W\\g16.exe' : 'C:\\ORCA\\orca.exe'}
+                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-400"
+              />
+            </label>
+            <label className="min-w-0">
+              <span className="block text-xs font-medium text-slate-500">Method</span>
+              <input
+                type="text"
+                value={externalConfig.method}
+                onChange={(event) => setExternalConfig((config) => ({ ...config, engine: selectedEngine, method: event.target.value }))}
+                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-400"
+              />
+            </label>
+            <label className="min-w-0">
+              <span className="block text-xs font-medium text-slate-500">Basis set</span>
+              <input
+                type="text"
+                value={externalConfig.basisSet}
+                onChange={(event) => setExternalConfig((config) => ({ ...config, engine: selectedEngine, basisSet: event.target.value }))}
+                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-400"
+              />
+            </label>
+          </div>
+
+          <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+            <label className="min-w-0">
+              <span className="block text-xs font-medium text-slate-500">Route options</span>
+              <input
+                type="text"
+                value={externalConfig.routeOptions || ''}
+                onChange={(event) => setExternalConfig((config) => ({ ...config, engine: selectedEngine, routeOptions: event.target.value }))}
+                placeholder={selectedEngine === 'gaussian' ? 'Pop=Full SCF=Tight' : 'TightSCF'}
+                className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-400"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={() => saveExternalConfig()}
+              disabled={configLoading}
+              className="self-end rounded-xl bg-slate-950 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              Save Port
+            </button>
+          </div>
+
+          {configMessage ? <p className="mt-3 text-xs leading-5 text-slate-600">{configMessage}</p> : null}
+        </div>
+      ) : null}
 
       <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto]">
         <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -305,7 +493,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
           {result.dipoleDebye ? (
             <VectorCard
               title="Dipole vector"
-              subtitle="Debye components returned by the xTB calculation."
+              subtitle={`Debye components returned by ${result.engineLabel}.`}
               vector={result.dipoleDebye}
               unit="D"
             />
@@ -468,4 +656,14 @@ function formatNumber(value: number) {
 function formatSigned(value: number) {
   if (!Number.isFinite(value)) return 'N/A';
   return `${value >= 0 ? '+' : ''}${value.toFixed(4)}`;
+}
+
+function engineLabel(engine: QuantumEngineKind) {
+  if (engine === 'gaussian') return 'Gaussian';
+  if (engine === 'orca') return 'ORCA';
+  return 'xTB';
+}
+
+function externalMethodLabel(config: ExternalQuantumEngineConfig) {
+  return config.basisSet ? `${config.method}/${config.basisSet}` : config.method;
 }

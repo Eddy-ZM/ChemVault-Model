@@ -1,19 +1,35 @@
+export type QuantumEngineKind = 'xtb' | 'gaussian' | 'orca';
+
+export type QuantumCalculationMode = 'single-point' | 'geometry-optimization';
+
 export type QuantumEngineStatus = {
   available: boolean;
-  engine: 'xTB';
-  method: 'GFN2-xTB';
+  engine: QuantumEngineKind;
+  engineLabel: string;
+  method: string;
   executable?: string;
-  source?: 'bundled' | 'environment' | 'path';
+  source?: 'bundled' | 'environment' | 'path' | 'configured';
   version?: string;
   message?: string;
 };
 
+export type ExternalQuantumEngineConfig = {
+  engine: Exclude<QuantumEngineKind, 'xtb'>;
+  executablePath: string;
+  method: string;
+  basisSet: string;
+  routeOptions?: string;
+};
+
 export type QuantumCalculationRequest = {
   xyz: string;
+  engine?: QuantumEngineKind;
   charge: number;
   unpairedElectrons: number;
-  method: 'gfn2';
-  calculationMode?: 'single-point' | 'geometry-optimization';
+  method: string;
+  basisSet?: string;
+  routeOptions?: string;
+  calculationMode?: QuantumCalculationMode;
   timeoutMs?: number;
 };
 
@@ -25,9 +41,10 @@ export type QuantumAtomCharge = {
 
 export type QuantumCalculationResult = {
   ok: boolean;
-  engine: 'xTB';
-  method: 'GFN2-xTB';
-  calculationMode: 'single-point' | 'geometry-optimization';
+  engine: QuantumEngineKind;
+  engineLabel: string;
+  method: string;
+  calculationMode: QuantumCalculationMode;
   energyHartree: number | null;
   dipoleDebye: {
     x: number;
@@ -36,7 +53,7 @@ export type QuantumCalculationResult = {
     total: number;
   } | null;
   charges: QuantumAtomCharge[];
-  chargeModel: 'xTB population analysis';
+  chargeModel: string;
   elapsedMs: number;
   warnings: string[];
   outputTail: string;

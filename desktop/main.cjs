@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const http = require('node:http');
@@ -10,6 +10,28 @@ const DEFAULT_USER_ORIGIN = 'https://user.chemvault.science';
 const DEFAULT_START_PATH = '/molecule/';
 const QUANTUM_TIMEOUT_MS = 180000;
 const MAX_QUANTUM_INPUT_BYTES = 2 * 1024 * 1024;
+const EXTERNAL_ENGINE_CONFIG_FILE = 'quantum-engines.json';
+const QUANTUM_ENGINE_LABELS = {
+  xtb: 'xTB',
+  gaussian: 'Gaussian',
+  orca: 'ORCA'
+};
+const DEFAULT_EXTERNAL_ENGINE_CONFIG = {
+  gaussian: {
+    engine: 'gaussian',
+    executablePath: '',
+    method: 'B3LYP',
+    basisSet: '6-31G(d)',
+    routeOptions: 'Pop=Full'
+  },
+  orca: {
+    engine: 'orca',
+    executablePath: '',
+    method: 'B3LYP',
+    basisSet: 'def2-SVP',
+    routeOptions: 'TightSCF'
+  }
+};
 
 let mainWindow = null;
 let staticServer = null;
@@ -17,8 +39,11 @@ const userCookieJar = new Map();
 
 app.setName(APP_TITLE);
 
-ipcMain.handle('quantum:engine-status', async () => getQuantumEngineStatus());
+ipcMain.handle('quantum:engine-status', async (_event, engine) => getQuantumEngineStatus(engine));
 ipcMain.handle('quantum:run', async (_event, request) => runQuantumCalculation(request));
+ipcMain.handle('quantum:external-config:get', async (_event, engine) => getExternalQuantumConfig(engine));
+ipcMain.handle('quantum:external-config:save', async (_event, config) => saveExternalQuantumConfig(config));
+ipcMain.handle('quantum:select-executable', async (_event, engine) => selectQuantumEngineExecutable(engine));
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -393,12 +418,18 @@ function cacheControl(filePath) {
     : 'no-cache';
 }
 
-async function getQuantumEngineStatus() {
+async function getQuantumEngineStatus(engineValue) {
+  const engineKind = normalizeEngineKind(engineValue);
+  if (engineKind !== 'xtb') {
+    return getExternalEngineStatus(engineKind);
+  }
+
   const engine = resolveXtbEngine();
   if (!engine) {
     return {
       available: false,
-      engine: 'xTB',
+      engine: 'xtb',
+      engineLabel: QUANTUM_ENGINE_LABELS.xtb,
       method: 'GFN2-xTB',
       message: 'xTB engine was not found. Install xTB, set CHEMVAULT_XTB_PATH, or bundle it under desktop/quantum/xtb before building.'
     };
@@ -407,7 +438,8 @@ async function getQuantumEngineStatus() {
   const versionResult = await runProcess(engine.executable, ['--version'], { timeoutMs: 10000, env: buildXtbEnv(engine) });
   return {
     available: true,
-    engine: 'xTB',
+    engine: 'xtb',
+    engineLabel: QUANTUM_ENGINE_LABELS.xtb,
     method: 'GFN2-xTB',
     executable: engine.executable,
     source: engine.source,
@@ -417,12 +449,18 @@ async function getQuantumEngineStatus() {
 }
 
 async function runQuantumCalculation(request) {
+  const engineKind = normalizeEngineKind(request?.engine);
+  if (engineKind !== 'xtb') {
+    return runExternalQuantumCalculation(engineKind, request);
+  }
+
   const startedAt = Date.now();
   const engine = resolveXtbEngine();
   const calculationMode = normalizeCalculationMode(request?.calculationMode);
   const baseResult = {
     ok: false,
-    engine: 'xTB',
+    engine: 'xtb',
+    engineLabel: QUANTUM_ENGINE_LABELS.xtb,
     method: 'GFN2-xTB',
     calculationMode,
     energyHartree: null,
@@ -482,7 +520,8 @@ async function runQuantumCalculation(request) {
 
     return {
       ok: processResult.exitCode === 0,
-      engine: 'xTB',
+      engine: 'xtb',
+      engineLabel: QUANTUM_ENGINE_LABELS.xtb,
       method: 'GFN2-xTB',
       calculationMode,
       energyHartree,
@@ -499,6 +538,141 @@ async function runQuantumCalculation(request) {
       ...baseResult,
       elapsedMs: Date.now() - startedAt,
       error: error instanceof Error ? error.message : 'Quantum calculation failed.'
+    };
+  } finally {
+    await fs.promises.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function getExternalEngineStatus(engineKind) {
+  const config = await getExternalQuantumConfig(engineKind);
+  const engineLabel = QUANTUM_ENGINE_LABELS[engineKind] || 'External engine';
+  const methodLabel = externalMethodLabel(config);
+
+  if (!config.executablePath) {
+    return {
+      available: false,
+      engine: engineKind,
+      engineLabel,
+      method: methodLabel,
+      message: `${engineLabel} executable is not configured. Select a licensed local installation before running this engine.`
+    };
+  }
+
+  if (!isReadableFile(config.executablePath)) {
+    return {
+      available: false,
+      engine: engineKind,
+      engineLabel,
+      method: methodLabel,
+      executable: config.executablePath,
+      source: 'configured',
+      message: `${engineLabel} executable was not found at the configured path.`
+    };
+  }
+
+  return {
+    available: true,
+    engine: engineKind,
+    engineLabel,
+    method: methodLabel,
+    executable: config.executablePath,
+    source: 'configured',
+    message: `${engineLabel} external engine port is ready.`
+  };
+}
+
+async function runExternalQuantumCalculation(engineKind, request) {
+  const startedAt = Date.now();
+  const config = await getExternalQuantumConfig(engineKind);
+  const engineLabel = QUANTUM_ENGINE_LABELS[engineKind] || 'External engine';
+  const calculationMode = normalizeCalculationMode(request?.calculationMode);
+  const method = sanitizeQuantumToken(request?.method) || config.method;
+  const basisSet = sanitizeQuantumToken(request?.basisSet) || config.basisSet;
+  const routeOptions = sanitizeRouteOptions(request?.routeOptions || config.routeOptions || '');
+  const methodLabel = externalMethodLabel({ ...config, method, basisSet });
+  const baseResult = {
+    ok: false,
+    engine: engineKind,
+    engineLabel,
+    method: methodLabel,
+    calculationMode,
+    energyHartree: null,
+    dipoleDebye: null,
+    charges: [],
+    chargeModel: `${engineLabel} Mulliken population analysis`,
+    elapsedMs: 0,
+    warnings: [],
+    outputTail: ''
+  };
+
+  if (!config.executablePath || !isReadableFile(config.executablePath)) {
+    return {
+      ...baseResult,
+      elapsedMs: Date.now() - startedAt,
+      error: `${engineLabel} executable is not configured or cannot be read.`
+    };
+  }
+
+  const xyz = normalizeQuantumInput(request?.xyz);
+  if (!xyz) {
+    return {
+      ...baseResult,
+      elapsedMs: Date.now() - startedAt,
+      error: 'A valid 3D XYZ structure is required before running an external quantum engine.'
+    };
+  }
+
+  const charge = boundedInteger(request?.charge, 0, -20, 20);
+  const unpairedElectrons = boundedInteger(request?.unpairedElectrons, 0, 0, 20);
+  const multiplicity = unpairedElectrons + 1;
+  const timeoutMs = boundedInteger(request?.timeoutMs, calculationMode === 'geometry-optimization' ? 900000 : 300000, 30000, 3600000);
+  const workDir = await fs.promises.mkdtemp(path.join(app.getPath('temp'), `chemvault-${engineKind}-`));
+
+  try {
+    const job = engineKind === 'gaussian'
+      ? await prepareGaussianJob(workDir, xyz, { charge, multiplicity, method, basisSet, routeOptions, calculationMode })
+      : await prepareOrcaJob(workDir, xyz, { charge, multiplicity, method, basisSet, routeOptions, calculationMode });
+    const processResult = await runProcess(config.executablePath, job.args, {
+      cwd: workDir,
+      timeoutMs,
+      env: {
+        ...process.env,
+        PATH: [path.dirname(config.executablePath), process.env.PATH || ''].join(path.delimiter)
+      }
+    });
+    const fileOutput = await readOptionalText(job.outputPath);
+    const output = [processResult.stdout, processResult.stderr, fileOutput].filter(Boolean).join('\n').trim();
+    const energyHartree = engineKind === 'gaussian' ? parseGaussianEnergy(output) : parseOrcaEnergy(output);
+    const dipoleDebye = engineKind === 'gaussian' ? parseGaussianDipole(output) : parseOrcaDipole(output);
+    const charges = engineKind === 'gaussian' ? parseGaussianCharges(output) : parseOrcaCharges(output);
+    const warnings = [];
+
+    if (processResult.timedOut) warnings.push(`${engineLabel} calculation timed out before completion.`);
+    if (energyHartree === null) warnings.push('Total energy was not found in the external engine output.');
+    if (!dipoleDebye) warnings.push('Dipole moment was not found in the external engine output.');
+    if (charges.length === 0) warnings.push('Mulliken charges were not found in the external engine output.');
+
+    return {
+      ok: processResult.exitCode === 0,
+      engine: engineKind,
+      engineLabel,
+      method: methodLabel,
+      calculationMode,
+      energyHartree,
+      dipoleDebye,
+      charges,
+      chargeModel: `${engineLabel} Mulliken population analysis`,
+      elapsedMs: Date.now() - startedAt,
+      warnings,
+      outputTail: outputTail(output),
+      error: processResult.exitCode === 0 ? undefined : `${engineLabel} exited with code ${processResult.exitCode}.`
+    };
+  } catch (error) {
+    return {
+      ...baseResult,
+      elapsedMs: Date.now() - startedAt,
+      error: error instanceof Error ? error.message : `${engineLabel} calculation failed.`
     };
   } finally {
     await fs.promises.rm(workDir, { recursive: true, force: true }).catch(() => {});
@@ -577,6 +751,100 @@ function buildXtbEnv(engine) {
   };
 }
 
+async function getExternalQuantumConfig(engineValue) {
+  const engine = normalizeExternalEngineKind(engineValue);
+  const configs = await readExternalEngineConfigs();
+  return normalizeExternalEngineConfig({
+    ...DEFAULT_EXTERNAL_ENGINE_CONFIG[engine],
+    ...(configs[engine] || {})
+  });
+}
+
+async function saveExternalQuantumConfig(config) {
+  const normalized = normalizeExternalEngineConfig(config);
+  const configs = await readExternalEngineConfigs();
+  configs[normalized.engine] = normalized;
+  const configPath = externalEngineConfigPath();
+  await fs.promises.mkdir(path.dirname(configPath), { recursive: true });
+  await fs.promises.writeFile(configPath, JSON.stringify(configs, null, 2), 'utf8');
+  return normalized;
+}
+
+async function selectQuantumEngineExecutable(engineValue) {
+  const engine = normalizeExternalEngineKind(engineValue);
+  const engineLabel = QUANTUM_ENGINE_LABELS[engine] || 'External engine';
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: `Select ${engineLabel} executable`,
+    properties: ['openFile'],
+    filters: [
+      { name: `${engineLabel} executable`, extensions: ['exe', 'bat', 'cmd'] },
+      { name: 'All files', extensions: ['*'] }
+    ]
+  });
+
+  if (result.canceled || result.filePaths.length === 0) {
+    return null;
+  }
+
+  return result.filePaths[0];
+}
+
+async function readExternalEngineConfigs() {
+  try {
+    const content = await fs.promises.readFile(externalEngineConfigPath(), 'utf8');
+    const parsed = JSON.parse(content);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function externalEngineConfigPath() {
+  return path.join(app.getPath('userData'), EXTERNAL_ENGINE_CONFIG_FILE);
+}
+
+function normalizeExternalEngineConfig(value) {
+  const engine = normalizeExternalEngineKind(value?.engine);
+  const defaults = DEFAULT_EXTERNAL_ENGINE_CONFIG[engine];
+  return {
+    engine,
+    executablePath: String(value?.executablePath || '').trim(),
+    method: sanitizeQuantumToken(value?.method) || defaults.method,
+    basisSet: sanitizeQuantumToken(value?.basisSet) || defaults.basisSet,
+    routeOptions: sanitizeRouteOptions(value?.routeOptions || defaults.routeOptions || '')
+  };
+}
+
+function normalizeEngineKind(value) {
+  if (value === 'gaussian' || value === 'orca') return value;
+  return 'xtb';
+}
+
+function normalizeExternalEngineKind(value) {
+  return value === 'orca' ? 'orca' : 'gaussian';
+}
+
+function externalMethodLabel(config) {
+  return config.basisSet ? `${config.method}/${config.basisSet}` : config.method;
+}
+
+function sanitizeQuantumToken(value) {
+  return String(value || '')
+    .replace(/[\r\n]/gu, ' ')
+    .replace(/[<>|&;]/gu, '')
+    .trim()
+    .slice(0, 80);
+}
+
+function sanitizeRouteOptions(value) {
+  return String(value || '')
+    .replace(/[\r\n]/gu, ' ')
+    .replace(/[<>|&;]/gu, '')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .slice(0, 160);
+}
+
 function isReadableFile(filePath) {
   try {
     return Boolean(filePath) && fs.statSync(filePath).isFile();
@@ -630,6 +898,82 @@ function normalizeQuantumInput(value) {
   return `${lines.slice(0, atomCount + 2).join('\n')}\n`;
 }
 
+async function prepareGaussianJob(workDir, xyz, options) {
+  const atoms = parseXyzGeometry(xyz);
+  const inputPath = path.join(workDir, 'chemvault.gjf');
+  const outputPath = path.join(workDir, 'chemvault.log');
+  const routeParts = [
+    '#p',
+    `${options.method}/${options.basisSet}`,
+    options.calculationMode === 'geometry-optimization' ? 'Opt' : 'SP',
+    options.routeOptions
+  ].filter(Boolean);
+  const content = [
+    '%chk=chemvault.chk',
+    routeParts.join(' '),
+    '',
+    'ChemVault Model external Gaussian job',
+    '',
+    `${options.charge} ${options.multiplicity}`,
+    ...atoms.map((atom) => `${atom.element} ${formatCoordinate(atom.x)} ${formatCoordinate(atom.y)} ${formatCoordinate(atom.z)}`),
+    '',
+    ''
+  ].join('\n');
+
+  await fs.promises.writeFile(inputPath, content, 'utf8');
+  return { args: [inputPath], outputPath };
+}
+
+async function prepareOrcaJob(workDir, xyz, options) {
+  const atoms = parseXyzGeometry(xyz);
+  const inputPath = path.join(workDir, 'chemvault.inp');
+  const outputPath = path.join(workDir, 'chemvault.out');
+  const commandParts = [
+    '!',
+    options.method,
+    options.basisSet,
+    options.calculationMode === 'geometry-optimization' ? 'Opt' : 'SP',
+    options.routeOptions
+  ].filter(Boolean);
+  const content = [
+    commandParts.join(' '),
+    '%pal nprocs 4 end',
+    `* xyz ${options.charge} ${options.multiplicity}`,
+    ...atoms.map((atom) => `${atom.element} ${formatCoordinate(atom.x)} ${formatCoordinate(atom.y)} ${formatCoordinate(atom.z)}`),
+    '*',
+    ''
+  ].join('\n');
+
+  await fs.promises.writeFile(inputPath, content, 'utf8');
+  return { args: [inputPath], outputPath };
+}
+
+function parseXyzGeometry(xyz) {
+  const lines = xyz.split(/\r?\n/u).filter((line) => line.trim());
+  const atomCount = Number.parseInt(lines[0], 10);
+  return lines.slice(2, 2 + atomCount).map((line) => {
+    const [element, rawX, rawY, rawZ] = line.trim().split(/\s+/u);
+    return {
+      element: element || '?',
+      x: Number(rawX) || 0,
+      y: Number(rawY) || 0,
+      z: Number(rawZ) || 0
+    };
+  });
+}
+
+function formatCoordinate(value) {
+  return Number.isFinite(value) ? value.toFixed(8) : '0.00000000';
+}
+
+async function readOptionalText(filePath) {
+  try {
+    return await fs.promises.readFile(filePath, 'utf8');
+  } catch {
+    return '';
+  }
+}
+
 function boundedInteger(value, fallback, min, max) {
   const parsed = Number.parseInt(String(value), 10);
   if (!Number.isFinite(parsed)) return fallback;
@@ -673,6 +1017,86 @@ function parseDipole(output) {
   }
 
   return fallback;
+}
+
+function parseGaussianEnergy(output) {
+  const matches = Array.from(output.matchAll(/SCF\s+Done:\s+E\([^)]+\)\s+=\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/giu));
+  const last = matches.at(-1);
+  return last ? Number(last[1]) : null;
+}
+
+function parseGaussianDipole(output) {
+  const matches = Array.from(output.matchAll(/X=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)\s+Y=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)\s+Z=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)\s+Tot=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/giu));
+  const last = matches.at(-1);
+  return last
+    ? {
+        x: Number(last[1]),
+        y: Number(last[2]),
+        z: Number(last[3]),
+        total: Number(last[4])
+      }
+    : null;
+}
+
+function parseGaussianCharges(output) {
+  const section = output.match(/Mulliken\s+charges:[\s\S]*?(?:Sum\s+of\s+Mulliken\s+charges|Dipole moment|Quadrupole moment|Job cpu time)/iu)?.[0] || '';
+  const charges = [];
+  for (const match of section.matchAll(/^\s*(\d+)\s+([A-Za-z]{1,2})\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/gmu)) {
+    charges.push({
+      index: Number(match[1]),
+      element: match[2],
+      charge: Number(match[3])
+    });
+  }
+  return charges;
+}
+
+function parseOrcaEnergy(output) {
+  const matches = Array.from(output.matchAll(/FINAL\s+SINGLE\s+POINT\s+ENERGY\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/giu));
+  const last = matches.at(-1);
+  return last ? Number(last[1]) : null;
+}
+
+function parseOrcaDipole(output) {
+  const vectorMatches = Array.from(output.matchAll(/Total\s+Dipole\s+Moment\s*:?\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/giu));
+  const magnitudeMatches = Array.from(output.matchAll(/Magnitude\s+\(Debye\)\s*:?\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/giu));
+  const vector = vectorMatches.at(-1);
+  const magnitude = magnitudeMatches.at(-1);
+
+  if (vector) {
+    const scale = 2.541746;
+    const x = Number(vector[1]) * scale;
+    const y = Number(vector[2]) * scale;
+    const z = Number(vector[3]) * scale;
+    return {
+      x,
+      y,
+      z,
+      total: magnitude ? Number(magnitude[1]) : Math.hypot(x, y, z)
+    };
+  }
+
+  return magnitude
+    ? {
+        x: 0,
+        y: 0,
+        z: 0,
+        total: Number(magnitude[1])
+      }
+    : null;
+}
+
+function parseOrcaCharges(output) {
+  const section = output.match(/MULLIKEN\s+ATOMIC\s+CHARGES[\s\S]*?(?:Sum\s+of\s+atomic\s+charges|LOEWDIN|HIRSHFELD|DIPOLE|ORBITAL)/iu)?.[0] || '';
+  const charges = [];
+  for (const match of section.matchAll(/^\s*(\d+)\s+([A-Za-z]{1,2})\s*:?\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/gmu)) {
+    charges.push({
+      index: Number(match[1]) + 1,
+      element: match[2],
+      charge: Number(match[3])
+    });
+  }
+  return charges;
 }
 
 async function readCharges(workDir, xyz) {

@@ -80,6 +80,9 @@ ChemVault Model separates quantum-related features by platform:
   clearly labeled as an approximation.
 - Windows desktop app: professional local quantum calculation through
   xTB GFN2-xTB, with single-point analysis and optional geometry optimization.
+- Windows desktop app: external engine port for user-licensed Gaussian and ORCA
+  installations. ChemVault generates input files, runs the configured local
+  executable, and parses output for energy, dipole moment, and Mulliken charges.
 - Apple app: no required quantum engine integration for this project stage.
 
 The Windows desktop app checks for xTB in this order:
@@ -107,6 +110,12 @@ reports GFN2-xTB total energy, xTB population charges, molecular dipole moment,
 run mode, and calculation logs for loaded 3D structures. If xTB is not installed
 or bundled, the app shows the missing engine status instead of pretending to run
 a professional calculation.
+
+For commercial quantum chemistry software, ChemVault provides a local external
+engine port instead of bundling licensed software. In the desktop calculation
+panel, choose Gaussian or ORCA, select the executable path, set method, basis
+set, and route options, then save the port. Users are responsible for having a
+valid local license and installation for any commercial engine they connect.
 
 ### GitHub Actions
 

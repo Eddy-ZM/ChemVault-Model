@@ -6,6 +6,7 @@ import { analyzeElectrostatics, structureToXyz } from '@/lib/chem/electrostaticA
 import type {
   CommercialQuantumEngineKind,
   ExternalQuantumEngineConfig,
+  LocalEngineInstallProgress,
   LocalEngineStatus,
   LocalOpenSourceEngineKind,
   QuantumCalculationMode,
@@ -186,6 +187,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
   const [localEngineLoading, setLocalEngineLoading] = useState(false);
   const [installingEngine, setInstallingEngine] = useState<LocalOpenSourceEngineKind | null>(null);
   const [localEngineMessage, setLocalEngineMessage] = useState('');
+  const [installProgress, setInstallProgress] = useState<LocalEngineInstallProgress | null>(null);
   const [setupRequestEngines, setSetupRequestEngines] = useState<LocalOpenSourceEngineKind[]>([]);
   const [setupPromptDismissed, setSetupPromptDismissed] = useState(false);
   const [result, setResult] = useState<QuantumCalculationResult | null>(null);
@@ -257,6 +259,13 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
   useEffect(() => {
     void loadLocalEngines();
     void loadEngineSetupRequest();
+    const unsubscribe = window.chemVaultDesktop?.onLocalEngineInstallProgress?.((progress) => {
+      setInstallProgress(progress);
+    });
+
+    return () => {
+      unsubscribe?.();
+    };
   }, []);
 
   useEffect(() => {
@@ -312,6 +321,13 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
 
     setInstallingEngine(engine);
     setLocalEngineMessage('');
+    setInstallProgress({
+      engine,
+      engineLabel: localEngineLabel(engine),
+      phase: 'checking',
+      percent: 5,
+      message: `Starting ${engine} setup.`
+    });
     try {
       const installResult = await api.installLocalOpenSourceEngine(engine);
       setLocalEngineMessage(
@@ -319,6 +335,9 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
           ? `${installResult.engineLabel} is ready.`
           : installResult.error || `${installResult.engineLabel} installation did not complete.`
       );
+      if (installResult.outputTail) {
+        setInstallProgress((progress) => progress ? { ...progress, outputTail: installResult.outputTail } : progress);
+      }
       await loadLocalEngines();
       setConfigRevision((value) => value + 1);
       if (engine === 'pyscf' && installResult.ok) {
@@ -475,6 +494,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
         loading={localEngineLoading}
         installingEngine={installingEngine}
         message={localEngineMessage}
+        progress={installProgress}
         setupPromptDismissed={setupPromptDismissed}
         setupRequestEngines={setupRequestEngines}
         onDismissSetup={clearEngineSetupRequest}
@@ -723,6 +743,7 @@ function LocalEngineManager({
   installingEngine,
   loading,
   message,
+  progress,
   setupPromptDismissed,
   setupRequestEngines,
   onDismissSetup,
@@ -734,6 +755,7 @@ function LocalEngineManager({
   installingEngine: LocalOpenSourceEngineKind | null;
   loading: boolean;
   message: string;
+  progress: LocalEngineInstallProgress | null;
   setupPromptDismissed: boolean;
   setupRequestEngines: LocalOpenSourceEngineKind[];
   onDismissSetup: () => void;
@@ -772,6 +794,23 @@ function LocalEngineManager({
           </button>
         </div>
       </div>
+
+      {progress ? (
+        <div className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-slate-900">{progress.engineLabel}: {progress.message}</p>
+            <span className="text-xs font-semibold text-slate-500">{progress.percent}%</span>
+          </div>
+          <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
+            <div className="h-full rounded-full bg-sky-700 transition-all" style={{ width: `${progress.percent}%` }} />
+          </div>
+          {progress.outputTail ? (
+            <pre className="mt-3 max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3 text-xs leading-5 text-slate-100">
+              {progress.outputTail}
+            </pre>
+          ) : null}
+        </div>
+      ) : null}
 
       {showSetupPrompt ? (
         <div className="mt-4 rounded-2xl border border-sky-200 bg-sky-50 px-4 py-3">
@@ -992,6 +1031,12 @@ function engineLabel(engine: QuantumEngineKind) {
   if (engine === 'pyscf') return 'PySCF';
   if (engine === 'gaussian') return 'Gaussian';
   if (engine === 'orca') return 'ORCA';
+  return 'xTB';
+}
+
+function localEngineLabel(engine: LocalOpenSourceEngineKind) {
+  if (engine === 'pyscf') return 'PySCF';
+  if (engine === 'psi4') return 'Psi4';
   return 'xTB';
 }
 

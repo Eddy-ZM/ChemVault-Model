@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { Header } from '@/components/layout/Header';
+import { DesktopQuantumWelcome } from '@/components/home/DesktopQuantumWelcome';
 
 export default function HomePage() {
   return (
@@ -22,6 +23,7 @@ export default function HomePage() {
               Open Studio
             </Link>
           </div>
+          <DesktopQuantumWelcome />
         </section>
       </main>
     </>

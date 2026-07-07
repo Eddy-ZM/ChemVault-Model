@@ -41,6 +41,15 @@ export type LocalEngineInstallResult = {
   error?: string;
 };
 
+export type LocalEngineInstallProgress = {
+  engine: LocalOpenSourceEngineKind;
+  engineLabel: string;
+  phase: 'checking' | 'creating-environment' | 'installing-dependencies' | 'installing-engine' | 'verifying' | 'complete' | 'error';
+  percent: number;
+  message: string;
+  outputTail?: string;
+};
+
 export type EngineSetupRequest = {
   pending: boolean;
   engines: LocalOpenSourceEngineKind[];

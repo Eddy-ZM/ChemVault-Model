@@ -69,7 +69,9 @@ ipcMain.handle('quantum:external-config:save', async (_event, config) => saveExt
 ipcMain.handle('quantum:external-config:discover', async (_event, engine) => discoverAndSaveExternalQuantumConfig(engine));
 ipcMain.handle('quantum:select-executable', async (_event, engine) => selectQuantumEngineExecutable(engine));
 ipcMain.handle('quantum:local-engines:list', async () => getLocalOpenSourceEngines());
-ipcMain.handle('quantum:local-engine:install', async (_event, engine) => installLocalOpenSourceEngine(engine));
+ipcMain.handle('quantum:local-engine:install', async (event, engine) => installLocalOpenSourceEngine(engine, (progress) => {
+  event.sender.send('quantum:local-engine:install-progress', progress);
+}));
 ipcMain.handle('quantum:local-engines:open-folder', async () => openLocalEngineFolder());
 ipcMain.handle('quantum:engine-setup-request:get', async () => readEngineSetupRequest());
 ipcMain.handle('quantum:engine-setup-request:clear', async () => clearEngineSetupRequest());
@@ -856,14 +858,15 @@ async function getPsi4Status() {
   };
 }
 
-async function installLocalOpenSourceEngine(engineValue) {
+async function installLocalOpenSourceEngine(engineValue, onProgress = () => {}) {
   const engine = normalizeLocalOpenSourceEngineKind(engineValue);
   if (engine === 'pyscf') {
-    return installPyscfEngine();
+    return installPyscfEngine(onProgress);
   }
 
   const status = engine === 'xtb' ? await getXtbLocalStatus() : await getPsi4Status();
   const engineLabel = QUANTUM_ENGINE_LABELS[engine];
+  emitInstallProgress(onProgress, engine, 'error', 100, `${engineLabel} requires a manual system installation.`);
   return {
     ok: false,
     engine,
@@ -874,9 +877,10 @@ async function installLocalOpenSourceEngine(engineValue) {
   };
 }
 
-async function installPyscfEngine() {
+async function installPyscfEngine(onProgress = () => {}) {
   const engine = 'pyscf';
   const engineLabel = QUANTUM_ENGINE_LABELS.pyscf;
+  emitInstallProgress(onProgress, engine, 'checking', 5, 'Checking Python 3 and existing PySCF environment.');
   const python = await resolveSystemPython();
   const venvDir = path.join(localEnginesRoot(), 'pyscf');
   const managedPython = pyscfPythonExecutable();
@@ -884,6 +888,7 @@ async function installPyscfEngine() {
 
   if (!python) {
     const status = await getPyscfStatus();
+    emitInstallProgress(onProgress, engine, 'error', 100, 'Python 3 was not found. Install Python 3 or set CHEMVAULT_PYTHON_PATH.');
     return {
       ok: false,
       engine,
@@ -897,12 +902,19 @@ async function installPyscfEngine() {
   await fs.promises.mkdir(localEnginesRoot(), { recursive: true });
 
   if (!isReadableFile(managedPython)) {
-    const createResult = await runProcess(python.executable, [...python.argsPrefix, '-m', 'venv', venvDir], {
-      timeoutMs: 180000
-    });
+    emitInstallProgress(onProgress, engine, 'creating-environment', 15, 'Creating the managed Python environment.');
+    const createResult = await runProcessWithProgress(
+      python.executable,
+      [...python.argsPrefix, '-m', 'venv', venvDir],
+      {
+        timeoutMs: 180000,
+        progress: (output) => emitInstallProgress(onProgress, engine, 'creating-environment', 25, 'Creating the managed Python environment.', output)
+      }
+    );
     outputParts.push(createResult.stdout, createResult.stderr);
     if (createResult.exitCode !== 0) {
       const status = await getPyscfStatus();
+      emitInstallProgress(onProgress, engine, 'error', 100, 'Could not create the managed Python environment.', outputTail(outputParts.join('\n')));
       return {
         ok: false,
         engine,
@@ -914,17 +926,40 @@ async function installPyscfEngine() {
     }
   }
 
-  const pipUpgrade = await runProcess(managedPython, ['-m', 'pip', 'install', '--upgrade', 'pip', 'wheel', 'setuptools'], {
-    timeoutMs: 600000
-  });
+  emitInstallProgress(onProgress, engine, 'installing-dependencies', 35, 'Upgrading pip, wheel, and setuptools.');
+  const pipUpgrade = await runProcessWithProgress(
+    managedPython,
+    ['-m', 'pip', 'install', '--upgrade', 'pip', 'wheel', 'setuptools'],
+    {
+      timeoutMs: 600000,
+      progress: (output) => emitInstallProgress(onProgress, engine, 'installing-dependencies', 50, 'Upgrading pip, wheel, and setuptools.', output)
+    }
+  );
   outputParts.push(pipUpgrade.stdout, pipUpgrade.stderr);
 
-  const installResult = await runProcess(managedPython, ['-m', 'pip', 'install', '--upgrade', 'pyscf'], {
-    timeoutMs: 1200000
-  });
+  emitInstallProgress(onProgress, engine, 'installing-engine', 60, 'Installing or updating PySCF. This can take several minutes.');
+  const installResult = await runProcessWithProgress(
+    managedPython,
+    ['-m', 'pip', 'install', '--upgrade', 'pyscf'],
+    {
+      timeoutMs: 1200000,
+      progress: (output) => emitInstallProgress(onProgress, engine, 'installing-engine', 80, 'Installing or updating PySCF. This can take several minutes.', output)
+    }
+  );
   outputParts.push(installResult.stdout, installResult.stderr);
 
+  emitInstallProgress(onProgress, engine, 'verifying', 90, 'Verifying PySCF installation.');
   const status = await getPyscfStatus();
+  emitInstallProgress(
+    onProgress,
+    engine,
+    installResult.exitCode === 0 && status.available ? 'complete' : 'error',
+    100,
+    installResult.exitCode === 0 && status.available
+      ? 'PySCF is ready for local DFT/HF calculations.'
+      : 'PySCF installation did not complete.',
+    outputTail(outputParts.join('\n'))
+  );
   return {
     ok: installResult.exitCode === 0 && status.available,
     engine,
@@ -1696,6 +1731,73 @@ function runProcess(executable, args, options = {}) {
         timedOut
       });
     });
+  });
+}
+
+function runProcessWithProgress(executable, args, options = {}) {
+  return new Promise((resolve) => {
+    const child = spawn(executable, args, {
+      cwd: options.cwd,
+      env: options.env || process.env,
+      windowsHide: true,
+      shell: process.platform === 'win32' && /\.(cmd|bat)$/iu.test(executable)
+    });
+    const stdout = [];
+    const stderr = [];
+    let timedOut = false;
+    let lastProgressAt = 0;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGTERM');
+    }, options.timeoutMs || QUANTUM_TIMEOUT_MS);
+
+    function pushProgress() {
+      if (typeof options.progress !== 'function') return;
+      const now = Date.now();
+      if (now - lastProgressAt < 500) return;
+      lastProgressAt = now;
+      options.progress(outputTail(`${Buffer.concat(stdout).toString('utf8')}\n${Buffer.concat(stderr).toString('utf8')}`));
+    }
+
+    child.stdout.on('data', (chunk) => {
+      stdout.push(Buffer.from(chunk));
+      pushProgress();
+    });
+    child.stderr.on('data', (chunk) => {
+      stderr.push(Buffer.from(chunk));
+      pushProgress();
+    });
+    child.on('error', (error) => {
+      clearTimeout(timer);
+      const result = { exitCode: -1, stdout: '', stderr: error.message, timedOut };
+      if (typeof options.progress === 'function') options.progress(error.message);
+      resolve(result);
+    });
+    child.on('close', (exitCode) => {
+      clearTimeout(timer);
+      const result = {
+        exitCode: exitCode ?? -1,
+        stdout: Buffer.concat(stdout).toString('utf8'),
+        stderr: Buffer.concat(stderr).toString('utf8'),
+        timedOut
+      };
+      if (typeof options.progress === 'function') {
+        options.progress(outputTail(`${result.stdout}\n${result.stderr}`));
+      }
+      resolve(result);
+    });
+  });
+}
+
+function emitInstallProgress(onProgress, engine, phase, percent, message, output) {
+  if (typeof onProgress !== 'function') return;
+  onProgress({
+    engine,
+    engineLabel: QUANTUM_ENGINE_LABELS[engine] || engine,
+    phase,
+    percent: Math.max(0, Math.min(100, Number(percent) || 0)),
+    message,
+    outputTail: output || undefined
   });
 }
 

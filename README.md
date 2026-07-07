@@ -71,13 +71,18 @@ npm run build:desktop
 Windows EXE builds should be run on Windows. Non-Windows machines should use
 the included GitHub Actions workflow or run the build on a Windows computer.
 
-### Desktop Quantum Engine
+### Quantum Calculation Strategy
 
-The website keeps the browser-side fast electrostatic estimate. The Windows
-desktop app can run a professional local quantum engine through xTB GFN2-xTB
-when xTB is available on the machine.
+ChemVault Model separates quantum-related features by platform:
 
-The desktop app checks for xTB in this order:
+- Web: browser-side approximate standard for partial charges, dipole vector,
+  and charge separation. It uses an iterative EEM/Gasteiger-style model and is
+  clearly labeled as an approximation.
+- Windows desktop app: professional local quantum calculation through
+  xTB GFN2-xTB, with single-point analysis and optional geometry optimization.
+- Apple app: no required quantum engine integration for this project stage.
+
+The Windows desktop app checks for xTB in this order:
 
 ```text
 CHEMVAULT_XTB_PATH
@@ -97,10 +102,11 @@ Then run:
 npm run build:desktop
 ```
 
-The professional calculation panel appears in the desktop app and reports
-GFN2-xTB total energy, partial charges, and molecular dipole moment for loaded
-3D structures. If xTB is not installed or bundled, the app shows the missing
-engine status instead of pretending to run a professional calculation.
+The professional calculation panel appears only in the Windows desktop app and
+reports GFN2-xTB total energy, xTB population charges, molecular dipole moment,
+run mode, and calculation logs for loaded 3D structures. If xTB is not installed
+or bundled, the app shows the missing engine status instead of pretending to run
+a professional calculation.
 
 ### GitHub Actions
 

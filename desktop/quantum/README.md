@@ -1,6 +1,8 @@
 # Optional Quantum Engine Bundle
 
-ChemVault Model can run professional desktop quantum calculations through xTB.
+ChemVault Model can run professional Windows desktop quantum calculations
+through xTB GFN2-xTB. The web app keeps the browser-side approximate standard,
+and the Apple app is not required to ship a local quantum engine at this stage.
 
 To bundle xTB into the Windows installer, place the complete Windows xTB
 runtime under:
@@ -17,5 +19,5 @@ desktop/quantum/xtb/bin/xtb.exe
 ```
 
 Do not commit third-party binary files unless their license and distribution
-terms have been reviewed. If xTB is not bundled, the desktop app will also look
-for `CHEMVAULT_XTB_PATH` and then `xtb.exe` on the system `PATH`.
+terms have been reviewed. If xTB is not bundled, the Windows desktop app will
+also look for `CHEMVAULT_XTB_PATH` and then `xtb.exe` on the system `PATH`.

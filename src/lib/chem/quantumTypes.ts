@@ -3,6 +3,7 @@ export type QuantumEngineStatus = {
   engine: 'xTB';
   method: 'GFN2-xTB';
   executable?: string;
+  source?: 'bundled' | 'environment' | 'path';
   version?: string;
   message?: string;
 };
@@ -12,6 +13,7 @@ export type QuantumCalculationRequest = {
   charge: number;
   unpairedElectrons: number;
   method: 'gfn2';
+  calculationMode?: 'single-point' | 'geometry-optimization';
   timeoutMs?: number;
 };
 
@@ -25,6 +27,7 @@ export type QuantumCalculationResult = {
   ok: boolean;
   engine: 'xTB';
   method: 'GFN2-xTB';
+  calculationMode: 'single-point' | 'geometry-optimization';
   energyHartree: number | null;
   dipoleDebye: {
     x: number;
@@ -33,6 +36,7 @@ export type QuantumCalculationResult = {
     total: number;
   } | null;
   charges: QuantumAtomCharge[];
+  chargeModel: 'xTB population analysis';
   elapsedMs: number;
   warnings: string[];
   outputTail: string;

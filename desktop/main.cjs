@@ -394,8 +394,8 @@ function cacheControl(filePath) {
 }
 
 async function getQuantumEngineStatus() {
-  const executable = findXtbExecutable();
-  if (!executable) {
+  const engine = resolveXtbEngine();
+  if (!engine) {
     return {
       available: false,
       engine: 'xTB',
@@ -404,12 +404,13 @@ async function getQuantumEngineStatus() {
     };
   }
 
-  const versionResult = await runProcess(executable, ['--version'], { timeoutMs: 10000 });
+  const versionResult = await runProcess(engine.executable, ['--version'], { timeoutMs: 10000, env: buildXtbEnv(engine) });
   return {
     available: true,
     engine: 'xTB',
     method: 'GFN2-xTB',
-    executable,
+    executable: engine.executable,
+    source: engine.source,
     version: extractVersion(`${versionResult.stdout}\n${versionResult.stderr}`),
     message: 'xTB engine is ready.'
   };
@@ -417,24 +418,27 @@ async function getQuantumEngineStatus() {
 
 async function runQuantumCalculation(request) {
   const startedAt = Date.now();
-  const status = await getQuantumEngineStatus();
+  const engine = resolveXtbEngine();
+  const calculationMode = normalizeCalculationMode(request?.calculationMode);
   const baseResult = {
     ok: false,
     engine: 'xTB',
     method: 'GFN2-xTB',
+    calculationMode,
     energyHartree: null,
     dipoleDebye: null,
     charges: [],
+    chargeModel: 'xTB population analysis',
     elapsedMs: 0,
     warnings: [],
     outputTail: ''
   };
 
-  if (!status.available || !status.executable) {
+  if (!engine) {
     return {
       ...baseResult,
       elapsedMs: Date.now() - startedAt,
-      error: status.message || 'xTB engine is not available.'
+      error: 'xTB engine was not found. Install xTB, set CHEMVAULT_XTB_PATH, or bundle it under desktop/quantum/xtb before building.'
     };
   }
 
@@ -455,16 +459,14 @@ async function runQuantumCalculation(request) {
 
   try {
     await fs.promises.writeFile(inputPath, xyz, 'utf8');
+    const args = buildXtbArgs(inputPath, charge, unpairedElectrons, calculationMode);
     const processResult = await runProcess(
-      status.executable,
-      [inputPath, '--gfn', '2', '--chrg', String(charge), '--uhf', String(unpairedElectrons)],
+      engine.executable,
+      args,
       {
         cwd: workDir,
         timeoutMs,
-        env: {
-          ...process.env,
-          OMP_NUM_THREADS: process.env.OMP_NUM_THREADS || '4'
-        }
+        env: buildXtbEnv(engine)
       }
     );
     const output = `${processResult.stdout}\n${processResult.stderr}`.trim();
@@ -482,9 +484,11 @@ async function runQuantumCalculation(request) {
       ok: processResult.exitCode === 0,
       engine: 'xTB',
       method: 'GFN2-xTB',
+      calculationMode,
       energyHartree,
       dipoleDebye,
       charges,
+      chargeModel: 'xTB population analysis',
       elapsedMs: Date.now() - startedAt,
       warnings,
       outputTail: outputTail(output),
@@ -501,15 +505,15 @@ async function runQuantumCalculation(request) {
   }
 }
 
-function findXtbExecutable() {
-  const envCandidate = normalizeExecutableCandidate(process.env.CHEMVAULT_XTB_PATH);
+function resolveXtbEngine() {
+  const envCandidate = normalizeExecutableCandidate(process.env.CHEMVAULT_XTB_PATH, 'environment');
   const candidates = [
     envCandidate,
     ...bundledXtbCandidates(),
     ...pathXtbCandidates()
   ].filter(Boolean);
 
-  return candidates.find((candidate) => isReadableFile(candidate)) || null;
+  return candidates.find((candidate) => candidate && isReadableFile(candidate.executable)) || null;
 }
 
 function bundledXtbCandidates() {
@@ -518,28 +522,59 @@ function bundledXtbCandidates() {
     path.join(app.getAppPath(), 'quantum'),
     path.join(app.getAppPath(), 'desktop', 'quantum')
   ];
-  return roots.flatMap((root) => [
-    path.join(root, 'xtb.exe'),
-    path.join(root, 'xtb', 'xtb.exe'),
-    path.join(root, 'xtb', 'bin', 'xtb.exe')
-  ]);
+  return roots.flatMap((root) => candidateExecutables(root, 'bundled'));
 }
 
 function pathXtbCandidates() {
   const names = process.platform === 'win32' ? ['xtb.exe', 'xtb.cmd', 'xtb.bat'] : ['xtb'];
   return String(process.env.PATH || '')
     .split(path.delimiter)
-    .flatMap((directory) => names.map((name) => path.join(directory, name)));
+    .flatMap((directory) => names.map((name) => ({ executable: path.join(directory, name), root: directory, source: 'path' })));
 }
 
-function normalizeExecutableCandidate(value) {
+function normalizeExecutableCandidate(value, source) {
   if (!value) return null;
   const trimmed = String(value).trim().replace(/^["']|["']$/gu, '');
   if (!trimmed) return null;
-  if (isReadableFile(trimmed)) return trimmed;
+
+  if (isReadableFile(trimmed)) {
+    return { executable: trimmed, root: path.dirname(trimmed), source };
+  }
+
   const executableName = process.platform === 'win32' ? 'xtb.exe' : 'xtb';
-  const nested = path.join(trimmed, executableName);
-  return isReadableFile(nested) ? nested : trimmed;
+  const direct = path.join(trimmed, executableName);
+  if (isReadableFile(direct)) return { executable: direct, root: trimmed, source };
+
+  const nested = path.join(trimmed, 'bin', executableName);
+  return isReadableFile(nested) ? { executable: nested, root: trimmed, source } : { executable: direct, root: trimmed, source };
+}
+
+function candidateExecutables(root, source) {
+  const executableName = process.platform === 'win32' ? 'xtb.exe' : 'xtb';
+  return [
+    { executable: path.join(root, executableName), root, source },
+    { executable: path.join(root, 'xtb', executableName), root: path.join(root, 'xtb'), source },
+    { executable: path.join(root, 'xtb', 'bin', executableName), root: path.join(root, 'xtb'), source }
+  ];
+}
+
+function buildXtbArgs(inputPath, charge, unpairedElectrons, calculationMode) {
+  const args = [inputPath, '--gfn', '2', '--chrg', String(charge), '--uhf', String(unpairedElectrons)];
+  if (calculationMode === 'geometry-optimization') {
+    args.push('--opt');
+  }
+  return args;
+}
+
+function buildXtbEnv(engine) {
+  const binDir = path.dirname(engine.executable);
+  const pathEntries = [binDir, engine.root].filter(Boolean);
+  return {
+    ...process.env,
+    PATH: [...pathEntries, process.env.PATH || ''].join(path.delimiter),
+    XTBPATH: process.env.XTBPATH || engine.root,
+    OMP_NUM_THREADS: process.env.OMP_NUM_THREADS || '4'
+  };
 }
 
 function isReadableFile(filePath) {
@@ -599,6 +634,10 @@ function boundedInteger(value, fallback, min, max) {
   const parsed = Number.parseInt(String(value), 10);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(max, Math.max(min, parsed));
+}
+
+function normalizeCalculationMode(value) {
+  return value === 'geometry-optimization' ? 'geometry-optimization' : 'single-point';
 }
 
 function extractVersion(output) {

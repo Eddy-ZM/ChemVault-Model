@@ -141,6 +141,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
   const [running, setRunning] = useState(false);
   const [charge, setCharge] = useState(0);
   const [unpairedElectrons, setUnpairedElectrons] = useState(0);
+  const [calculationMode, setCalculationMode] = useState<'single-point' | 'geometry-optimization'>('single-point');
   const [result, setResult] = useState<QuantumCalculationResult | null>(null);
   const [error, setError] = useState('');
 
@@ -179,7 +180,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
   useEffect(() => {
     setResult(null);
     setError('');
-  }, [xyz]);
+  }, [xyz, charge, unpairedElectrons, calculationMode]);
 
   const canRun = Boolean(xyz && status?.available && !running);
 
@@ -195,7 +196,8 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
         charge,
         unpairedElectrons,
         method: 'gfn2',
-        timeoutMs: 180000
+        calculationMode,
+        timeoutMs: calculationMode === 'geometry-optimization' ? 600000 : 180000
       });
       setResult(nextResult);
       if (!nextResult.ok) {
@@ -218,7 +220,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
         <div>
           <h3 className="text-lg font-bold text-slate-950">Professional Quantum Calculation</h3>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Desktop GFN2-xTB calculation for total energy, partial charges, and molecular dipole moment.
+            Windows desktop GFN2-xTB engine for energy, population charges, and molecular dipole moment.
           </p>
         </div>
         <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
@@ -227,10 +229,14 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
       </div>
 
       <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${status?.available ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
-        {statusLoading ? 'Checking local quantum engine...' : status?.available ? `Engine ready${status.version ? `: ${status.version}` : ''}` : status?.message || 'xTB engine is not available.'}
+        {statusLoading
+          ? 'Checking local quantum engine...'
+          : status?.available
+            ? `Engine ready${status.source ? ` (${status.source})` : ''}${status.version ? `: ${status.version}` : ''}`
+            : status?.message || 'xTB engine is not available.'}
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
+      <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto]">
         <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
           <span className="block text-xs font-medium text-slate-500">Total charge</span>
           <input
@@ -254,6 +260,17 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
             onChange={(event) => setUnpairedElectrons(Number(event.target.value))}
             className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-400"
           />
+        </label>
+        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <span className="block text-xs font-medium text-slate-500">Calculation type</span>
+          <select
+            value={calculationMode}
+            onChange={(event) => setCalculationMode(event.target.value as 'single-point' | 'geometry-optimization')}
+            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-400"
+          >
+            <option value="single-point">Single-point analysis</option>
+            <option value="geometry-optimization">Geometry optimization</option>
+          </select>
         </label>
         <button
           type="button"
@@ -281,6 +298,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
             <Metric label="Total energy" value={result.energyHartree === null ? 'N/A' : `${formatNumber(result.energyHartree)} Eh`} />
             <Metric label="Dipole magnitude" value={result.dipoleDebye ? `${formatNumber(result.dipoleDebye.total)} D` : 'N/A'} />
             <Metric label="Partial charges" value={String(result.charges.length)} />
+            <Metric label="Run mode" value={result.calculationMode === 'geometry-optimization' ? 'Optimized' : 'Single point'} />
             <Metric label="Elapsed time" value={`${(result.elapsedMs / 1000).toFixed(1)} s`} />
           </div>
 
@@ -298,7 +316,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
               <div className="grid grid-cols-[72px_72px_minmax(100px,1fr)] bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
                 <span>Atom</span>
                 <span>Elem</span>
-                <span>xTB charge</span>
+                <span>{result.chargeModel}</span>
               </div>
               {strongestCharges.map((atom) => (
                 <div key={atom.index} className="grid grid-cols-[72px_72px_minmax(100px,1fr)] border-t border-slate-100 px-3 py-2 text-sm text-slate-700">
@@ -334,9 +352,9 @@ function ElectrostaticPanel({ analysis }: { analysis: ElectrostaticAnalysis | nu
   if (!analysis) {
     return (
       <div className="mt-5 rounded-3xl border border-dashed border-slate-300 bg-white px-4 py-5">
-        <p className="text-sm font-semibold text-slate-950">Fast Electrostatic Estimate</p>
+        <p className="text-sm font-semibold text-slate-950">Approximate Electrostatic Standard</p>
         <p className="mt-2 text-sm leading-6 text-slate-600">
-          Load a 3D SDF, MOL, XYZ, or PDB structure to estimate partial charges and molecular charge vectors in the browser.
+          Load a 3D SDF, MOL, XYZ, or PDB structure to run the browser-side approximate charge and dipole standard.
         </p>
       </div>
     );
@@ -350,19 +368,20 @@ function ElectrostaticPanel({ analysis }: { analysis: ElectrostaticAnalysis | nu
     <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h3 className="text-lg font-bold text-slate-950">Fast Electrostatic Estimate</h3>
+          <h3 className="text-lg font-bold text-slate-950">Approximate Electrostatic Standard</h3>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Browser-side estimate for partial charges, dipole vector, and charge separation.
+            Browser-side EEM/Gasteiger-style approximation for partial charges, dipole vector, and charge separation.
           </p>
         </div>
         <span className="rounded-full border border-sky-200 bg-sky-50 px-3 py-1 text-xs font-semibold text-sky-800">
-          {analysis.method}
+          {analysis.standard}
         </span>
       </div>
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Metric label="Atoms parsed" value={String(analysis.atoms.length)} />
         <Metric label="Bonds used" value={String(analysis.bonds.length)} />
+        <Metric label="Method" value={analysis.method} />
         <Metric label="Dipole magnitude" value={`${formatNumber(analysis.dipole.magnitudeDebye)} D`} />
         <Metric label="Charge separation" value={analysis.chargeSeparation.distance === null ? 'N/A' : `${formatNumber(analysis.chargeSeparation.distance)} A`} />
       </div>
@@ -370,7 +389,7 @@ function ElectrostaticPanel({ analysis }: { analysis: ElectrostaticAnalysis | nu
       <div className="mt-4 grid gap-3 lg:grid-cols-2">
         <VectorCard
           title="Dipole vector"
-          subtitle="Debye components from estimated partial charges."
+          subtitle="Debye components from approximate partial charges."
           vector={analysis.dipole.vector}
           unit="D"
         />

@@ -20,6 +20,7 @@ export type AtomCharge = ParsedAtom & {
 
 export type ElectrostaticAnalysis = {
   method: string;
+  standard: string;
   atoms: AtomCharge[];
   bonds: ParsedBond[];
   centroid: Vector3;
@@ -43,6 +44,9 @@ type Vector3 = {
 };
 
 const DEBYE_PER_E_ANGSTROM = 4.80320471257;
+const DEFAULT_ELECTRONEGATIVITY = 2.2;
+const DEFAULT_HARDNESS = 10;
+const CHARGE_ITERATIONS = 8;
 
 const ELECTRONEGATIVITY: Record<string, number> = {
   H: 2.2,
@@ -67,6 +71,31 @@ const ELECTRONEGATIVITY: Record<string, number> = {
   Zn: 1.65,
   Br: 2.96,
   I: 2.66
+};
+
+const CHEMICAL_HARDNESS: Record<string, number> = {
+  H: 13.6,
+  Li: 5.4,
+  Be: 9.3,
+  B: 8.3,
+  C: 11.3,
+  N: 14.5,
+  O: 13.6,
+  F: 17.4,
+  Na: 5.1,
+  Mg: 7.6,
+  Al: 6,
+  Si: 8.2,
+  P: 10.5,
+  S: 10.4,
+  Cl: 12.9,
+  K: 4.3,
+  Ca: 6.1,
+  Fe: 7.9,
+  Cu: 7.7,
+  Zn: 9.4,
+  Br: 11.8,
+  I: 10.5
 };
 
 const COVALENT_RADIUS: Record<string, number> = {
@@ -122,10 +151,11 @@ export function analyzeElectrostatics(structureData: string | null | undefined, 
   const dipoleDebye = scaleVector(dipoleVector, DEBYE_PER_E_ANGSTROM);
   const centers = chargeCenters(atoms);
 
-  warnings.push('Fast website estimate only. Not a substitute for ab initio, DFT, xTB, or force-field charge assignment.');
+  warnings.push('Website approximation only. Use the Windows desktop xTB engine for professional quantum results.');
 
   return {
-    method: 'Fast electronegativity estimate',
+    method: 'Iterative EEM/Gasteiger-style approximation',
+    standard: 'Browser approximate standard',
     atoms,
     bonds,
     centroid,
@@ -267,21 +297,30 @@ function inferBonds(atoms: ParsedAtom[]): ParsedBond[] {
 
 function estimatePartialCharges(atoms: ParsedAtom[], bonds: ParsedBond[]) {
   const charges = new Array(atoms.length).fill(0) as number[];
-  bonds.forEach((bond) => {
-    const from = atoms[bond.from];
-    const to = atoms[bond.to];
-    if (!from || !to) return;
-    const fromChi = ELECTRONEGATIVITY[from.element] ?? 2.2;
-    const toChi = ELECTRONEGATIVITY[to.element] ?? 2.2;
-    const orderFactor = Math.min(Math.max(bond.order || 1, 1), 3) ** 0.5;
-    const transfer = clamp((toChi - fromChi) * 0.08 * orderFactor, -0.28, 0.28);
-    charges[bond.from] += transfer;
-    charges[bond.to] -= transfer;
-  });
+
+  for (let iteration = 0; iteration < CHARGE_ITERATIONS; iteration += 1) {
+    const damping = 0.5 ** (iteration + 1);
+
+    bonds.forEach((bond) => {
+      const from = atoms[bond.from];
+      const to = atoms[bond.to];
+      if (!from || !to) return;
+
+      const fromHardness = CHEMICAL_HARDNESS[from.element] ?? DEFAULT_HARDNESS;
+      const toHardness = CHEMICAL_HARDNESS[to.element] ?? DEFAULT_HARDNESS;
+      const fromPotential = (ELECTRONEGATIVITY[from.element] ?? DEFAULT_ELECTRONEGATIVITY) + fromHardness * charges[bond.from];
+      const toPotential = (ELECTRONEGATIVITY[to.element] ?? DEFAULT_ELECTRONEGATIVITY) + toHardness * charges[bond.to];
+      const orderFactor = Math.min(Math.max(bond.order || 1, 1), 3) ** 0.5;
+      const transfer = clamp(((toPotential - fromPotential) / (fromHardness + toHardness)) * orderFactor * damping, -0.12, 0.12);
+
+      charges[bond.from] += transfer;
+      charges[bond.to] -= transfer;
+    });
+  }
 
   const net = charges.reduce((sum, charge) => sum + charge, 0);
   const correction = atoms.length ? net / atoms.length : 0;
-  return charges.map((charge) => charge - correction);
+  return charges.map((charge) => clamp(charge - correction, -1.25, 1.25));
 }
 
 function chargeCenters(atoms: AtomCharge[]) {

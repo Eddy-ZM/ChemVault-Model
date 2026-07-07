@@ -4,7 +4,9 @@
 
 ChemVault Model can also be packaged as a Windows desktop application with Electron.
 The desktop app keeps the existing Next.js web interface and serves the exported
-`out/` files from an internal local server. The app title is `ChemVault Model`.
+`out/` files from an internal local server. The app opens to the same welcome
+screen as the website before entering Molecule Studio. The app title is
+`ChemVault Model`.
 
 ### Install
 

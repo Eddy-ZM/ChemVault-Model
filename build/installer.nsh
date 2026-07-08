@@ -14,10 +14,13 @@ ShowUninstDetails show
 !ifndef BUILD_UNINSTALLER
 Var ChemVaultEngineSetupCheckbox
 Var ChemVaultEngineSetupState
+Var ChemVaultDesktopShortcutCheckbox
+Var ChemVaultDesktopShortcutState
+Var ChemVaultStartMenuShortcutCheckbox
+Var ChemVaultStartMenuShortcutState
 Var ChemVaultEngineSetupTitle
 Var ChemVaultEngineSetupBody
 Var ChemVaultEngineSetupDetails
-Var ChemVaultEngineSetupCommercial
 Var ChemVaultEngineSetupTitleFont
 Var ChemVaultEngineSetupBodyFont
 Var ChemVaultInstallSize
@@ -38,27 +41,32 @@ Function ChemVaultEngineSetupPageCreate
   CreateFont $ChemVaultEngineSetupTitleFont "Segoe UI" 12 700
   CreateFont $ChemVaultEngineSetupBodyFont "Segoe UI" 10 400
 
-  ${NSD_CreateLabel} 0 0 100% 18u "Install details and quantum setup"
+  ${NSD_CreateLabel} 0 0 100% 18u "Install options"
   Pop $ChemVaultEngineSetupTitle
   SendMessage $ChemVaultEngineSetupTitle ${WM_SETFONT} $ChemVaultEngineSetupTitleFont 1
   SetCtlColors $ChemVaultEngineSetupTitle 0x111827 transparent
 
-  ${NSD_CreateLabel} 0 24u 100% 28u "This setup installs ChemVault Model, the local desktop interface, molecular viewer assets, shortcuts, and update metadata."
+  ${NSD_CreateLabel} 0 24u 100% 24u "Choose shortcut and quantum setup preferences before installing ChemVault Model."
   Pop $ChemVaultEngineSetupBody
   SendMessage $ChemVaultEngineSetupBody ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
   SetCtlColors $ChemVaultEngineSetupBody 0x1F2937 transparent
 
-  ${NSD_CreateLabel} 0 58u 100% 18u "Install progress details are expanded on the next page."
+  ${NSD_CreateLabel} 0 54u 100% 18u "Install progress details are expanded on the next page."
   Pop $ChemVaultEngineSetupDetails
   SendMessage $ChemVaultEngineSetupDetails ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
   SetCtlColors $ChemVaultEngineSetupDetails 0x1F2937 transparent
 
-  ${NSD_CreateLabel} 0 82u 100% 18u "Not included: PySCF, xTB, Psi4, Gaussian, or ORCA binaries."
-  Pop $ChemVaultEngineSetupCommercial
-  SendMessage $ChemVaultEngineSetupCommercial ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
-  SetCtlColors $ChemVaultEngineSetupCommercial 0x374151 transparent
+  ${NSD_CreateCheckbox} 0 78u 100% 16u "Create desktop shortcut"
+  Pop $ChemVaultDesktopShortcutCheckbox
+  SendMessage $ChemVaultDesktopShortcutCheckbox ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
+  ${NSD_SetState} $ChemVaultDesktopShortcutCheckbox ${BST_CHECKED}
 
-  ${NSD_CreateCheckbox} 0 106u 100% 18u "Prompt for PySCF setup on first launch"
+  ${NSD_CreateCheckbox} 0 100u 100% 16u "Create Start Menu shortcut"
+  Pop $ChemVaultStartMenuShortcutCheckbox
+  SendMessage $ChemVaultStartMenuShortcutCheckbox ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
+  ${NSD_SetState} $ChemVaultStartMenuShortcutCheckbox ${BST_CHECKED}
+
+  ${NSD_CreateCheckbox} 0 122u 100% 16u "Prompt for PySCF setup on first launch"
   Pop $ChemVaultEngineSetupCheckbox
   SendMessage $ChemVaultEngineSetupCheckbox ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
   ${NSD_SetState} $ChemVaultEngineSetupCheckbox ${BST_CHECKED}
@@ -67,6 +75,8 @@ Function ChemVaultEngineSetupPageCreate
 FunctionEnd
 
 Function ChemVaultEngineSetupPageLeave
+  ${NSD_GetState} $ChemVaultDesktopShortcutCheckbox $ChemVaultDesktopShortcutState
+  ${NSD_GetState} $ChemVaultStartMenuShortcutCheckbox $ChemVaultStartMenuShortcutState
   ${NSD_GetState} $ChemVaultEngineSetupCheckbox $ChemVaultEngineSetupState
 FunctionEnd
 
@@ -92,16 +102,46 @@ FunctionEnd
 
 !macro customInstall
   SetDetailsPrint both
-  DetailPrint "Writing Windows application registration and shortcuts."
+  DetailPrint "Writing Windows application registration and applying shortcut choices."
   ${If} ${FileExists} "$INSTDIR\${UNINSTALL_FILENAME}"
     DetailPrint "Verified uninstaller: $INSTDIR\${UNINSTALL_FILENAME}"
   ${EndIf}
-  ${If} ${FileExists} "$newStartMenuLink"
-    DetailPrint "Verified Start Menu shortcut: $newStartMenuLink"
+
+  ${If} $ChemVaultStartMenuShortcutState == ${BST_CHECKED}
+    ${IfNot} ${FileExists} "$newStartMenuLink"
+      CreateShortCut "$newStartMenuLink" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
+      ClearErrors
+      WinShell::SetLnkAUMI "$newStartMenuLink" "${APP_ID}"
+    ${EndIf}
+    ${If} ${FileExists} "$newStartMenuLink"
+      DetailPrint "Verified Start Menu shortcut: $newStartMenuLink"
+    ${EndIf}
+  ${Else}
+    ${If} ${FileExists} "$newStartMenuLink"
+      Delete "$newStartMenuLink"
+      WinShell::UninstShortcut "$newStartMenuLink"
+    ${EndIf}
+    StrCpy $launchLink "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+    DetailPrint "Start Menu shortcut was skipped by user choice."
   ${EndIf}
-  ${If} ${FileExists} "$newDesktopLink"
-    DetailPrint "Verified desktop shortcut: $newDesktopLink"
+
+  ${If} $ChemVaultDesktopShortcutState == ${BST_CHECKED}
+    ${IfNot} ${FileExists} "$newDesktopLink"
+      CreateShortCut "$newDesktopLink" "$appExe" "" "$appExe" 0 "" "" "${APP_DESCRIPTION}"
+      ClearErrors
+      WinShell::SetLnkAUMI "$newDesktopLink" "${APP_ID}"
+    ${EndIf}
+    ${If} ${FileExists} "$newDesktopLink"
+      DetailPrint "Verified desktop shortcut: $newDesktopLink"
+    ${EndIf}
+  ${Else}
+    ${If} ${FileExists} "$newDesktopLink"
+      Delete "$newDesktopLink"
+      WinShell::UninstShortcut "$newDesktopLink"
+    ${EndIf}
+    DetailPrint "Desktop shortcut was skipped by user choice."
   ${EndIf}
+
   ${If} $ChemVaultEngineSetupState == ${BST_CHECKED}
     CreateDirectory "$APPDATA\ChemVault Model"
     DetailPrint "Created user data folder: $APPDATA\ChemVault Model"

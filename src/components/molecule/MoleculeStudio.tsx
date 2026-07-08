@@ -18,6 +18,7 @@ import { MoleculePropertiesPanel } from '@/components/molecule/MoleculePropertie
 import { DisplayControls, Representation } from '@/components/molecule/DisplayControls';
 import { ExportNameSource, ExportPanel } from '@/components/molecule/ExportPanel';
 import { AuthButton } from '@/components/auth/AuthButton';
+import { GlobalLoadingOverlay } from '@/components/ui/LoadingState';
 
 type StructureFormat = 'sdf' | 'mol' | 'xyz' | 'pdb' | 'cif';
 type MoleculeSource = 'search' | 'smiles' | 'draw' | 'upload' | 'pdb';
@@ -643,6 +644,16 @@ export function MoleculeStudio() {
     [smiles, structure.data, structure.format]
   );
 
+  const globalLoading = useMemo(() => {
+    if (loadingSearch) return { label: 'Searching molecule', description: 'Querying molecular records and preparing the selected structure.' };
+    if (loadingPdb) return { label: 'Loading PDB structure', description: 'Fetching the structure file and metadata.' };
+    if (loadingUpload) return { label: 'Loading structure file', description: 'Reading and validating the selected molecular structure.' };
+    if (loading3D) return { label: 'Rendering structure', description: 'Generating the current molecular model view.' };
+    if (loadingExport) return { label: 'Exporting file', description: 'Preparing the requested output file.' };
+    if (detailsOpen && loadingProperties) return { label: 'Updating structure details', description: 'Calculating molecular properties for the current structure.' };
+    return null;
+  }, [detailsOpen, loading3D, loadingExport, loadingPdb, loadingProperties, loadingSearch, loadingUpload]);
+
   const toastClass = useCallback((level: Toast['level']) => {
     if (level === 'error') return 'border-rose-200 text-rose-700';
     if (level === 'success') return 'border-emerald-200 text-emerald-700';
@@ -879,6 +890,12 @@ export function MoleculeStudio() {
           </div>
         ))}
       </div>
+
+      <GlobalLoadingOverlay
+        visible={Boolean(globalLoading)}
+        label={globalLoading?.label || 'Loading'}
+        description={globalLoading?.description}
+      />
     </div>
   );
 }

@@ -1,7 +1,6 @@
 'use client';
 
 import { useState } from 'react';
-import { EngineSpinner } from '@/components/ui/LoadingState';
 
 type Props = {
   onLoadPdb: (pdbId: string) => void;
@@ -34,14 +33,7 @@ export function PDBViewerPanel({ onLoadPdb, loading, metadata }: Props) {
           className="rounded-md bg-slate-800 px-3 py-2 text-sm text-white"
           disabled={loading}
         >
-          {loading ? (
-            <span className="inline-flex items-center justify-center gap-2">
-              <EngineSpinner size="xs" decorative className="cv-engine-spinner-on-dark" />
-              Loading
-            </span>
-          ) : (
-            'Load PDB'
-          )}
+          {loading ? 'Loading' : 'Load PDB'}
         </button>
       </div>
       <p className="text-xs text-slate-500">Examples: 1CRN, 4HHB, 1BNA</p>

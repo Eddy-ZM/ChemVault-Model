@@ -1,7 +1,6 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import { EngineSpinner } from '@/components/ui/LoadingState';
 
 type Props = {
   onSearch: (query: string) => Promise<void>;
@@ -35,14 +34,7 @@ export function MoleculeSearch({ onSearch, loading }: Props) {
           disabled={loading || !query.trim()}
           className="w-full rounded-md bg-slate-800 px-3 py-2 text-sm text-white disabled:opacity-50 sm:w-auto"
         >
-          {loading ? (
-            <span className="inline-flex items-center justify-center gap-2">
-              <EngineSpinner size="xs" decorative className="cv-engine-spinner-on-dark" />
-              Search
-            </span>
-          ) : (
-            'Search'
-          )}
+          Search
         </button>
       </form>
 

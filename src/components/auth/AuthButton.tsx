@@ -3,7 +3,6 @@
 import Link from 'next/link';
 import { useAuth } from '@/components/auth/AuthProvider';
 import { UserMenu } from '@/components/auth/UserMenu';
-import { EngineSpinner } from '@/components/ui/LoadingState';
 import { buildRegisterUrl } from '@/lib/auth/chemvaultUserLinks';
 
 export function AuthButton() {
@@ -11,9 +10,7 @@ export function AuthButton() {
 
   if (!ready) {
     return (
-      <span className="grid h-10 w-24 place-items-center rounded-full border border-slate-200 bg-white/80" aria-label="Loading authentication state">
-        <EngineSpinner size="xs" decorative />
-      </span>
+      <span className="h-10 w-24 rounded-full border border-slate-200 bg-white/80" aria-label="Loading authentication state" />
     );
   }
 

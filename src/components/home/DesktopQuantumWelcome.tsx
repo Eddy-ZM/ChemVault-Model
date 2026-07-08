@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { QuantumEngineSetupDialog, type QuantumSetupDialogMode } from '@/components/desktop/QuantumEngineSetupDialog';
-import { LoadingState } from '@/components/ui/LoadingState';
 import type { LocalEngineStatus, QuantumEngineKind } from '@/lib/chem/quantumTypes';
 
 export function DesktopQuantumWelcome() {
@@ -114,18 +113,12 @@ export function DesktopQuantumWelcome() {
               </button>
             </div>
             <p className="mt-2 text-sm text-slate-700">
-              {loading ? null : readyEngines.length > 0
+              {loading
+                ? 'Scanning local engines.'
+                : readyEngines.length > 0
                 ? `Ready: ${readyEngines.map((engine) => engine.engineLabel).join(', ')}`
                 : 'No local open-source quantum engine is ready yet.'}
             </p>
-            {loading ? (
-              <LoadingState
-                compact
-                className="mt-2"
-                label="Scanning local engines"
-                description="Checking managed installs, configured executables, and PATH."
-              />
-            ) : null}
           </div>
 
           {message ? <p className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">{message}</p> : null}

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
-import { EngineSpinner, LoadingState } from '@/components/ui/LoadingState';
+import { LoadingState } from '@/components/ui/LoadingState';
 import { OAuthProvider, buildOAuthUrl, buildRegisterUrl } from '@/lib/auth/chemvaultUserLinks';
 
 const oauthProviders: Array<{ id: OAuthProvider; label: string; className: string; iconWrapClassName: string }> = [
@@ -143,7 +143,6 @@ export function LoginForm() {
           disabled={busy}
           className="mt-4 flex w-full items-center justify-center gap-3 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
         >
-          {busy ? <EngineSpinner size="xs" decorative className="cv-engine-spinner-on-dark" /> : null}
           {busy ? 'Signing in' : 'Sign in'}
         </button>
       </form>

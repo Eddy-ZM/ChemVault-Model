@@ -1,7 +1,6 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import { EngineSpinner } from '@/components/ui/LoadingState';
 
 const EXAMPLES = ['1CRN', '4HHB', '1BNA'];
 
@@ -42,14 +41,7 @@ export function PdbMode({ onLoadPdb, loading, error, metadata }: Props) {
           disabled={loading}
           className="rounded-2xl bg-slate-950 px-6 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loading ? (
-            <span className="inline-flex items-center justify-center gap-2">
-              <EngineSpinner size="xs" decorative className="cv-engine-spinner-on-dark" />
-              Loading
-            </span>
-          ) : (
-            'Load PDB'
-          )}
+          {loading ? 'Loading' : 'Load PDB'}
         </button>
       </form>
 

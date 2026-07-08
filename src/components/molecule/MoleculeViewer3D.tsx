@@ -1,7 +1,6 @@
 'use client';
 
 import { ReactNode, forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { LoadingState } from '@/components/ui/LoadingState';
 
 type Representation = 'ball-and-stick' | 'stick' | 'sphere' | 'line' | 'surface' | 'cartoon' | 'space-filling';
 type StructureFormat = 'sdf' | 'mol' | 'molfile' | 'xyz' | 'pdb' | 'cif';
@@ -107,7 +106,7 @@ function normalizeBackground(value: string) {
 }
 
 export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function MoleculeViewer3D(
-  { loading, initialRepresentation = 'stick', onReady, children, showHeader = true },
+  { initialRepresentation = 'stick', onReady, children, showHeader = true },
   ref
 ) {
   const container = useRef<HTMLDivElement>(null);
@@ -285,14 +284,7 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
       {showHeader ? <h2 className="text-lg font-semibold">3D Viewer</h2> : null}
       <div className="relative h-[55vh] min-h-[360px] w-full overflow-hidden rounded-xl border border-slate-200 bg-white">
         <div ref={container} className="h-full w-full" />
-        {!ready || loading ? (
-          <div className="absolute inset-0 grid place-items-center bg-white/70 backdrop-blur-[1px]">
-            <LoadingState
-              label={!ready ? 'Loading viewer' : 'Rendering structure'}
-              description={!ready ? 'Preparing the molecular visualization engine.' : 'Generating the current molecular model view.'}
-            />
-          </div>
-        ) : null}
+        {!ready ? <div className="absolute inset-0 grid place-items-center text-sm font-semibold text-slate-600">Preparing viewer</div> : null}
         {error ? (
           <div className="absolute inset-x-2 top-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
             {error}

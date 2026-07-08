@@ -1,7 +1,6 @@
 'use client';
 
 import { FormEvent, useState } from 'react';
-import { EngineSpinner } from '@/components/ui/LoadingState';
 
 const EXAMPLES = ['Water', 'Ethanol', 'Benzene', 'Caffeine', 'Aspirin', 'Paracetamol', 'Ibuprofen', 'Glucose'];
 
@@ -40,14 +39,7 @@ export function SearchMode({ onSearch, loading, error }: Props) {
           disabled={loading}
           className="rounded-2xl bg-slate-950 px-6 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loading ? (
-            <span className="inline-flex items-center justify-center gap-2">
-              <EngineSpinner size="xs" decorative className="cv-engine-spinner-on-dark" />
-              Searching
-            </span>
-          ) : (
-            'Search PubChem'
-          )}
+          {loading ? 'Searching' : 'Search PubChem'}
         </button>
       </form>
 

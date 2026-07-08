@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
-import { EngineSpinner, LoadingState } from '@/components/ui/LoadingState';
+import { EngineSpinner } from '@/components/ui/LoadingState';
 import type {
   CommercialQuantumEngineKind,
   ExternalQuantumEngineConfig,
@@ -411,16 +411,7 @@ function ConfigureView({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-bold text-slate-950">Automatic engine discovery</p>
-            {scanning ? (
-              <LoadingState
-                compact
-                className="mt-2"
-                label="Scanning engines"
-                description={scanMessage || 'Checking local paths, saved configuration, and common commercial engine locations.'}
-              />
-            ) : (
-              <p className="mt-1 text-sm leading-6 text-slate-600">{scanMessage || 'Ready to scan this computer for installed quantum engines.'}</p>
-            )}
+            <p className="mt-1 text-sm leading-6 text-slate-600">{scanMessage || 'Ready to scan this computer for installed quantum engines.'}</p>
           </div>
           <button
             type="button"
@@ -428,14 +419,7 @@ function ConfigureView({
             disabled={scanning}
             className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {scanning ? (
-              <span className="inline-flex items-center gap-2">
-                <EngineSpinner size="xs" decorative />
-                Scanning
-              </span>
-            ) : (
-              'Scan again'
-            )}
+            {scanning ? 'Scanning' : 'Scan again'}
           </button>
         </div>
         {scanning ? <div className="cv-scan-line mt-4" /> : null}

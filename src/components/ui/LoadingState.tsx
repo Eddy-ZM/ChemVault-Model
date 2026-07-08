@@ -69,3 +69,23 @@ export function LoadingState({
     </div>
   );
 }
+
+export function GlobalLoadingOverlay({
+  description,
+  label,
+  visible
+}: {
+  description?: string;
+  label: string;
+  visible: boolean;
+}) {
+  if (!visible) return null;
+
+  return (
+    <div className="fixed inset-0 z-[1200] grid place-items-center bg-slate-950/25 px-4 backdrop-blur-[2px]" aria-live="polite">
+      <div className="rounded-2xl border border-slate-200 bg-white/95 px-8 py-7 shadow-2xl">
+        <LoadingState label={label} description={description} />
+      </div>
+    </div>
+  );
+}

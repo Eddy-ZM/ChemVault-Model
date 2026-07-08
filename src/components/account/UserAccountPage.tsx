@@ -4,7 +4,7 @@ import type { Route } from 'next';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AuthUser, useAuth, userApiUrl } from '@/components/auth/AuthProvider';
-import { EngineSpinner, LoadingState } from '@/components/ui/LoadingState';
+import { LoadingState } from '@/components/ui/LoadingState';
 import { UserPortalSection, buildRegisterUrl, buildUserPortalUrl } from '@/lib/auth/chemvaultUserLinks';
 
 export type AccountPage = 'profile' | 'molecules' | 'settings';
@@ -160,14 +160,7 @@ export function UserAccountPage({ page }: { page: AccountPage }) {
                 disabled={syncing || loading || entitlementsLoading}
                 className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-sky-300 hover:text-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {syncing || entitlementsLoading ? (
-                  <span className="inline-flex items-center gap-2">
-                    <EngineSpinner size="xs" decorative />
-                    Refreshing
-                  </span>
-                ) : (
-                  'Refresh from User System'
-                )}
+                {syncing || entitlementsLoading ? 'Refreshing' : 'Refresh from User System'}
               </button>
             ) : null}
             <a
@@ -449,10 +442,6 @@ function AccountSkeleton({ title }: { title: string }) {
           label={`Loading ${title}`}
           description="Syncing account state from ChemVault User."
         />
-      </div>
-      <div className="grid gap-4 lg:grid-cols-2">
-        <LoadingState tone="panel" label="Preparing profile data" />
-        <LoadingState tone="panel" label="Preparing permissions" />
       </div>
     </main>
   );

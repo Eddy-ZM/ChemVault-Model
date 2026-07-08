@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { EngineSpinner, LoadingState } from '@/components/ui/LoadingState';
+import { LoadingState } from '@/components/ui/LoadingState';
 
 const DEFER_UNTIL_KEY = 'chemvault.desktop.update.deferUntil';
 const DEFER_PAIR_KEY = 'chemvault.desktop.update.deferPair';
@@ -168,14 +168,7 @@ export function DesktopUpdateGate() {
             disabled={checking}
             className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {checking ? (
-              <span className="inline-flex items-center gap-2">
-                <EngineSpinner size="xs" decorative />
-                Checking
-              </span>
-            ) : (
-              'Check again'
-            )}
+            {checking ? 'Checking' : 'Check again'}
           </button>
           <button
             type="button"

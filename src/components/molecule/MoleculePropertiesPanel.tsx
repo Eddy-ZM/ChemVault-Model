@@ -2,7 +2,6 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { QuantumEngineSetupDialog, type QuantumSetupDialogMode } from '@/components/desktop/QuantumEngineSetupDialog';
-import { EngineSpinner, LoadingState } from '@/components/ui/LoadingState';
 import type { ElectrostaticAnalysis } from '@/lib/chem/electrostaticAnalysis';
 import { analyzeElectrostatics, structureToXyz } from '@/lib/chem/electrostaticAnalysis';
 import type {
@@ -130,7 +129,7 @@ export function MoleculePropertiesPanel({ metadata, properties, loading, onCopy 
           <article key={card.key} className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
             <p className="text-xs font-medium text-slate-500">{card.label}</p>
             <p className="mt-2 flex min-h-7 items-center text-lg font-semibold text-slate-950">
-              {loading ? <EngineSpinner size="sm" decorative /> : formatValue(properties[card.key], card.unit)}
+              {loading ? 'Loading' : formatValue(properties[card.key], card.unit)}
             </p>
           </article>
         ))}
@@ -452,11 +451,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
 
       <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${status?.available ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
         {statusLoading ? (
-          <LoadingState
-            compact
-            label="Checking quantum engine"
-            description={`Inspecting ${engineLabel(selectedEngine)} availability and configuration.`}
-          />
+          `Checking ${engineLabel(selectedEngine)} availability and configuration.`
         ) : status?.available ? (
           `Engine ready${status.source ? ` (${status.source})` : ''}${status.version ? `: ${status.version}` : ''}`
         ) : (
@@ -652,14 +647,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
           disabled={!canRun}
           className="self-end rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
-          {running ? (
-            <span className="inline-flex items-center justify-center gap-2">
-              <EngineSpinner size="xs" decorative className="cv-engine-spinner-on-dark" />
-              Calculating
-            </span>
-          ) : (
-            'Run Calculation'
-          )}
+          {running ? 'Calculating' : 'Run Calculation'}
         </button>
       </div>
 
@@ -786,14 +774,7 @@ function LocalEngineManager({
             disabled={loading}
             className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {loading ? (
-              <span className="inline-flex items-center gap-2">
-                <EngineSpinner size="xs" decorative />
-                Refreshing
-              </span>
-            ) : (
-              'Refresh'
-            )}
+            {loading ? 'Refreshing' : 'Refresh'}
           </button>
           <button
             type="button"
@@ -839,12 +820,9 @@ function LocalEngineManager({
       <div className="mt-4 grid gap-3 lg:grid-cols-3">
         {engines.length === 0 ? (
           loading ? (
-            <LoadingState
-              compact
-              tone="panel"
-              label="Checking local engines"
-              description="Inspecting managed installs, configured executables, and PATH."
-            />
+            <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600">
+              Checking local engines.
+            </p>
           ) : (
             <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600">
               Local engine status is not available.

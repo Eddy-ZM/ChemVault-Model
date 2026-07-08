@@ -71,27 +71,18 @@ FunctionEnd
 Function ChemVaultInstFilesPageShow
   SetDetailsView show
   SetDetailsPrint both
-  DetailPrint "ChemVault Model installation details:"
-  DetailPrint "Desktop application files"
-  DetailPrint "Local web interface assets"
-  DetailPrint "3D molecule viewer runtime"
-  DetailPrint "Shortcuts and application registration"
-  DetailPrint "Quantum engine setup preference"
 FunctionEnd
 
 !macro customInstall
-  DetailPrint "Installing ChemVault Model desktop application."
-  DetailPrint "Installing local web interface, molecule viewer assets, and desktop runtime."
-  DetailPrint "Installing shortcuts and application registration."
   ${If} $ChemVaultEngineSetupState == ${BST_CHECKED}
-    DetailPrint "Writing first-launch request for PySCF engine setup."
     CreateDirectory "$APPDATA\ChemVault Model"
+    DetailPrint "Created user data folder: $APPDATA\ChemVault Model"
     FileOpen $0 "$APPDATA\ChemVault Model\engine-setup-request.json" w
     FileWrite $0 "{$\"engines$\":[$\"pyscf$\"],$\"source$\":$\"installer$\",$\"message$\":$\"Installer requested local open-source engine setup.$\"}"
     FileClose $0
+    DetailPrint "Wrote engine setup request: $APPDATA\ChemVault Model\engine-setup-request.json"
   ${Else}
-    DetailPrint "Skipping first-launch PySCF engine setup request."
+    DetailPrint "Engine setup request was not written by user choice."
   ${EndIf}
-  DetailPrint "Commercial engines are not bundled. ChemVault will only detect existing licensed installations."
 !macroend
 !endif

@@ -3,6 +3,7 @@ const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
+const { TextDecoder } = require('node:util');
 
 const APP_TITLE = 'ChemVault Model';
 const DEFAULT_API_BASE = 'https://model.chemvault.science/api/chem';
@@ -14,6 +15,11 @@ const MAX_QUANTUM_INPUT_BYTES = 2 * 1024 * 1024;
 const VERSION_CHECK_TIMEOUT_MS = 8000;
 const PYSCF_INSTALL_TIMEOUT_MS = 1200000;
 const PYSCF_PIP_TIMEOUT_SECONDS = 120;
+const TEXT_DECODERS = {
+  utf8: new TextDecoder('utf-8'),
+  utf16le: new TextDecoder('utf-16le'),
+  gb18030: new TextDecoder('gb18030')
+};
 const EXTERNAL_ENGINE_CONFIG_FILE = 'quantum-engines.json';
 const LOCAL_ENGINE_CONFIG_FILE = 'local-quantum-engines.json';
 const ENGINE_SETUP_REQUEST_FILE = 'engine-setup-request.json';
@@ -875,15 +881,19 @@ async function runExternalQuantumCalculation(engineKind, request) {
     const energyHartree = engineKind === 'gaussian' ? parseGaussianEnergy(output) : parseOrcaEnergy(output);
     const dipoleDebye = engineKind === 'gaussian' ? parseGaussianDipole(output) : parseOrcaDipole(output);
     const charges = engineKind === 'gaussian' ? parseGaussianCharges(output) : parseOrcaCharges(output);
+    const completedOk = processResult.exitCode === 0 && (engineKind !== 'gaussian' || /Normal termination of Gaussian/iu.test(output));
     const warnings = [];
 
     if (processResult.timedOut) warnings.push(`${engineLabel} calculation timed out before completion.`);
+    if (engineKind === 'gaussian' && processResult.exitCode === 0 && !completedOk) {
+      warnings.push('Gaussian did not report normal termination in the output log.');
+    }
     if (energyHartree === null) warnings.push('Total energy was not found in the external engine output.');
     if (!dipoleDebye) warnings.push('Dipole moment was not found in the external engine output.');
     if (charges.length === 0) warnings.push('Mulliken charges were not found in the external engine output.');
 
     return {
-      ok: processResult.exitCode === 0,
+      ok: completedOk,
       engine: engineKind,
       engineLabel,
       method: methodLabel,
@@ -895,7 +905,7 @@ async function runExternalQuantumCalculation(engineKind, request) {
       elapsedMs: Date.now() - startedAt,
       warnings,
       outputTail: outputTail(output),
-      error: processResult.exitCode === 0 ? undefined : diagnoseExternalEngineFailure(engineKind, processResult, output, config)
+      error: completedOk ? undefined : diagnoseExternalEngineFailure(engineKind, processResult, output, config)
     };
   } catch (error) {
     return {
@@ -1575,11 +1585,45 @@ function combinedProcessOutput(result) {
   return `${result?.stdout || ''}\n${result?.stderr || ''}`;
 }
 
+function decodeTextBuffer(buffer) {
+  if (!buffer || buffer.length === 0) return '';
+
+  if (buffer.length >= 2 && buffer[0] === 0xff && buffer[1] === 0xfe) {
+    return TEXT_DECODERS.utf16le.decode(buffer);
+  }
+
+  if (looksLikeUtf16Le(buffer)) {
+    return TEXT_DECODERS.utf16le.decode(buffer);
+  }
+
+  const utf8 = TEXT_DECODERS.utf8.decode(buffer);
+  if (!utf8.includes('\uFFFD')) return utf8;
+
+  const gb18030 = TEXT_DECODERS.gb18030.decode(buffer);
+  return replacementCount(gb18030) < replacementCount(utf8) ? gb18030 : utf8;
+}
+
+function looksLikeUtf16Le(buffer) {
+  if (buffer.length < 8) return false;
+  const sampleLength = Math.min(buffer.length, 256);
+  let oddNulls = 0;
+  let evenNulls = 0;
+  for (let index = 0; index < sampleLength; index += 1) {
+    if (buffer[index] !== 0) continue;
+    if (index % 2 === 0) evenNulls += 1;
+    else oddNulls += 1;
+  }
+  return oddNulls > sampleLength / 5 && evenNulls < sampleLength / 20;
+}
+
+function replacementCount(value) {
+  return (String(value).match(/\uFFFD/gu) || []).length;
+}
+
 async function runGaussianJob(executablePath, job, workDir, timeoutMs) {
   const env = buildExternalEngineEnv('gaussian', executablePath, workDir);
   if (process.platform === 'win32') {
-    const command = `"${executablePath}" < "${job.inputPath}" > "${job.outputPath}"`;
-    return runProcess(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', command], {
+    return runProcess(executablePath, [job.inputPath, job.outputPath], {
       cwd: workDir,
       timeoutMs,
       env
@@ -1659,6 +1703,14 @@ function diagnoseExternalEngineFailure(engineKind, processResult, output, config
     return `${engineLabel} timed out before completion. Increase timeout or run a smaller structure first.`;
   }
 
+  if (engineKind === 'gaussian') {
+    const gaussianError = summarizeGaussianError(text);
+    if (gaussianError) return `Gaussian stopped before completion. ${gaussianError}`;
+    if (processResult.exitCode === 0 && !/Normal termination of Gaussian/iu.test(text)) {
+      return 'Gaussian process ended, but the output log did not contain a normal termination marker. Re-run the calculation and inspect the calculation log for the last Gaussian link message.';
+    }
+  }
+
   if (engineKind === 'gaussian' && processResult.exitCode === 127) {
     return [
       'Gaussian exited with code 127, which usually means the executable started without the required Gaussian runtime environment.',
@@ -1680,6 +1732,39 @@ function diagnoseExternalEngineFailure(engineKind, processResult, output, config
   }
 
   return `${engineLabel} exited with code ${processResult.exitCode}.`;
+}
+
+function summarizeGaussianError(output) {
+  const lines = String(output || '').split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+  if (lines.length === 0) return '';
+
+  const markers = [
+    /Error termination/iu,
+    /QPErr/iu,
+    /Erroneous write/iu,
+    /End of file/iu,
+    /Syntax error/iu,
+    /Illegal/iu,
+    /Unknown center/iu,
+    /Charge and multiplicity/iu,
+    /Basis set data/iu,
+    /Convergence failure/iu,
+    /Problem with the distance matrix/iu,
+    /Atoms too close/iu,
+    /No data on checkpoint file/iu
+  ];
+  const selected = [];
+
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!markers.some((marker) => marker.test(lines[index]))) continue;
+    const start = Math.max(0, index - 2);
+    const end = Math.min(lines.length, index + 3);
+    for (const line of lines.slice(start, end)) {
+      if (!selected.includes(line)) selected.push(line);
+    }
+  }
+
+  return selected.slice(-8).join(' ');
 }
 
 async function openLocalEngineFolder() {
@@ -2577,8 +2662,8 @@ function runProcess(executable, args, options = {}) {
       clearTimeout(timer);
       resolve({
         exitCode: exitCode ?? -1,
-        stdout: Buffer.concat(stdout).toString('utf8'),
-        stderr: Buffer.concat(stderr).toString('utf8'),
+        stdout: decodeTextBuffer(Buffer.concat(stdout)),
+        stderr: decodeTextBuffer(Buffer.concat(stderr)),
         timedOut
       });
     });
@@ -2607,7 +2692,7 @@ function runProcessWithProgress(executable, args, options = {}) {
       const now = Date.now();
       if (now - lastProgressAt < 500) return;
       lastProgressAt = now;
-      options.progress(outputTail(`${Buffer.concat(stdout).toString('utf8')}\n${Buffer.concat(stderr).toString('utf8')}`));
+      options.progress(outputTail(`${decodeTextBuffer(Buffer.concat(stdout))}\n${decodeTextBuffer(Buffer.concat(stderr))}`));
     }
 
     child.stdout.on('data', (chunk) => {
@@ -2628,8 +2713,8 @@ function runProcessWithProgress(executable, args, options = {}) {
       clearTimeout(timer);
       const result = {
         exitCode: exitCode ?? -1,
-        stdout: Buffer.concat(stdout).toString('utf8'),
-        stderr: Buffer.concat(stderr).toString('utf8'),
+        stdout: decodeTextBuffer(Buffer.concat(stdout)),
+        stderr: decodeTextBuffer(Buffer.concat(stderr)),
         timedOut
       };
       if (typeof options.progress === 'function') {
@@ -2736,7 +2821,7 @@ function formatCoordinate(value) {
 
 async function readOptionalText(filePath) {
   try {
-    return await fs.promises.readFile(filePath, 'utf8');
+    return decodeTextBuffer(await fs.promises.readFile(filePath));
   } catch {
     return '';
   }

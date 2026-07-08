@@ -863,14 +863,13 @@ async function runExternalQuantumCalculation(engineKind, request) {
     const job = engineKind === 'gaussian'
       ? await prepareGaussianJob(workDir, xyz, { charge, multiplicity, method, basisSet, routeOptions, calculationMode })
       : await prepareOrcaJob(workDir, xyz, { charge, multiplicity, method, basisSet, routeOptions, calculationMode });
-    const processResult = await runProcess(config.executablePath, job.args, {
-      cwd: workDir,
-      timeoutMs,
-      env: {
-        ...process.env,
-        PATH: [path.dirname(config.executablePath), process.env.PATH || ''].join(path.delimiter)
-      }
-    });
+    const processResult = engineKind === 'gaussian'
+      ? await runGaussianJob(config.executablePath, job, workDir, timeoutMs)
+      : await runProcess(config.executablePath, job.args, {
+        cwd: workDir,
+        timeoutMs,
+        env: buildExternalEngineEnv(engineKind, config.executablePath, workDir)
+      });
     const fileOutput = await readOptionalText(job.outputPath);
     const output = [processResult.stdout, processResult.stderr, fileOutput].filter(Boolean).join('\n').trim();
     const energyHartree = engineKind === 'gaussian' ? parseGaussianEnergy(output) : parseOrcaEnergy(output);
@@ -896,7 +895,7 @@ async function runExternalQuantumCalculation(engineKind, request) {
       elapsedMs: Date.now() - startedAt,
       warnings,
       outputTail: outputTail(output),
-      error: processResult.exitCode === 0 ? undefined : `${engineLabel} exited with code ${processResult.exitCode}.`
+      error: processResult.exitCode === 0 ? undefined : diagnoseExternalEngineFailure(engineKind, processResult, output, config)
     };
   } catch (error) {
     return {
@@ -1574,6 +1573,113 @@ function pipIndexArgs() {
 
 function combinedProcessOutput(result) {
   return `${result?.stdout || ''}\n${result?.stderr || ''}`;
+}
+
+async function runGaussianJob(executablePath, job, workDir, timeoutMs) {
+  const env = buildExternalEngineEnv('gaussian', executablePath, workDir);
+  if (process.platform === 'win32') {
+    const command = `"${executablePath}" < "${job.inputPath}" > "${job.outputPath}"`;
+    return runProcess(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', command], {
+      cwd: workDir,
+      timeoutMs,
+      env
+    });
+  }
+
+  return runProcess(executablePath, job.args, {
+    cwd: workDir,
+    timeoutMs,
+    env
+  });
+}
+
+function buildExternalEngineEnv(engineKind, executablePath, workDir) {
+  if (engineKind === 'gaussian') return buildGaussianEnv(executablePath, workDir);
+  return {
+    ...process.env,
+    PATH: uniquePathEntries([path.dirname(executablePath), process.env.PATH || '']).join(path.delimiter)
+  };
+}
+
+function buildGaussianEnv(executablePath, workDir) {
+  const executableDir = path.dirname(executablePath);
+  const installRoot = gaussianInstallRoot(executableDir);
+  const scratchDir = path.join(workDir, 'gaussian-scratch');
+  fs.mkdirSync(scratchDir, { recursive: true });
+
+  const pathEntries = [
+    executableDir,
+    path.join(executableDir, 'wbin'),
+    path.join(executableDir, 'bin'),
+    path.join(installRoot, 'g16'),
+    path.join(installRoot, 'g16w'),
+    process.env.PATH || ''
+  ];
+
+  return {
+    ...process.env,
+    GAUSS_EXEDIR: process.env.GAUSS_EXEDIR || executableDir,
+    GAUSS_SCRDIR: process.env.GAUSS_SCRDIR || scratchDir,
+    G16ROOT: process.env.G16ROOT || installRoot,
+    GAUSS_ARCHDIR: process.env.GAUSS_ARCHDIR || executableDir,
+    PATH: uniquePathEntries(pathEntries).join(path.delimiter)
+  };
+}
+
+function gaussianInstallRoot(executableDir) {
+  const base = path.basename(executableDir).toLowerCase();
+  if (/^g\d{2}w?$/u.test(base)) return path.dirname(executableDir);
+  const parent = path.dirname(executableDir);
+  const parentBase = path.basename(parent).toLowerCase();
+  if (/^g\d{2}w?$/u.test(parentBase)) return path.dirname(parent);
+  return executableDir;
+}
+
+function uniquePathEntries(entries) {
+  const seen = new Set();
+  const output = [];
+  for (const entry of entries.flatMap((value) => String(value || '').split(path.delimiter))) {
+    const trimmed = entry.trim();
+    if (!trimmed) continue;
+    const key = process.platform === 'win32' ? trimmed.toLowerCase() : trimmed;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    output.push(trimmed);
+  }
+  return output;
+}
+
+function diagnoseExternalEngineFailure(engineKind, processResult, output, config) {
+  const engineLabel = QUANTUM_ENGINE_LABELS[engineKind] || 'External engine';
+  const text = String(output || `${processResult.stdout || ''}\n${processResult.stderr || ''}`).trim();
+  const executablePath = config?.executablePath || '';
+  const executableDir = executablePath ? path.dirname(executablePath) : '';
+
+  if (processResult.timedOut) {
+    return `${engineLabel} timed out before completion. Increase timeout or run a smaller structure first.`;
+  }
+
+  if (engineKind === 'gaussian' && processResult.exitCode === 127) {
+    return [
+      'Gaussian exited with code 127, which usually means the executable started without the required Gaussian runtime environment.',
+      `ChemVault now launches it with Gaussian environment variables; if this still appears, choose the real Gaussian command executable from the install folder, for example ${path.join('C:\\', 'G16W', 'g16.exe')}, and confirm it runs from Command Prompt.`,
+      executableDir ? `Configured folder: ${executableDir}` : ''
+    ].filter(Boolean).join(' ');
+  }
+
+  if (engineKind === 'gaussian' && /link 0|l1\.exe|l\d+\.exe|cannot open|No such file|not recognized|unable to open|failed to locate/iu.test(text)) {
+    return `${engineLabel} could not find required Gaussian link executables or files. Check that GAUSS_EXEDIR points to the Gaussian install folder and that the selected executable belongs to the same installation.`;
+  }
+
+  if (/license|licensed|permission|access denied|denied/iu.test(text)) {
+    return `${engineLabel} started but reported a license or permission problem. Check the local installation license and run permissions.`;
+  }
+
+  if (/No such file|not found|not recognized|cannot find|ENOENT/iu.test(text)) {
+    return `${engineLabel} could not start from the configured path. Re-select the installed executable and save the port again.`;
+  }
+
+  return `${engineLabel} exited with code ${processResult.exitCode}.`;
 }
 
 async function openLocalEngineFolder() {
@@ -2583,7 +2689,7 @@ async function prepareGaussianJob(workDir, xyz, options) {
   ].join('\n');
 
   await fs.promises.writeFile(inputPath, content, 'utf8');
-  return { args: [inputPath], outputPath };
+  return { args: [inputPath], inputPath, outputPath };
 }
 
 async function prepareOrcaJob(workDir, xyz, options) {

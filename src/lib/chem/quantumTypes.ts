@@ -57,7 +57,10 @@ export type LocalEngineInstallProgress = {
   phase: 'checking' | 'creating-environment' | 'installing-dependencies' | 'installing-engine' | 'verifying' | 'complete' | 'error';
   percent: number;
   message: string;
+  attempt?: string;
+  diagnosis?: string;
   outputTail?: string;
+  repairAction?: string;
 };
 
 export type EngineSetupRequest = {

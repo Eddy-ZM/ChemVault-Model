@@ -1,6 +1,7 @@
 'use client';
 
 import { useMemo } from 'react';
+import { EngineSpinner } from '@/components/ui/LoadingState';
 
 type Representation = 'ball-and-stick' | 'stick' | 'sphere' | 'line' | 'surface' | 'cartoon' | 'space-filling';
 
@@ -73,7 +74,14 @@ export function Toolbar({
           disabled={generatingDisabled || loadingGenerate3d}
           className="rounded-lg bg-chemvault-accent px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loadingGenerate3d ? 'Generating…' : 'Generate 3D Model'}
+          {loadingGenerate3d ? (
+            <span className="inline-flex items-center justify-center gap-2">
+              <EngineSpinner size="xs" decorative className="cv-engine-spinner-on-dark" />
+              Generating
+            </span>
+          ) : (
+            'Generate 3D Model'
+          )}
         </button>
         <button
           type="button"
@@ -102,7 +110,14 @@ export function Toolbar({
           disabled={loadingExport}
           className="rounded-lg border border-slate-300 px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {loadingExport ? 'Exporting…' : 'Export PNG'}
+          {loadingExport ? (
+            <span className="inline-flex items-center justify-center gap-2">
+              <EngineSpinner size="xs" decorative />
+              Exporting
+            </span>
+          ) : (
+            'Export PNG'
+          )}
         </button>
         <button
           type="button"

@@ -1,6 +1,7 @@
 'use client';
 
 import { ChangeEvent, DragEvent, useMemo, useRef, useState } from 'react';
+import { EngineSpinner } from '@/components/ui/LoadingState';
 import { FileFormat, inferFormatFromFilename } from '@/lib/chem/fileExport';
 
 export type UploadPayload = {
@@ -122,7 +123,14 @@ export function UploadMode({ onLoadFile, loading, error }: Props) {
               disabled={!selectedFile || loading}
               className="rounded-2xl bg-sky-700 px-4 py-3 text-sm font-semibold text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50"
             >
-              {loading ? 'Loading file...' : 'Load File'}
+              {loading ? (
+                <span className="inline-flex items-center justify-center gap-2">
+                  <EngineSpinner size="xs" decorative className="cv-engine-spinner-on-dark" />
+                  Loading
+                </span>
+              ) : (
+                'Load File'
+              )}
             </button>
             <button
               type="button"

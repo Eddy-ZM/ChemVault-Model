@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { QuantumEngineSetupDialog, type QuantumSetupDialogMode } from '@/components/desktop/QuantumEngineSetupDialog';
-import type { LocalEngineStatus } from '@/lib/chem/quantumTypes';
+import { LoadingState } from '@/components/ui/LoadingState';
+import type { LocalEngineStatus, QuantumEngineKind } from '@/lib/chem/quantumTypes';
 
 export function DesktopQuantumWelcome() {
   const [isDesktop, setIsDesktop] = useState(false);
@@ -44,6 +45,11 @@ export function DesktopQuantumWelcome() {
     setSetupMode('later');
     setChoiceVisible(false);
     setDismissed(true);
+  }
+
+  function handleEngineSelected(_engine: QuantumEngineKind, label: string) {
+    setMessage(`${label} selected. Open Molecule Studio to run calculations with this engine.`);
+    setDismissed(false);
   }
 
   return (
@@ -108,12 +114,18 @@ export function DesktopQuantumWelcome() {
               </button>
             </div>
             <p className="mt-2 text-sm text-slate-700">
-              {loading
-                ? 'Scanning this computer for local engines...'
-                : readyEngines.length > 0
-                  ? `Ready: ${readyEngines.map((engine) => engine.engineLabel).join(', ')}`
-                  : 'No local open-source quantum engine is ready yet.'}
+              {loading ? null : readyEngines.length > 0
+                ? `Ready: ${readyEngines.map((engine) => engine.engineLabel).join(', ')}`
+                : 'No local open-source quantum engine is ready yet.'}
             </p>
+            {loading ? (
+              <LoadingState
+                compact
+                className="mt-2"
+                label="Scanning local engines"
+                description="Checking managed installs, configured executables, and PATH."
+              />
+            ) : null}
           </div>
 
           {message ? <p className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">{message}</p> : null}
@@ -131,6 +143,7 @@ export function DesktopQuantumWelcome() {
       <QuantumEngineSetupDialog
         mode={setupMode}
         onClose={() => setSetupMode(null)}
+        onEngineSelected={handleEngineSelected}
         onEnginesChanged={() => void loadEngines()}
       />
     </div>

@@ -88,15 +88,48 @@ button {
 }
 
 .cv-engine-spinner {
+  --cv-spinner-size: 54px;
+  --cv-spinner-core-inset: 18px;
+  --cv-spinner-ring-inset: 7px;
+  --cv-spinner-ring-width: 2px;
   position: relative;
-  width: 54px;
-  height: 54px;
+  display: inline-block;
+  width: var(--cv-spinner-size);
+  height: var(--cv-spinner-size);
   flex: 0 0 auto;
+}
+
+.cv-engine-spinner-xs {
+  --cv-spinner-size: 18px;
+  --cv-spinner-core-inset: 6px;
+  --cv-spinner-ring-inset: 3px;
+  --cv-spinner-ring-width: 1.5px;
+}
+
+.cv-engine-spinner-sm {
+  --cv-spinner-size: 28px;
+  --cv-spinner-core-inset: 9px;
+  --cv-spinner-ring-inset: 4px;
+  --cv-spinner-ring-width: 1.5px;
+}
+
+.cv-engine-spinner-md {
+  --cv-spinner-size: 42px;
+  --cv-spinner-core-inset: 14px;
+  --cv-spinner-ring-inset: 6px;
+  --cv-spinner-ring-width: 2px;
+}
+
+.cv-engine-spinner-lg {
+  --cv-spinner-size: 54px;
+  --cv-spinner-core-inset: 18px;
+  --cv-spinner-ring-inset: 7px;
+  --cv-spinner-ring-width: 2px;
 }
 
 .cv-engine-spinner::before {
   position: absolute;
-  inset: 18px;
+  inset: var(--cv-spinner-core-inset);
   content: '';
   border-radius: 999px;
   background: #0f172a;
@@ -104,8 +137,8 @@ button {
 
 .cv-engine-spinner span {
   position: absolute;
-  inset: 7px;
-  border: 2px solid #0369a1;
+  inset: var(--cv-spinner-ring-inset);
+  border: var(--cv-spinner-ring-width) solid #0369a1;
   border-radius: 999px;
   opacity: 0.72;
   animation: cvEngineOrbit 1.7s linear infinite;
@@ -119,6 +152,14 @@ button {
 .cv-engine-spinner span:nth-child(3) {
   transform: rotate(120deg);
   animation-duration: 2.5s;
+}
+
+.cv-engine-spinner-on-dark::before {
+  background: #ffffff;
+}
+
+.cv-engine-spinner-on-dark span {
+  border-color: #93c5fd;
 }
 
 .cv-progress-fill {

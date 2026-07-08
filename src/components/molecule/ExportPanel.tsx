@@ -1,6 +1,7 @@
 'use client';
 
 import { ReactNode } from 'react';
+import { EngineSpinner } from '@/components/ui/LoadingState';
 
 type ExportAvailability = {
   smiles: boolean;
@@ -93,7 +94,16 @@ export function ExportPanel({
         <ExportButton disabled={!available.structure || loadingExport} onClick={onExportSdf}>SDF</ExportButton>
         <ExportButton disabled={!available.structure || loadingExport} onClick={onExportXyz}>XYZ</ExportButton>
         <ExportButton disabled={(!available.structure && !available.pdb) || loadingExport} onClick={onExportPdb}>PDB</ExportButton>
-        <ExportButton disabled={!available.image || loadingExport} onClick={onExportPng}>{loadingExport ? 'PNG...' : 'PNG'}</ExportButton>
+        <ExportButton disabled={!available.image || loadingExport} onClick={onExportPng}>
+          {loadingExport ? (
+            <span className="inline-flex items-center gap-1.5">
+              <EngineSpinner size="xs" decorative />
+              PNG
+            </span>
+          ) : (
+            'PNG'
+          )}
+        </ExportButton>
       </div>
       {!hasAnything ? <span className="sr-only">Load a molecule before exporting structure files.</span> : null}
     </section>

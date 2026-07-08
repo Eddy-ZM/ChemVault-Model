@@ -4,6 +4,7 @@ import type { Route } from 'next';
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AuthUser, useAuth, userApiUrl } from '@/components/auth/AuthProvider';
+import { EngineSpinner, LoadingState } from '@/components/ui/LoadingState';
 import { UserPortalSection, buildRegisterUrl, buildUserPortalUrl } from '@/lib/auth/chemvaultUserLinks';
 
 export type AccountPage = 'profile' | 'molecules' | 'settings';
@@ -159,7 +160,14 @@ export function UserAccountPage({ page }: { page: AccountPage }) {
                 disabled={syncing || loading || entitlementsLoading}
                 className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:border-sky-300 hover:text-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
               >
-                {syncing || entitlementsLoading ? 'Refreshing...' : 'Refresh from User System'}
+                {syncing || entitlementsLoading ? (
+                  <span className="inline-flex items-center gap-2">
+                    <EngineSpinner size="xs" decorative />
+                    Refreshing
+                  </span>
+                ) : (
+                  'Refresh from User System'
+                )}
               </button>
             ) : null}
             <a
@@ -436,13 +444,15 @@ function AccountSkeleton({ title }: { title: string }) {
   return (
     <main className="mx-auto min-h-[calc(100vh-65px)] max-w-7xl px-4 py-8 sm:px-6 lg:px-8" aria-label={`Loading ${title}`}>
       <div className="mb-6 h-32 rounded-2xl border border-slate-200 bg-white/80 p-6 shadow-sm">
-        <div className="skeleton h-4 w-40 rounded" />
-        <div className="skeleton mt-5 h-8 w-72 rounded" />
-        <div className="skeleton mt-4 h-4 max-w-xl rounded" />
+        <LoadingState
+          compact
+          label={`Loading ${title}`}
+          description="Syncing account state from ChemVault User."
+        />
       </div>
       <div className="grid gap-4 lg:grid-cols-2">
-        <div className="skeleton h-72 rounded-2xl" />
-        <div className="skeleton h-72 rounded-2xl" />
+        <LoadingState tone="panel" label="Preparing profile data" />
+        <LoadingState tone="panel" label="Preparing permissions" />
       </div>
     </main>
   );

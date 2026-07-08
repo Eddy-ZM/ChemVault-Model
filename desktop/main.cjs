@@ -12,6 +12,8 @@ const DEFAULT_VERSION_MANIFEST_URL = 'https://model.chemvault.science/app-versio
 const QUANTUM_TIMEOUT_MS = 180000;
 const MAX_QUANTUM_INPUT_BYTES = 2 * 1024 * 1024;
 const VERSION_CHECK_TIMEOUT_MS = 8000;
+const PYSCF_INSTALL_TIMEOUT_MS = 1200000;
+const PYSCF_PIP_TIMEOUT_SECONDS = 120;
 const EXTERNAL_ENGINE_CONFIG_FILE = 'quantum-engines.json';
 const LOCAL_ENGINE_CONFIG_FILE = 'local-quantum-engines.json';
 const ENGINE_SETUP_REQUEST_FILE = 'engine-setup-request.json';
@@ -1145,12 +1147,12 @@ async function installPyscfEngine(onProgress = () => {}) {
   const engine = 'pyscf';
   const engineLabel = QUANTUM_ENGINE_LABELS.pyscf;
   emitInstallProgress(onProgress, engine, 'checking', 5, 'Checking Python 3 and existing PySCF environment.');
-  const python = await resolveSystemPython();
+  const pythonCandidates = await resolvePyscfInstallPythonCandidates(onProgress);
   const venvDir = path.join(localEnginesRoot(), 'pyscf');
   const managedPython = pyscfPythonExecutable();
   const outputParts = [];
 
-  if (!python) {
+  if (pythonCandidates.length === 0) {
     const status = await getPyscfStatus();
     emitInstallProgress(onProgress, engine, 'error', 100, 'Python 3 was not found. Install Python 3 or set CHEMVAULT_PYTHON_PATH.');
     return {
@@ -1165,75 +1167,413 @@ async function installPyscfEngine(onProgress = () => {}) {
 
   await fs.promises.mkdir(localEnginesRoot(), { recursive: true });
 
-  if (!isReadableFile(managedPython)) {
-    emitInstallProgress(onProgress, engine, 'creating-environment', 15, 'Creating the managed Python environment.');
-    const createResult = await runProcessWithProgress(
-      python.executable,
-      [...python.argsPrefix, '-m', 'venv', venvDir],
-      {
-        timeoutMs: 180000,
-        progress: (output) => emitInstallProgress(onProgress, engine, 'creating-environment', 25, 'Creating the managed Python environment.', output)
+  let lastInstallResult = null;
+  let lastDiagnosis = null;
+  let finalStatus = await getPyscfStatus();
+
+  for (let index = 0; index < pythonCandidates.length; index += 1) {
+    const python = pythonCandidates[index];
+    const candidateLabel = pythonInstallCandidateLabel(python);
+    const managedProbe = isReadableFile(managedPython)
+      ? await probePythonForPyscfInstall({ executable: managedPython, argsPrefix: [] })
+      : null;
+    const shouldRebuild = index > 0 || shouldRebuildPyscfManagedEnvironment(managedProbe, python.probe);
+
+    if (shouldRebuild) {
+      await resetManagedPyscfEnvironment(
+        venvDir,
+        onProgress,
+        outputParts,
+        index > 0
+          ? `Rebuilding the managed environment with ${candidateLabel}.`
+          : 'Repair monitor is rebuilding the managed environment before retrying PySCF.'
+      );
+    }
+
+    if (!isReadableFile(managedPython)) {
+      emitInstallProgress(
+        onProgress,
+        engine,
+        'creating-environment',
+        15,
+        `Creating the managed Python environment with ${candidateLabel}.`,
+        outputTail(outputParts.join('\n')),
+        {
+          attempt: candidateLabel,
+          diagnosis: python.probe.summary,
+          repairAction: 'Creating a clean private environment before installing PySCF.'
+        }
+      );
+      const createResult = await runMonitoredPyscfInstallProcess(
+        python.executable,
+        [...python.argsPrefix, '-m', 'venv', venvDir],
+        {
+          onProgress,
+          engine,
+          phase: 'creating-environment',
+          percent: 25,
+          message: `Creating the managed Python environment with ${candidateLabel}.`,
+          attempt: candidateLabel,
+          timeoutMs: 180000
+        }
+      );
+      outputParts.push(createResult.stdout, createResult.stderr);
+      if (createResult.exitCode !== 0) {
+        lastDiagnosis = diagnosePyscfInstallerOutput(combinedProcessOutput(createResult));
+        if (index < pythonCandidates.length - 1) continue;
+
+        const status = await getPyscfStatus();
+        emitInstallProgress(
+          onProgress,
+          engine,
+          'error',
+          100,
+          'Could not create the managed Python environment.',
+          outputTail(outputParts.join('\n')),
+          {
+            attempt: candidateLabel,
+            diagnosis: lastDiagnosis.summary,
+            repairAction: lastDiagnosis.repairAction || 'Try installing Python from python.org, then run setup again.'
+          }
+        );
+        return {
+          ok: false,
+          engine,
+          engineLabel,
+          status,
+          outputTail: outputTail(outputParts.join('\n')),
+          error: `Could not create the managed Python environment for PySCF. ${lastDiagnosis.summary}`
+        };
       }
-    );
-    outputParts.push(createResult.stdout, createResult.stderr);
-    if (createResult.exitCode !== 0) {
-      const status = await getPyscfStatus();
-      emitInstallProgress(onProgress, engine, 'error', 100, 'Could not create the managed Python environment.', outputTail(outputParts.join('\n')));
+    }
+
+    await repairPyscfPipTooling(managedPython, onProgress, outputParts, candidateLabel);
+    lastInstallResult = await installPyscfPackageWithRepair(managedPython, onProgress, outputParts, candidateLabel);
+    finalStatus = await getPyscfStatus();
+
+    if (lastInstallResult.ok && finalStatus.available) {
+      emitInstallProgress(
+        onProgress,
+        engine,
+        'complete',
+        100,
+        'PySCF is ready for local DFT/HF calculations.',
+        outputTail(outputParts.join('\n')),
+        {
+          attempt: candidateLabel,
+          diagnosis: 'PySCF import verification passed.',
+          repairAction: 'No further repair is required.'
+        }
+      );
       return {
-        ok: false,
+        ok: true,
         engine,
         engineLabel,
-        status,
-        outputTail: outputTail(outputParts.join('\n')),
-        error: 'Could not create the managed Python environment for PySCF.'
+        status: finalStatus,
+        outputTail: outputTail(outputParts.join('\n'))
       };
     }
+
+    lastDiagnosis = lastInstallResult.diagnosis || diagnosePyscfInstallerOutput(outputParts.join('\n'));
+    if (!shouldTryAnotherPythonForPyscf(lastDiagnosis) || index === pythonCandidates.length - 1) {
+      break;
+    }
+
+    emitInstallProgress(
+      onProgress,
+      engine,
+      'installing-engine',
+      82,
+      'PySCF did not install cleanly with this Python. Trying another Python candidate.',
+      outputTail(outputParts.join('\n')),
+      {
+        attempt: candidateLabel,
+        diagnosis: lastDiagnosis.summary,
+        repairAction: 'The monitor will rebuild the environment with another Python version and retry.'
+      }
+    );
   }
 
-  emitInstallProgress(onProgress, engine, 'installing-dependencies', 35, 'Upgrading pip, wheel, and setuptools.');
-  const pipUpgrade = await runProcessWithProgress(
-    managedPython,
-    ['-m', 'pip', 'install', '--upgrade', 'pip', 'wheel', 'setuptools'],
-    {
-      timeoutMs: 600000,
-      progress: (output) => emitInstallProgress(onProgress, engine, 'installing-dependencies', 50, 'Upgrading pip, wheel, and setuptools.', output)
-    }
-  );
-  outputParts.push(pipUpgrade.stdout, pipUpgrade.stderr);
-
-  emitInstallProgress(onProgress, engine, 'installing-engine', 60, 'Installing or updating PySCF. This can take several minutes.');
-  const installResult = await runProcessWithProgress(
-    managedPython,
-    ['-m', 'pip', 'install', '--upgrade', 'pyscf'],
-    {
-      timeoutMs: 1200000,
-      progress: (output) => emitInstallProgress(onProgress, engine, 'installing-engine', 80, 'Installing or updating PySCF. This can take several minutes.', output)
-    }
-  );
-  outputParts.push(installResult.stdout, installResult.stderr);
-
-  emitInstallProgress(onProgress, engine, 'verifying', 90, 'Verifying PySCF installation.');
-  const status = await getPyscfStatus();
+  const status = finalStatus || await getPyscfStatus();
+  const diagnosis = lastDiagnosis || diagnosePyscfInstallerOutput(outputParts.join('\n'));
   emitInstallProgress(
     onProgress,
     engine,
-    installResult.exitCode === 0 && status.available ? 'complete' : 'error',
+    'error',
     100,
-    installResult.exitCode === 0 && status.available
-      ? 'PySCF is ready for local DFT/HF calculations.'
-      : 'PySCF installation did not complete.',
-    outputTail(outputParts.join('\n'))
+    'PySCF installation did not complete.',
+    outputTail(outputParts.join('\n')),
+    {
+      attempt: lastInstallResult?.attempt,
+      diagnosis: diagnosis.summary,
+      repairAction: diagnosis.repairAction || 'Use Configure Existing to select a Python environment where PySCF is already installed.'
+    }
   );
+
   return {
-    ok: installResult.exitCode === 0 && status.available,
+    ok: false,
     engine,
     engineLabel,
     status,
     outputTail: outputTail(outputParts.join('\n')),
-    error: installResult.exitCode === 0 && status.available
-      ? undefined
-      : 'PySCF installation did not complete. Check the installer output and Python compatibility.'
+    error: `PySCF installation did not complete. ${diagnosis.summary}`
   };
+}
+
+async function repairPyscfPipTooling(managedPython, onProgress, outputParts, attempt) {
+  const engine = 'pyscf';
+  emitInstallProgress(
+    onProgress,
+    engine,
+    'installing-dependencies',
+    32,
+    'Repair monitor is checking pip inside the managed environment.',
+    outputTail(outputParts.join('\n')),
+    {
+      attempt,
+      diagnosis: 'pip, wheel, setuptools, and packaging must be healthy before PySCF can be installed.',
+      repairAction: 'Bootstrapping pip and upgrading installer tooling.'
+    }
+  );
+
+  const ensurePip = await runMonitoredPyscfInstallProcess(
+    managedPython,
+    ['-m', 'ensurepip', '--upgrade'],
+    {
+      onProgress,
+      engine,
+      phase: 'installing-dependencies',
+      percent: 38,
+      message: 'Bootstrapping pip in the managed environment.',
+      attempt,
+      timeoutMs: 180000
+    }
+  );
+  outputParts.push(ensurePip.stdout, ensurePip.stderr);
+
+  const pipUpgrade = await runMonitoredPyscfInstallProcess(
+    managedPython,
+    [
+      '-m',
+      'pip',
+      'install',
+      '--upgrade',
+      '--retries',
+      '5',
+      '--timeout',
+      String(PYSCF_PIP_TIMEOUT_SECONDS),
+      'pip',
+      'wheel',
+      'setuptools',
+      'packaging'
+    ],
+    {
+      onProgress,
+      engine,
+      phase: 'installing-dependencies',
+      percent: 50,
+      message: 'Upgrading pip, wheel, setuptools, and packaging.',
+      attempt,
+      timeoutMs: 600000
+    }
+  );
+  outputParts.push(pipUpgrade.stdout, pipUpgrade.stderr);
+}
+
+async function installPyscfPackageWithRepair(managedPython, onProgress, outputParts, candidateLabel) {
+  const engine = 'pyscf';
+  const attempts = pyscfInstallAttempts();
+  let lastDiagnosis = null;
+
+  for (let index = 0; index < attempts.length; index += 1) {
+    const attempt = attempts[index];
+    if (attempt.preArgs) {
+      const preflight = await runMonitoredPyscfInstallProcess(
+        managedPython,
+        attempt.preArgs,
+        {
+          onProgress,
+          engine,
+          phase: 'installing-engine',
+          percent: Math.min(78, attempt.percent - 4),
+          message: attempt.preMessage || 'Preparing the next PySCF repair attempt.',
+          attempt: `${candidateLabel} / ${attempt.name}`,
+          timeoutMs: 180000
+        }
+      );
+      outputParts.push(preflight.stdout, preflight.stderr);
+    }
+
+    emitInstallProgress(
+      onProgress,
+      engine,
+      'installing-engine',
+      attempt.percent,
+      attempt.message,
+      outputTail(outputParts.join('\n')),
+      {
+        attempt: `${candidateLabel} / ${attempt.name}`,
+        diagnosis: lastDiagnosis?.summary,
+        repairAction: attempt.repairAction
+      }
+    );
+
+    const result = await runMonitoredPyscfInstallProcess(
+      managedPython,
+      attempt.args,
+      {
+        onProgress,
+        engine,
+        phase: 'installing-engine',
+        percent: attempt.percent,
+        message: attempt.message,
+        attempt: `${candidateLabel} / ${attempt.name}`,
+        timeoutMs: PYSCF_INSTALL_TIMEOUT_MS
+      }
+    );
+    outputParts.push(result.stdout, result.stderr);
+    lastDiagnosis = diagnosePyscfInstallerOutput(combinedProcessOutput(result));
+
+    const probe = await probePyscf(managedPython, []);
+    if (result.exitCode === 0 && probe.available) {
+      return { ok: true, attempt: `${candidateLabel} / ${attempt.name}`, diagnosis: lastDiagnosis };
+    }
+
+    if (isTerminalPyscfInstallFailure(lastDiagnosis)) {
+      break;
+    }
+  }
+
+  return {
+    ok: false,
+    attempt: `${candidateLabel} / ${attempts.at(-1)?.name || 'install'}`,
+    diagnosis: lastDiagnosis || diagnosePyscfInstallerOutput(outputParts.join('\n'))
+  };
+}
+
+function pyscfInstallAttempts() {
+  const configuredIndex = pipIndexArgs();
+  const defaultRetryArgs = [
+    '--upgrade',
+    '--retries',
+    '5',
+    '--timeout',
+    String(PYSCF_PIP_TIMEOUT_SECONDS)
+  ];
+  const attempts = [
+    {
+      name: 'standard install',
+      percent: 62,
+      message: 'Installing or updating PySCF with standard pip settings.',
+      repairAction: 'Using pip with longer timeout and retry settings.',
+      args: ['-m', 'pip', 'install', ...defaultRetryArgs, ...configuredIndex, 'pyscf']
+    },
+    {
+      name: 'binary wheel repair',
+      percent: 72,
+      message: 'Retrying PySCF with binary wheels only.',
+      repairAction: 'Avoiding source builds that commonly fail on Windows without compiler tooling.',
+      args: ['-m', 'pip', 'install', ...defaultRetryArgs, '--only-binary=:all:', '--prefer-binary', ...configuredIndex, 'pyscf']
+    },
+    {
+      name: 'clean cache repair',
+      percent: 80,
+      message: 'Clearing pip cache and retrying PySCF.',
+      preMessage: 'Clearing pip cache before retrying PySCF.',
+      repairAction: 'Removing partial downloads and forcing a clean package fetch.',
+      preArgs: ['-m', 'pip', 'cache', 'purge'],
+      args: ['-m', 'pip', 'install', ...defaultRetryArgs, '--no-cache-dir', '--prefer-binary', ...configuredIndex, 'pyscf']
+    }
+  ];
+
+  if (configuredIndex.length === 0) {
+    attempts.push({
+      name: 'alternate HTTPS index repair',
+      percent: 86,
+      message: 'Retrying PySCF through an alternate HTTPS package index.',
+      repairAction: 'Using a regional HTTPS mirror when the default PyPI connection is unstable.',
+      args: [
+        '-m',
+        'pip',
+        'install',
+        ...defaultRetryArgs,
+        '--prefer-binary',
+        '--index-url',
+        'https://pypi.tuna.tsinghua.edu.cn/simple',
+        '--trusted-host',
+        'pypi.tuna.tsinghua.edu.cn',
+        'pyscf'
+      ]
+    });
+  }
+
+  return attempts;
+}
+
+async function runMonitoredPyscfInstallProcess(executable, args, options) {
+  return runProcessWithProgress(executable, args, {
+    timeoutMs: options.timeoutMs,
+    progress: (output) => {
+      const diagnosis = diagnosePyscfInstallerOutput(output);
+      emitInstallProgress(
+        options.onProgress,
+        options.engine,
+        options.phase,
+        options.percent,
+        options.message,
+        output,
+        {
+          attempt: options.attempt,
+          diagnosis: diagnosis.summary,
+          repairAction: diagnosis.repairAction
+        }
+      );
+    }
+  });
+}
+
+async function resetManagedPyscfEnvironment(venvDir, onProgress, outputParts, reason) {
+  const engine = 'pyscf';
+  emitInstallProgress(
+    onProgress,
+    engine,
+    'creating-environment',
+    12,
+    reason,
+    outputTail(outputParts.join('\n')),
+    {
+      diagnosis: 'The existing managed environment is missing, incompatible, or failed verification.',
+      repairAction: 'Removing only ChemVault managed PySCF files and recreating the environment.'
+    }
+  );
+
+  const root = path.resolve(localEnginesRoot());
+  const target = path.resolve(venvDir);
+  if (!isPathInside(target, root)) {
+    throw new Error('Refusing to reset a managed engine path outside the ChemVault engine folder.');
+  }
+  await fs.promises.rm(target, { recursive: true, force: true });
+}
+
+function shouldRebuildPyscfManagedEnvironment(managedProbe, selectedProbe) {
+  if (!managedProbe) return false;
+  if (!managedProbe.available) return true;
+  if (isRecommendedPyscfPythonProbe(managedProbe)) return false;
+  return isRecommendedPyscfPythonProbe(selectedProbe);
+}
+
+function isPathInside(target, root) {
+  const relative = path.relative(root, target);
+  return relative === '' || Boolean(relative && !relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function pipIndexArgs() {
+  const configured = String(process.env.CHEMVAULT_PIP_INDEX_URL || process.env.PIP_INDEX_URL || '').trim();
+  return configured ? ['--index-url', configured] : [];
+}
+
+function combinedProcessOutput(result) {
+  return `${result?.stdout || ''}\n${result?.stderr || ''}`;
 }
 
 async function openLocalEngineFolder() {
@@ -1624,6 +1964,114 @@ async function resolveSystemPython() {
     }
   }
   return null;
+}
+
+async function resolvePyscfInstallPythonCandidates(onProgress = () => {}) {
+  const probes = [];
+  const candidates = systemPythonCandidates();
+  for (const candidate of candidates) {
+    const probe = await probePythonForPyscfInstall(candidate);
+    if (!probe.available) continue;
+    probes.push({ ...candidate, probe });
+  }
+
+  probes.sort((left, right) => rankPyscfPythonCandidate(left.probe) - rankPyscfPythonCandidate(right.probe));
+  const recommended = probes.filter((candidate) => isRecommendedPyscfPythonProbe(candidate.probe));
+  const fallback = probes.filter((candidate) => !isRecommendedPyscfPythonProbe(candidate.probe));
+  const resolved = [...recommended, ...fallback].slice(0, 4);
+
+  if (resolved.length > 0) {
+    emitInstallProgress(
+      onProgress,
+      'pyscf',
+      'checking',
+      8,
+      `Selected ${pythonInstallCandidateLabel(resolved[0])} for the first install attempt.`,
+      undefined,
+      {
+        attempt: pythonInstallCandidateLabel(resolved[0]),
+        diagnosis: `Found ${resolved.length} usable Python candidate${resolved.length === 1 ? '' : 's'}.`,
+        repairAction: recommended.length > 0
+          ? 'Prioritizing 64-bit Python 3.10-3.12 for better PySCF wheel compatibility.'
+          : 'No preferred Python 3.10-3.12 candidate was found; the monitor will try available Python 3 versions.'
+      }
+    );
+  }
+
+  return resolved;
+}
+
+async function probePythonForPyscfInstall(candidate) {
+  const script = 'import json, platform, sys; print(json.dumps({"version": ".".join(map(str, sys.version_info[:3])), "major": sys.version_info[0], "minor": sys.version_info[1], "architecture": platform.architecture()[0], "executable": sys.executable}, ensure_ascii=True))';
+  const result = await runProcess(candidate.executable, [...candidate.argsPrefix, '-c', script], { timeoutMs: 10000 });
+  const output = `${result.stdout}\n${result.stderr}`.trim();
+  if (result.exitCode !== 0) {
+    return {
+      available: false,
+      summary: diagnosePyscfInstallerOutput(output).summary
+    };
+  }
+
+  try {
+    const parsed = JSON.parse(output.split(/\r?\n/u).filter(Boolean).at(-1) || '{}');
+    const major = Number(parsed.major);
+    const minor = Number(parsed.minor);
+    const architecture = String(parsed.architecture || '');
+    const version = String(parsed.version || '');
+    const isPython3 = major === 3;
+    return {
+      available: isPython3,
+      version,
+      major,
+      minor,
+      architecture,
+      executable: String(parsed.executable || candidate.executable),
+      summary: isPython3
+        ? `Python ${version} ${architecture} is available.`
+        : 'This candidate is not Python 3.'
+    };
+  } catch {
+    return {
+      available: /\bPython\s+3\./iu.test(output),
+      version: extractVersion(output) || '',
+      major: 3,
+      minor: 0,
+      architecture: '',
+      executable: candidate.executable,
+      summary: outputTail(output) || 'Python candidate responded, but version metadata could not be parsed.'
+    };
+  }
+}
+
+function isRecommendedPyscfPythonProbe(probe) {
+  return Boolean(
+    probe?.available &&
+      probe.major === 3 &&
+      probe.minor >= 10 &&
+      probe.minor <= 12 &&
+      /64/u.test(String(probe.architecture || ''))
+  );
+}
+
+function rankPyscfPythonCandidate(probe) {
+  if (!probe?.available) return 100;
+  const versionPreference = new Map([
+    [11, 0],
+    [12, 1],
+    [10, 2],
+    [9, 3],
+    [8, 4],
+    [13, 8]
+  ]);
+  const archPenalty = /64/u.test(String(probe.architecture || '')) ? 0 : 20;
+  return (versionPreference.has(probe.minor) ? versionPreference.get(probe.minor) : 10) + archPenalty;
+}
+
+function pythonInstallCandidateLabel(candidate) {
+  const probe = candidate?.probe || {};
+  const version = probe.version ? `Python ${probe.version}` : path.basename(candidate?.executable || 'Python');
+  const arch = probe.architecture ? ` ${probe.architecture}` : '';
+  return `${version}${arch}`;
 }
 
 function systemPythonCandidates() {
@@ -2086,7 +2534,7 @@ function runProcessWithProgress(executable, args, options = {}) {
   });
 }
 
-function emitInstallProgress(onProgress, engine, phase, percent, message, output) {
+function emitInstallProgress(onProgress, engine, phase, percent, message, output, details = {}) {
   if (typeof onProgress !== 'function') return;
   onProgress({
     engine,
@@ -2094,7 +2542,10 @@ function emitInstallProgress(onProgress, engine, phase, percent, message, output
     phase,
     percent: Math.max(0, Math.min(100, Number(percent) || 0)),
     message,
-    outputTail: output || undefined
+    attempt: details.attempt || undefined,
+    diagnosis: details.diagnosis || undefined,
+    outputTail: output || undefined,
+    repairAction: details.repairAction || undefined
   });
 }
 
@@ -2343,6 +2794,135 @@ function parseXyzAtoms(xyz) {
     const [element] = line.trim().split(/\s+/u);
     return { element: element || '?' };
   });
+}
+
+function diagnosePyscfInstallerOutput(output) {
+  const text = String(output || '').trim();
+  if (!text) {
+    return {
+      code: 'waiting',
+      summary: 'Waiting for installer output.',
+      repairAction: 'The monitor will update this diagnosis when pip or Python returns output.',
+      retryWithAnotherPython: false,
+      terminal: false
+    };
+  }
+
+  if (/No module named pip|ensurepip is disabled|No module named ensurepip|pip is not recognized/iu.test(text)) {
+    return {
+      code: 'pip-missing',
+      summary: 'pip is missing or damaged in the Python environment.',
+      repairAction: 'Bootstrapping pip with ensurepip, then upgrading wheel and setuptools.',
+      retryWithAnotherPython: false,
+      terminal: false
+    };
+  }
+
+  if (/Microsoft Store|No Python at|App execution alias|was not found but can be installed/iu.test(text)) {
+    return {
+      code: 'store-python',
+      summary: 'Windows returned the Microsoft Store Python alias instead of a real Python installation.',
+      repairAction: 'Skipping this alias and trying another Python executable.',
+      retryWithAnotherPython: true,
+      terminal: false
+    };
+  }
+
+  if (/No matching distribution found|Could not find a version that satisfies|Requires-Python|not a supported wheel on this platform/iu.test(text)) {
+    return {
+      code: 'no-compatible-wheel',
+      summary: 'No compatible PySCF wheel was available for this Python version or platform.',
+      repairAction: 'Trying another 64-bit Python 3.10-3.12 candidate when available.',
+      retryWithAnotherPython: true,
+      terminal: true
+    };
+  }
+
+  if (/Microsoft Visual C\+\+|cl\.exe|Failed building wheel|Building wheel for .* failed|subprocess-exited-with-error|legacy-install-failure|CMake Error|ninja/iu.test(text)) {
+    return {
+      code: 'source-build-failed',
+      summary: 'pip attempted a source build and the Windows compiler toolchain failed.',
+      repairAction: 'Retrying with binary wheels only, then trying another Python candidate if needed.',
+      retryWithAnotherPython: true,
+      terminal: false
+    };
+  }
+
+  if (/CERTIFICATE_VERIFY_FAILED|SSL:|TLSV1_ALERT|Read timed out|ConnectionReset|Temporary failure|NameResolutionError|ProxyError|Could not fetch URL|network is unreachable|timed out/iu.test(text)) {
+    return {
+      code: 'network',
+      summary: 'The package download failed because of network, proxy, SSL, or timeout problems.',
+      repairAction: 'Retrying with longer timeout, clean cache, and an alternate HTTPS package index.',
+      retryWithAnotherPython: false,
+      terminal: false
+    };
+  }
+
+  if (/Access is denied|Permission denied|WinError 5|operation not permitted|Errno 13/iu.test(text)) {
+    return {
+      code: 'permission',
+      summary: 'Windows blocked access to the Python environment or package cache.',
+      repairAction: 'Recreating only the ChemVault managed environment and retrying in the user data folder.',
+      retryWithAnotherPython: false,
+      terminal: false
+    };
+  }
+
+  if (/hashes do not match|THESE PACKAGES DO NOT MATCH THE HASHES|File is not a zip file|BadZipFile|invalid wheel|corrupt/iu.test(text)) {
+    return {
+      code: 'corrupt-download',
+      summary: 'The downloaded package or cached wheel appears incomplete or corrupted.',
+      repairAction: 'Clearing pip cache and retrying the package download.',
+      retryWithAnotherPython: false,
+      terminal: false
+    };
+  }
+
+  if (/Successfully installed|Requirement already satisfied|Installing collected packages/iu.test(text)) {
+    return {
+      code: 'progress',
+      summary: 'pip is installing packages normally.',
+      repairAction: 'ChemVault will still verify PySCF import before marking the engine ready.',
+      retryWithAnotherPython: false,
+      terminal: false
+    };
+  }
+
+  if (/Collecting|Downloading|Using cached|Preparing metadata|Installing build dependencies|Getting requirements/iu.test(text)) {
+    return {
+      code: 'download',
+      summary: 'pip is resolving, downloading, or preparing package dependencies.',
+      repairAction: 'The monitor is watching for wheel, network, and build failures.',
+      retryWithAnotherPython: false,
+      terminal: false
+    };
+  }
+
+  if (/Traceback|Error|Failed|Could not/iu.test(text)) {
+    return {
+      code: 'generic-error',
+      summary: 'The installer output contains an error that does not match a known automatic repair pattern.',
+      repairAction: 'The monitor will continue with the next safe retry path if one is available.',
+      retryWithAnotherPython: false,
+      terminal: false
+    };
+  }
+
+  return {
+    code: 'informational',
+    summary: 'The installer output is informational.',
+    repairAction: 'ChemVault is waiting for the final process result before deciding the next action.',
+    retryWithAnotherPython: false,
+    terminal: false
+  };
+}
+
+function shouldTryAnotherPythonForPyscf(diagnosis) {
+  return Boolean(diagnosis?.retryWithAnotherPython);
+}
+
+function isTerminalPyscfInstallFailure(diagnosis) {
+  return Boolean(diagnosis?.terminal && !diagnosis.retryWithAnotherPython);
 }
 
 function outputTail(output) {

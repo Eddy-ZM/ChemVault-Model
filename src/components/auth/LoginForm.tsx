@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { FormEvent, useEffect, useMemo, useState } from 'react';
 import { useAuth } from '@/components/auth/AuthProvider';
+import { EngineSpinner, LoadingState } from '@/components/ui/LoadingState';
 import { OAuthProvider, buildOAuthUrl, buildRegisterUrl } from '@/lib/auth/chemvaultUserLinks';
 
 const oauthProviders: Array<{ id: OAuthProvider; label: string; className: string; iconWrapClassName: string }> = [
@@ -111,10 +112,7 @@ export function LoginForm() {
       <form onSubmit={onSubmit} className="relative mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-busy={busy}>
         {busy ? (
           <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-white/55 backdrop-blur-[1px]">
-            <div className="flex items-center gap-3 rounded-full border border-sky-100 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-sky-200 border-t-sky-700" aria-hidden="true" />
-              Connecting to ChemVault User
-            </div>
+            <LoadingState compact tone="overlay" label="Connecting to ChemVault User" />
           </div>
         ) : null}
         <label className="block text-sm font-medium text-slate-700" htmlFor="auth-email">
@@ -145,7 +143,7 @@ export function LoginForm() {
           disabled={busy}
           className="mt-4 flex w-full items-center justify-center gap-3 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
         >
-          {busy ? <span className="h-4 w-4 animate-spin rounded-full border-2 border-white/30 border-t-white" aria-hidden="true" /> : null}
+          {busy ? <EngineSpinner size="xs" decorative className="cv-engine-spinner-on-dark" /> : null}
           {busy ? 'Signing in' : 'Sign in'}
         </button>
       </form>

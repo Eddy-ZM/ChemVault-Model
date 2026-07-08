@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { EngineSpinner, LoadingState } from '@/components/ui/LoadingState';
 
 const DEFER_UNTIL_KEY = 'chemvault.desktop.update.deferUntil';
 const DEFER_PAIR_KEY = 'chemvault.desktop.update.deferPair';
@@ -141,6 +142,16 @@ export function DesktopUpdateGate() {
             : `You can continue briefly, but this device will be asked again after ${deferralHours} hours.`}
         </p>
 
+        {checking ? (
+          <LoadingState
+            compact
+            tone="panel"
+            className="mt-4"
+            label="Checking release status"
+            description="Comparing this build with the current ChemVault Model release."
+          />
+        ) : null}
+
         <div className="mt-6 flex flex-wrap items-center justify-end gap-3">
           {status.canDefer ? (
             <button
@@ -157,7 +168,14 @@ export function DesktopUpdateGate() {
             disabled={checking}
             className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {checking ? 'Checking' : 'Check again'}
+            {checking ? (
+              <span className="inline-flex items-center gap-2">
+                <EngineSpinner size="xs" decorative />
+                Checking
+              </span>
+            ) : (
+              'Check again'
+            )}
           </button>
           <button
             type="button"

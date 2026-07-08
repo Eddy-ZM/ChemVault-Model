@@ -2,6 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
+import { EngineSpinner, LoadingState } from '@/components/ui/LoadingState';
 import type {
   CommercialQuantumEngineKind,
   ExternalQuantumEngineConfig,
@@ -9,7 +10,8 @@ import type {
   LocalEngineInstallResult,
   LocalEngineSelectResult,
   LocalEngineStatus,
-  LocalOpenSourceEngineKind
+  LocalOpenSourceEngineKind,
+  QuantumEngineKind
 } from '@/lib/chem/quantumTypes';
 
 export type QuantumSetupDialogMode = 'install' | 'configure' | 'later';
@@ -31,6 +33,7 @@ type ExternalDiscoveryResult = {
 type Props = {
   mode: QuantumSetupDialogMode | null;
   onClose: () => void;
+  onEngineSelected?: (engine: QuantumEngineKind, label: string) => void;
   onEnginesChanged?: () => void;
 };
 
@@ -51,7 +54,7 @@ const commercialDefaults: Record<CommercialQuantumEngineKind, ExternalQuantumEng
   }
 };
 
-export function QuantumEngineSetupDialog({ mode, onClose, onEnginesChanged }: Props) {
+export function QuantumEngineSetupDialog({ mode, onClose, onEngineSelected, onEnginesChanged }: Props) {
   const [activeMode, setActiveMode] = useState<QuantumSetupDialogMode | null>(mode);
   const [localEngines, setLocalEngines] = useState<LocalEngineStatus[]>([]);
   const [commercialEngines, setCommercialEngines] = useState<CommercialDiscovery[]>([]);
@@ -187,6 +190,9 @@ export function QuantumEngineSetupDialog({ mode, onClose, onEnginesChanged }: Pr
     }
 
     setManualSelectMessage(result.message || `${localEngineLabel(engine)} application selected.`);
+    if (isSelectableLocalEngine(engine)) {
+      onEngineSelected?.(engine, localEngineLabel(engine));
+    }
     await scanExistingEngines();
   }
 
@@ -206,11 +212,13 @@ export function QuantumEngineSetupDialog({ mode, onClose, onEnginesChanged }: Pr
       executablePath
     });
     setManualSelectMessage(`${commercialEngineLabel(engine)} application selected and saved.`);
+    onEngineSelected?.(engine, commercialEngineLabel(engine));
     await scanExistingEngines();
   }
 
-  function useDetectedEngine(label: string) {
+  function useDetectedEngine(engine: QuantumEngineKind, label: string) {
     setManualSelectMessage(`${label} selected. You can run calculations from Molecule Studio.`);
+    onEngineSelected?.(engine, label);
     onEnginesChanged?.();
     closeDialog();
   }
@@ -285,11 +293,7 @@ function InstallView({
     <div className="space-y-5">
       <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
         <div className="flex items-center gap-4">
-          <div className="cv-engine-spinner" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
+          <EngineSpinner size="lg" decorative />
           <div>
             <p className="text-sm font-bold text-slate-950">Managed local installation</p>
             <p className="mt-1 text-sm leading-6 text-slate-600">
@@ -328,6 +332,19 @@ function InstallView({
               <p className="mt-2 text-sm leading-6 text-slate-700">{explainTerminalOutput(progress.outputTail)}</p>
             </div>
           </div>
+          {progress.attempt || progress.diagnosis || progress.repairAction ? (
+            <div className="mt-4 grid gap-3 lg:grid-cols-3">
+              {progress.attempt ? (
+                <InstallMonitorCard title="Current attempt" value={progress.attempt} />
+              ) : null}
+              {progress.diagnosis ? (
+                <InstallMonitorCard title="Live diagnosis" value={progress.diagnosis} />
+              ) : null}
+              {progress.repairAction ? (
+                <InstallMonitorCard title="Repair action" value={progress.repairAction} />
+              ) : null}
+            </div>
+          ) : null}
           {progress.outputTail ? (
             <pre className="mt-4 max-h-52 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3 text-xs leading-5 text-slate-100">
               {progress.outputTail}
@@ -346,6 +363,15 @@ function InstallView({
           </p>
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function InstallMonitorCard({ title, value }: { title: string; value: string }) {
+  return (
+    <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
+      <p className="text-xs font-bold uppercase tracking-[0.14em] text-sky-700">{title}</p>
+      <p className="mt-2 text-xs leading-5 text-sky-900">{value}</p>
     </div>
   );
 }
@@ -377,7 +403,7 @@ function ConfigureView({
   onRefresh: () => void;
   onSelectCommercial: (engine: CommercialQuantumEngineKind) => void;
   onSelectLocal: (engine: LocalOpenSourceEngineKind) => void;
-  onUseDetected: (label: string) => void;
+  onUseDetected: (engine: QuantumEngineKind, label: string) => void;
 }) {
   return (
     <div className="space-y-5">
@@ -385,7 +411,16 @@ function ConfigureView({
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <p className="text-sm font-bold text-slate-950">Automatic engine discovery</p>
-            <p className="mt-1 text-sm leading-6 text-slate-600">{scanMessage || 'Ready to scan this computer for installed quantum engines.'}</p>
+            {scanning ? (
+              <LoadingState
+                compact
+                className="mt-2"
+                label="Scanning engines"
+                description={scanMessage || 'Checking local paths, saved configuration, and common commercial engine locations.'}
+              />
+            ) : (
+              <p className="mt-1 text-sm leading-6 text-slate-600">{scanMessage || 'Ready to scan this computer for installed quantum engines.'}</p>
+            )}
           </div>
           <button
             type="button"
@@ -393,7 +428,14 @@ function ConfigureView({
             disabled={scanning}
             className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {scanning ? 'Scanning...' : 'Scan again'}
+            {scanning ? (
+              <span className="inline-flex items-center gap-2">
+                <EngineSpinner size="xs" decorative />
+                Scanning
+              </span>
+            ) : (
+              'Scan again'
+            )}
           </button>
         </div>
         {scanning ? <div className="cv-scan-line mt-4" /> : null}
@@ -401,16 +443,21 @@ function ConfigureView({
 
       {hasDetectedEngines ? (
         <div className="grid gap-3 lg:grid-cols-2">
-          {detectedLocalEngines.map((engine) => (
-            <EngineChoiceCard
-              key={engine.engine}
-              label={engine.engineLabel}
-              meta={engine.installMode}
-              path={engine.executable}
-              message={engine.message}
-              onUse={() => onUseDetected(engine.engineLabel)}
-            />
-          ))}
+          {detectedLocalEngines.map((engine) => {
+            const selectableEngine = isSelectableLocalEngine(engine.engine) ? engine.engine : null;
+            return (
+              <EngineChoiceCard
+                key={engine.engine}
+                actionLabel={selectableEngine ? 'Use' : 'Detected'}
+                disabled={!selectableEngine}
+                label={engine.engineLabel}
+                meta={engine.installMode}
+                path={engine.executable}
+                message={selectableEngine ? engine.message : `${engine.message} Direct Psi4 calculation is not enabled in this desktop runner yet.`}
+                onUse={selectableEngine ? () => onUseDetected(selectableEngine, engine.engineLabel) : undefined}
+              />
+            );
+          })}
           {detectedCommercialEngines.map((engine) => (
             <EngineChoiceCard
               key={engine.engine}
@@ -418,7 +465,7 @@ function ConfigureView({
               meta="commercial"
               path={engine.executablePath}
               message={engine.message}
-              onUse={() => onUseDetected(engine.engineLabel)}
+              onUse={() => onUseDetected(engine.engine, engine.engineLabel)}
             />
           ))}
         </div>
@@ -518,17 +565,21 @@ function LaterView({ onClose }: { onClose: () => void }) {
 }
 
 function EngineChoiceCard({
+  actionLabel = 'Use',
+  disabled = false,
   label,
   message,
   meta,
   onUse,
   path
 }: {
+  actionLabel?: string;
+  disabled?: boolean;
   label: string;
   meta: string;
   message: string;
   path?: string;
-  onUse: () => void;
+  onUse?: () => void;
 }) {
   return (
     <article className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
@@ -540,9 +591,10 @@ function EngineChoiceCard({
         <button
           type="button"
           onClick={onUse}
-          className="rounded-xl bg-emerald-900 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800"
+          disabled={disabled || !onUse}
+          className="rounded-xl bg-emerald-900 px-3 py-2 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-emerald-200 disabled:text-emerald-800"
         >
-          Use
+          {actionLabel}
         </button>
       </div>
       <p className="mt-3 text-xs leading-5 text-emerald-800">{message}</p>
@@ -612,4 +664,8 @@ function localEngineLabel(engine: LocalOpenSourceEngineKind) {
   if (engine === 'pyscf') return 'PySCF';
   if (engine === 'psi4') return 'Psi4';
   return 'xTB';
+}
+
+function isSelectableLocalEngine(engine: LocalOpenSourceEngineKind): engine is Extract<QuantumEngineKind, LocalOpenSourceEngineKind> {
+  return engine === 'xtb' || engine === 'pyscf';
 }

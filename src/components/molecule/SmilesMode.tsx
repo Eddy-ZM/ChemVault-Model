@@ -1,6 +1,7 @@
 'use client';
 
 import { FormEvent, useEffect, useState } from 'react';
+import { EngineSpinner } from '@/components/ui/LoadingState';
 
 const EXAMPLES = [
   { label: 'Ethanol', value: 'CCO' },
@@ -59,7 +60,14 @@ export function SmilesMode({ value, onValueChange, onLoad, onClear, onCopy, load
             disabled={loading}
             className="rounded-2xl bg-sky-700 px-5 py-3 text-sm font-semibold text-white transition hover:bg-sky-800 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {loading ? 'Loading SMILES...' : 'Load SMILES'}
+            {loading ? (
+              <span className="inline-flex items-center justify-center gap-2">
+                <EngineSpinner size="xs" decorative className="cv-engine-spinner-on-dark" />
+                Loading
+              </span>
+            ) : (
+              'Load SMILES'
+            )}
           </button>
           <button
             type="button"

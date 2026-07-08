@@ -20,6 +20,8 @@ Var ChemVaultEngineSetupDetails
 Var ChemVaultEngineSetupCommercial
 Var ChemVaultEngineSetupTitleFont
 Var ChemVaultEngineSetupBodyFont
+Var ChemVaultInstallSize
+Var ChemVaultInstallFiles
 
 !macro customPageAfterChangeDir
   Page custom ChemVaultEngineSetupPageCreate ChemVaultEngineSetupPageLeave
@@ -71,9 +73,35 @@ FunctionEnd
 Function ChemVaultInstFilesPageShow
   SetDetailsView show
   SetDetailsPrint both
+  DetailPrint "Preparing ChemVault Model installation."
 FunctionEnd
 
+!macro customFiles_x64
+  SetDetailsPrint both
+  DetailPrint "Application archive extracted for Windows x64."
+  ${GetSize} "$INSTDIR" "/S=0K" $ChemVaultInstallSize $ChemVaultInstallFiles $0
+  DetailPrint "Installed application files are being copied into: $INSTDIR"
+  DetailPrint "Current installed payload: $ChemVaultInstallFiles files, $ChemVaultInstallSize KB."
+  ${If} ${FileExists} "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+    DetailPrint "Verified desktop executable: $INSTDIR\${APP_EXECUTABLE_FILENAME}"
+  ${EndIf}
+  ${If} ${FileExists} "$INSTDIR\resources\app.asar"
+    DetailPrint "Verified packaged application resources: $INSTDIR\resources\app.asar"
+  ${EndIf}
+!macroend
+
 !macro customInstall
+  SetDetailsPrint both
+  DetailPrint "Writing Windows application registration and shortcuts."
+  ${If} ${FileExists} "$INSTDIR\${UNINSTALL_FILENAME}"
+    DetailPrint "Verified uninstaller: $INSTDIR\${UNINSTALL_FILENAME}"
+  ${EndIf}
+  ${If} ${FileExists} "$newStartMenuLink"
+    DetailPrint "Verified Start Menu shortcut: $newStartMenuLink"
+  ${EndIf}
+  ${If} ${FileExists} "$newDesktopLink"
+    DetailPrint "Verified desktop shortcut: $newDesktopLink"
+  ${EndIf}
   ${If} $ChemVaultEngineSetupState == ${BST_CHECKED}
     CreateDirectory "$APPDATA\ChemVault Model"
     DetailPrint "Created user data folder: $APPDATA\ChemVault Model"

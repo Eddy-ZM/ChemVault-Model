@@ -16,6 +16,7 @@ import type {
   QuantumEngineKind,
   QuantumEngineStatus
 } from '@/lib/chem/quantumTypes';
+import { downloadText, safeFileBaseName } from '@/lib/chem/fileExport';
 import { MoleculeProperties } from '@/lib/chem/types';
 import { formatValue } from '@/lib/chem/moleculeUtils';
 
@@ -40,6 +41,12 @@ type Props = {
   properties: MoleculeProperties;
   loading?: boolean;
   onCopy?: (value: string) => void;
+};
+
+type QuantumExportContext = {
+  charge: number;
+  metadata?: Metadata;
+  unpairedElectrons: number;
 };
 
 const cards: Array<{ key: keyof MoleculeProperties; label: string; unit?: string }> = [
@@ -137,7 +144,7 @@ export function MoleculePropertiesPanel({ metadata, properties, loading, onCopy 
         ))}
       </div>
 
-      {desktopQuantum ? <ProfessionalQuantumPanel xyz={quantumInput} /> : <ElectrostaticPanel analysis={electrostatics} />}
+      {desktopQuantum ? <ProfessionalQuantumPanel metadata={metadata} xyz={quantumInput} /> : <ElectrostaticPanel analysis={electrostatics} />}
     </section>
   );
 }
@@ -171,7 +178,7 @@ function Identifier({ label, value, onCopy }: { label: string; value: string; on
   );
 }
 
-function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
+function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz: string | null }) {
   const [status, setStatus] = useState<QuantumEngineStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
   const [running, setRunning] = useState(false);
@@ -454,6 +461,36 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
   const strongestCharges = result?.charges
     ? [...result.charges].sort((first, second) => Math.abs(second.charge) - Math.abs(first.charge)).slice(0, 8)
     : [];
+  const exportBaseName = useMemo(
+    () => quantumExportBaseName(metadata, result?.engine || selectedEngine),
+    [metadata, result?.engine, selectedEngine]
+  );
+
+  function exportQuantumReport() {
+    if (!result) return;
+    downloadText(
+      `${exportBaseName}_${exportTimestamp()}_report.html`,
+      buildQuantumReportHtml(result, {
+        charge,
+        metadata,
+        unpairedElectrons
+      }),
+      'text/html'
+    );
+  }
+
+  function exportQuantumLog() {
+    if (!result) return;
+    downloadText(
+      `${exportBaseName}_${exportTimestamp()}_log.txt`,
+      buildQuantumLogText(result, {
+        charge,
+        metadata,
+        unpairedElectrons
+      }),
+      'text/plain'
+    );
+  }
 
   return (
     <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4">
@@ -701,6 +738,32 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
 
       {result ? (
         <div className="mt-4 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+            <div>
+              <p className="text-sm font-bold text-slate-950">Calculation export</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                Export the completed summary, charges, vectors, warnings, and engine log with a ChemVault footer watermark.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={exportQuantumReport}
+                className="rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+              >
+                Export Report
+              </button>
+              <button
+                type="button"
+                onClick={exportQuantumLog}
+                disabled={!result.outputLog && !result.outputTail}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Export Log
+              </button>
+            </div>
+          </div>
+
           <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <Metric label="Total energy" value={result.energyHartree === null ? 'N/A' : `${formatNumber(result.energyHartree)} Eh`} />
             <Metric label="Dipole magnitude" value={result.dipoleDebye ? `${formatNumber(result.dipoleDebye.total)} D` : 'N/A'} />
@@ -1082,6 +1145,160 @@ function AxisValue({ axis, unit, value }: { axis: string; unit: string; value: n
       <span className="mt-1 block font-mono text-xs font-semibold text-slate-800">{formatSigned(value)} {unit}</span>
     </p>
   );
+}
+
+function quantumExportBaseName(metadata: Metadata | undefined, engine: QuantumEngineKind) {
+  const sourceName =
+    metadata?.name ||
+    metadata?.pdbId ||
+    metadata?.cid ||
+    metadata?.fileName ||
+    metadata?.smiles ||
+    'molecule';
+  return safeFileBaseName(`${sourceName}_${engine}_quantum`);
+}
+
+function exportTimestamp() {
+  return new Date().toISOString().replace(/[:.]/g, '-');
+}
+
+function buildQuantumReportHtml(result: QuantumCalculationResult, context: QuantumExportContext) {
+  const generatedAt = new Date().toLocaleString();
+  const log = result.outputLog || result.outputTail || 'No engine log was returned.';
+  const warnings = result.warnings.length
+    ? result.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join('')
+    : '<li>No warnings returned.</li>';
+  const chargeRows = result.charges.length
+    ? result.charges
+        .map((atom) => `
+          <tr>
+            <td>${atom.index}</td>
+            <td>${escapeHtml(atom.element)}</td>
+            <td class="${atom.charge >= 0 ? 'positive' : 'negative'}">${escapeHtml(formatSigned(atom.charge))} e</td>
+          </tr>
+        `)
+        .join('')
+    : '<tr><td colspan="3">No partial charges were returned.</td></tr>';
+  const dipole = result.dipoleDebye;
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>ChemVault quantum calculation report</title>
+  <style>
+    body { margin: 0; background: #f8fafc; color: #0f172a; font-family: Inter, Arial, sans-serif; }
+    main { max-width: 1040px; margin: 0 auto; padding: 40px 28px; }
+    h1 { margin: 0; font-size: 30px; line-height: 1.2; }
+    h2 { margin: 28px 0 12px; font-size: 18px; }
+    p { margin: 6px 0; }
+    .subtle { color: #64748b; }
+    .panel { border: 1px solid #dbe3ef; border-radius: 18px; background: #fff; padding: 20px; margin-top: 18px; }
+    .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .metric { border: 1px solid #e2e8f0; border-radius: 14px; background: #f8fafc; padding: 14px; }
+    .label { color: #64748b; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+    .value { margin-top: 8px; font-size: 18px; font-weight: 800; }
+    table { width: 100%; border-collapse: collapse; overflow: hidden; border-radius: 14px; }
+    th, td { border-bottom: 1px solid #e2e8f0; padding: 10px 12px; text-align: left; }
+    th { background: #f1f5f9; color: #475569; font-size: 12px; text-transform: uppercase; letter-spacing: .12em; }
+    pre { max-height: none; overflow: visible; white-space: pre-wrap; word-break: break-word; border-radius: 14px; background: #020617; color: #e2e8f0; padding: 16px; font-size: 12px; line-height: 1.55; }
+    .positive { color: #be123c; }
+    .negative { color: #075985; }
+    .watermark { margin-top: 36px; border-top: 1px solid #cbd5e1; padding-top: 16px; text-align: center; color: #64748b; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
+    @media print { body { background: #fff; } main { padding: 24px; } .panel, .metric { break-inside: avoid; } }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>ChemVault Quantum Calculation Report</h1>
+    <p class="subtle">Generated ${escapeHtml(generatedAt)}</p>
+
+    <section class="panel">
+      <h2>Calculation summary</h2>
+      <div class="grid">
+        <div class="metric"><div class="label">Engine</div><div class="value">${escapeHtml(result.engineLabel)}</div></div>
+        <div class="metric"><div class="label">Method</div><div class="value">${escapeHtml(result.method)}</div></div>
+        <div class="metric"><div class="label">Mode</div><div class="value">${escapeHtml(result.calculationMode)}</div></div>
+        <div class="metric"><div class="label">Elapsed</div><div class="value">${(result.elapsedMs / 1000).toFixed(1)} s</div></div>
+      </div>
+      <p><strong>Molecule:</strong> ${escapeHtml(exportMoleculeLabel(context.metadata))}</p>
+      <p><strong>Total charge:</strong> ${context.charge}</p>
+      <p><strong>Unpaired electrons:</strong> ${context.unpairedElectrons}</p>
+      <p><strong>Status:</strong> ${result.ok ? 'Completed' : escapeHtml(result.error || 'Not completed')}</p>
+    </section>
+
+    <section class="panel">
+      <h2>Computed properties</h2>
+      <div class="grid">
+        <div class="metric"><div class="label">Total energy</div><div class="value">${result.energyHartree === null ? 'N/A' : `${formatNumber(result.energyHartree)} Eh`}</div></div>
+        <div class="metric"><div class="label">Dipole magnitude</div><div class="value">${dipole ? `${formatNumber(dipole.total)} D` : 'N/A'}</div></div>
+        <div class="metric"><div class="label">Partial charges</div><div class="value">${result.charges.length}</div></div>
+        <div class="metric"><div class="label">Charge model</div><div class="value">${escapeHtml(result.chargeModel)}</div></div>
+      </div>
+      ${dipole ? `<p><strong>Dipole vector:</strong> X ${escapeHtml(formatSigned(dipole.x))} D, Y ${escapeHtml(formatSigned(dipole.y))} D, Z ${escapeHtml(formatSigned(dipole.z))} D</p>` : ''}
+    </section>
+
+    <section class="panel">
+      <h2>Partial charges</h2>
+      <table>
+        <thead><tr><th>Atom</th><th>Element</th><th>${escapeHtml(result.chargeModel)}</th></tr></thead>
+        <tbody>${chargeRows}</tbody>
+      </table>
+    </section>
+
+    <section class="panel">
+      <h2>Warnings</h2>
+      <ul>${warnings}</ul>
+    </section>
+
+    <section class="panel">
+      <h2>Engine log</h2>
+      <pre>${escapeHtml(log)}</pre>
+    </section>
+
+    <footer class="watermark">Generated by ChemVault Model | chemvault.science</footer>
+  </main>
+</body>
+</html>`;
+}
+
+function buildQuantumLogText(result: QuantumCalculationResult, context: QuantumExportContext) {
+  const generatedAt = new Date().toISOString();
+  const log = result.outputLog || result.outputTail || 'No engine log was returned.';
+  return [
+    'ChemVault Model Quantum Calculation Log',
+    `Generated: ${generatedAt}`,
+    `Molecule: ${exportMoleculeLabel(context.metadata)}`,
+    `Engine: ${result.engineLabel}`,
+    `Method: ${result.method}`,
+    `Calculation mode: ${result.calculationMode}`,
+    `Total charge: ${context.charge}`,
+    `Unpaired electrons: ${context.unpairedElectrons}`,
+    `Status: ${result.ok ? 'Completed' : result.error || 'Not completed'}`,
+    '',
+    'Computed summary',
+    `Total energy: ${result.energyHartree === null ? 'N/A' : `${formatNumber(result.energyHartree)} Eh`}`,
+    `Dipole magnitude: ${result.dipoleDebye ? `${formatNumber(result.dipoleDebye.total)} D` : 'N/A'}`,
+    `Partial charges: ${result.charges.length}`,
+    '',
+    'Engine log',
+    log,
+    '',
+    'Generated by ChemVault Model | chemvault.science'
+  ].join('\n');
+}
+
+function exportMoleculeLabel(metadata?: Metadata) {
+  return metadata?.name || metadata?.pdbId || metadata?.cid || metadata?.fileName || metadata?.smiles || 'Unnamed molecule';
+}
+
+function escapeHtml(value: string | number) {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function clampPercent(value: number) {

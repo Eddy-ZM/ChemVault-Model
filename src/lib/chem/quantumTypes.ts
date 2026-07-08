@@ -133,5 +133,6 @@ export type QuantumCalculationResult = {
   elapsedMs: number;
   warnings: string[];
   outputTail: string;
+  outputLog?: string;
   error?: string;
 };

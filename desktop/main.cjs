@@ -716,7 +716,8 @@ async function runQuantumCalculation(request, onProgress = () => {}) {
     chargeModel: 'xTB population analysis',
     elapsedMs: 0,
     warnings: [],
-    outputTail: ''
+    outputTail: '',
+    outputLog: ''
   };
 
   if (!engine) {
@@ -794,6 +795,7 @@ async function runQuantumCalculation(request, onProgress = () => {}) {
       elapsedMs: Date.now() - startedAt,
       warnings,
       outputTail: outputTail(output),
+      outputLog: output,
       error: processResult.exitCode === 0 ? undefined : `xTB exited with code ${processResult.exitCode}.`
     };
     emitCalculationProgress(
@@ -894,7 +896,8 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
     chargeModel: `${engineLabel} Mulliken population analysis`,
     elapsedMs: 0,
     warnings: [],
-    outputTail: ''
+    outputTail: '',
+    outputLog: ''
   };
 
   if (!config.executablePath || !isReadableFile(config.executablePath)) {
@@ -984,6 +987,7 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
       elapsedMs: Date.now() - startedAt,
       warnings,
       outputTail: outputTail(output),
+      outputLog: output,
       error: completedOk ? undefined : diagnoseExternalEngineFailure(engineKind, processResult, output, config)
     };
     emitCalculationProgress(
@@ -1932,7 +1936,8 @@ async function runPyscfCalculation(request, onProgress = () => {}) {
     chargeModel: 'PySCF Mulliken population analysis',
     elapsedMs: 0,
     warnings: [],
-    outputTail: ''
+    outputTail: '',
+    outputLog: ''
   };
 
   if (calculationMode !== 'single-point') {
@@ -2030,6 +2035,7 @@ async function runPyscfCalculation(request, onProgress = () => {}) {
       elapsedMs: Date.now() - startedAt,
       warnings,
       outputTail: outputTail(output),
+      outputLog: output,
       error: processResult.exitCode === 0 && parsed ? undefined : `PySCF exited with code ${processResult.exitCode}.`
     };
     emitCalculationProgress(

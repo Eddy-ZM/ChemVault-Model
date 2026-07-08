@@ -51,7 +51,7 @@ Function ChemVaultEngineSetupPageCreate
   SendMessage $ChemVaultEngineSetupBody ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
   SetCtlColors $ChemVaultEngineSetupBody 0x1F2937 transparent
 
-  ${NSD_CreateLabel} 0 54u 100% 18u "Install progress details are expanded on the next page."
+  ${NSD_CreateLabel} 0 54u 100% 18u "Detailed installation progress is shown in English on the next page."
   Pop $ChemVaultEngineSetupDetails
   SendMessage $ChemVaultEngineSetupDetails ${WM_SETFONT} $ChemVaultEngineSetupBodyFont 1
   SetCtlColors $ChemVaultEngineSetupDetails 0x1F2937 transparent

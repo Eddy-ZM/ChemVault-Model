@@ -465,6 +465,14 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     () => quantumExportBaseName(metadata, result?.engine || selectedEngine),
     [metadata, result?.engine, selectedEngine]
   );
+  const selectedEngineOption = engineOptions.find((option) => option.value === selectedEngine) || engineOptions[0];
+  const engineReady = Boolean(status?.available);
+  const statusDetails = statusLoading
+    ? `Checking ${engineLabel(selectedEngine)} availability and configuration.`
+    : engineReady
+      ? `Ready${status?.source ? ` from ${status.source}` : ''}${status?.version ? `: ${status.version}` : ''}.`
+      : status?.message || 'Selected quantum engine is not available yet.';
+  const showLocalEngineManager = !isCommercialEngine(selectedEngine) || setupRequestEngines.length > 0 || Boolean(localEngineMessage);
 
   function exportQuantumReport() {
     if (!result) return;
@@ -498,54 +506,72 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         <div>
           <h3 className="text-lg font-bold text-slate-950">Professional Quantum Calculation</h3>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Windows desktop calculation port for local open-source engines and user-licensed external quantum engines.
+            Desktop calculation workspace for local open-source engines and user-licensed external engines.
           </p>
         </div>
-        <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
-          {status?.engineLabel || engineLabel(selectedEngine)}
+        <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${engineReady ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+          {statusLoading ? 'Checking' : engineReady ? 'Ready' : 'Setup needed'}
         </span>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-4">
-        {engineOptions.map((option) => (
-          <button
-            key={option.value}
-            type="button"
-            onClick={() => setSelectedEngine(option.value)}
-            className={`rounded-2xl border px-4 py-3 text-left transition ${
-              selectedEngine === option.value
-                ? 'border-sky-400 bg-sky-50 text-sky-950'
-                : 'border-slate-200 bg-slate-50 text-slate-700 hover:border-slate-300'
-            }`}
-          >
-            <span className="block text-sm font-bold">{option.label}</span>
-            <span className="mt-1 block text-xs leading-5 text-slate-500">{option.description}</span>
-          </button>
-        ))}
+      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Engine</p>
+              <h4 className="mt-1 text-base font-bold text-slate-950">Choose calculation engine</h4>
+            </div>
+            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+              {selectedEngineOption.label}
+            </span>
+          </div>
+
+          <div className="mt-4 grid gap-2 md:grid-cols-4">
+            {engineOptions.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                onClick={() => setSelectedEngine(option.value)}
+                className={`rounded-xl border px-3 py-3 text-left transition ${
+                  selectedEngine === option.value
+                    ? 'border-sky-400 bg-white text-sky-950 shadow-sm'
+                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                }`}
+              >
+                <span className="block text-sm font-bold">{option.label}</span>
+                <span className="mt-1 block text-xs leading-5 text-slate-500">{option.description}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white p-4">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Readiness</p>
+          <div className="mt-3 space-y-2">
+            <ReadinessItem label="Structure" ready={Boolean(xyz)} value={xyz ? 'Loaded' : 'Load a 3D structure'} />
+            <ReadinessItem label="Engine" ready={engineReady} value={statusLoading ? 'Checking' : engineReady ? 'Ready' : 'Needs setup'} />
+            <ReadinessItem label="Mode" ready={selectedEngine !== 'pyscf' || calculationMode === 'single-point'} value={calculationMode === 'geometry-optimization' ? 'Geometry optimization' : 'Single point'} />
+          </div>
+          <p className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-5 ${engineReady ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
+            {statusDetails}
+          </p>
+        </div>
       </div>
 
-      <div className={`mt-4 rounded-2xl border px-4 py-3 text-sm ${status?.available ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-amber-200 bg-amber-50 text-amber-900'}`}>
-        {statusLoading ? (
-          `Checking ${engineLabel(selectedEngine)} availability and configuration.`
-        ) : status?.available ? (
-          `Engine ready${status.source ? ` (${status.source})` : ''}${status.version ? `: ${status.version}` : ''}`
-        ) : (
-          status?.message || 'Selected quantum engine is not available.'
-        )}
-      </div>
-
-      <LocalEngineManager
-        engines={localEngines}
-        loading={localEngineLoading}
-        message={localEngineMessage}
-        setupPromptDismissed={setupPromptDismissed}
-        setupRequestEngines={setupRequestEngines}
-        onDismissSetup={clearEngineSetupRequest}
-        onConfigureExisting={() => setSetupMode('configure')}
-        onInstall={() => setSetupMode('install')}
-        onOpenFolder={openLocalEngineFolder}
-        onRefresh={loadLocalEngines}
-      />
+      {showLocalEngineManager ? (
+        <LocalEngineManager
+          engines={localEngines}
+          loading={localEngineLoading}
+          message={localEngineMessage}
+          setupPromptDismissed={setupPromptDismissed}
+          setupRequestEngines={setupRequestEngines}
+          onDismissSetup={clearEngineSetupRequest}
+          onConfigureExisting={() => setSetupMode('configure')}
+          onInstall={() => setSetupMode('install')}
+          onOpenFolder={openLocalEngineFolder}
+          onRefresh={loadLocalEngines}
+        />
+      ) : null}
 
       <QuantumEngineSetupDialog
         mode={setupMode}
@@ -896,47 +922,21 @@ function LocalEngineManager({
   const missingPyscf = engines.some((engine) => engine.engine === 'pyscf' && !engine.available);
   const installerRequestedPyscf = setupRequestEngines.includes('pyscf');
   const showSetupPrompt = missingPyscf && !setupPromptDismissed;
+  const readyCount = engines.filter((engine) => engine.available).length;
+  const summary = loading ? 'Checking' : engines.length > 0 ? `${readyCount}/${engines.length} ready` : 'Not checked';
 
   return (
-    <div className="mt-4 rounded-3xl border border-slate-200 bg-slate-50 p-4">
+    <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h4 className="text-sm font-bold text-slate-950">Local Open-Source Engines</h4>
+          <h4 className="text-sm font-bold text-slate-950">Optional Local Engine Setup</h4>
           <p className="mt-1 text-xs leading-5 text-slate-600">
-            Manage local open-source engines for desktop calculations without bundling commercial software.
+            Use PySCF for local DFT/HF work, or connect an existing open-source engine when needed.
           </p>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={onInstall}
-            className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
-          >
-            Install Engine
-          </button>
-          <button
-            type="button"
-            onClick={onConfigureExisting}
-            className="rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-white"
-          >
-            Configure Existing
-          </button>
-          <button
-            type="button"
-            onClick={onRefresh}
-            disabled={loading}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {loading ? 'Refreshing' : 'Refresh'}
-          </button>
-          <button
-            type="button"
-            onClick={onOpenFolder}
-            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-          >
-            Engine Folder
-          </button>
-        </div>
+        <span className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+          {summary}
+        </span>
       </div>
 
       {showSetupPrompt ? (
@@ -944,10 +944,10 @@ function LocalEngineManager({
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
               <p className="text-sm font-bold text-sky-950">
-                {installerRequestedPyscf ? 'Installer requested local engine setup' : 'PySCF local engine is not installed'}
+                {installerRequestedPyscf ? 'Local PySCF setup is pending' : 'PySCF is not ready'}
               </p>
               <p className="mt-1 text-xs leading-5 text-sky-800">
-                Install PySCF into the ChemVault managed engine folder to enable local open-source DFT/HF calculations. Python 3 and network access are required.
+                Install PySCF into the managed ChemVault folder, or skip this step and use a configured commercial engine.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -970,66 +970,101 @@ function LocalEngineManager({
         </div>
       ) : null}
 
-      <div className="mt-4 grid gap-3 lg:grid-cols-3">
-        {engines.length === 0 ? (
-          loading ? (
-            <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600">
-              Checking local engines.
-            </p>
-          ) : (
-            <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600">
-              Local engine status is not available.
-            </p>
-          )
-        ) : (
-          engines.map((engine) => {
-            const canManagedInstall = engine.engine === 'pyscf';
-
-            return (
-              <article key={engine.engine} className="rounded-2xl border border-slate-200 bg-white p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <p className="text-sm font-bold text-slate-950">{engine.engineLabel}</p>
-                    <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
-                      {engine.available ? 'Ready' : engine.installMode === 'managed' ? 'Installable' : 'Manual setup'}
-                    </p>
-                  </div>
-                  <span
-                    className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
-                      engine.available ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'
-                    }`}
-                  >
-                    {engine.installMode}
-                  </span>
-                </div>
-
-                <p className="mt-3 min-h-10 text-xs leading-5 text-slate-600">{engine.message}</p>
-
-                {engine.version ? <p className="mt-2 break-words text-xs text-slate-500">{engine.version}</p> : null}
-                {engine.executable ? <p className="mt-2 break-all font-mono text-[11px] leading-5 text-slate-500">{engine.executable}</p> : null}
-
-                {!engine.available && engine.installCommand ? (
-                  <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 font-mono text-[11px] leading-5 text-slate-600">
-                    {engine.installCommand}
-                  </p>
-                ) : null}
-
-                {canManagedInstall ? (
-                  <button
-                    type="button"
-                    onClick={onInstall}
-                    className="mt-3 w-full rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-                  >
-                    {engine.available ? 'Update PySCF' : 'Install PySCF'}
-                  </button>
-                ) : null}
-              </article>
-            );
-          })
-        )}
+      <div className="mt-4 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onInstall}
+            className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+          >
+            Install PySCF
+          </button>
+          <button
+            type="button"
+            onClick={onConfigureExisting}
+            className="rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-white"
+          >
+            Use Existing
+          </button>
+          <button
+            type="button"
+            onClick={onRefresh}
+            disabled={loading}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {loading ? 'Refreshing' : 'Refresh'}
+          </button>
+          <button
+            type="button"
+            onClick={onOpenFolder}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            Engine Folder
+          </button>
       </div>
 
       {message ? <p className="mt-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs leading-5 text-slate-600">{message}</p> : null}
+
+      <details className="mt-3 rounded-2xl border border-slate-200 bg-white px-4 py-3">
+        <summary className="cursor-pointer text-sm font-semibold text-slate-800">Advanced engine details</summary>
+        <div className="mt-3 grid gap-3 lg:grid-cols-3">
+          {engines.length === 0 ? (
+            loading ? (
+              <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600">
+                Checking local engines.
+              </p>
+            ) : (
+              <p className="rounded-2xl border border-dashed border-slate-300 bg-white px-4 py-3 text-sm text-slate-600">
+                Local engine status is not available.
+              </p>
+            )
+          ) : (
+            engines.map((engine) => {
+              const canManagedInstall = engine.engine === 'pyscf';
+
+              return (
+                <article key={engine.engine} className="rounded-2xl border border-slate-200 bg-white p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-bold text-slate-950">{engine.engineLabel}</p>
+                      <p className="mt-1 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+                        {engine.available ? 'Ready' : engine.installMode === 'managed' ? 'Installable' : 'Manual setup'}
+                      </p>
+                    </div>
+                    <span
+                      className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                        engine.available ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'
+                      }`}
+                    >
+                      {engine.installMode}
+                    </span>
+                  </div>
+
+                  <p className="mt-3 min-h-10 text-xs leading-5 text-slate-600">{engine.message}</p>
+
+                  {engine.version ? <p className="mt-2 break-words text-xs text-slate-500">{engine.version}</p> : null}
+                  {engine.executable ? <p className="mt-2 break-all font-mono text-[11px] leading-5 text-slate-500">{engine.executable}</p> : null}
+
+                  {!engine.available && engine.installCommand ? (
+                    <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 font-mono text-[11px] leading-5 text-slate-600">
+                      {engine.installCommand}
+                    </p>
+                  ) : null}
+
+                  {canManagedInstall ? (
+                    <button
+                      type="button"
+                      onClick={onInstall}
+                      className="mt-3 w-full rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    >
+                      {engine.available ? 'Update PySCF' : 'Install PySCF'}
+                    </button>
+                  ) : null}
+                </article>
+              );
+            })
+          )}
+        </div>
+      </details>
     </div>
   );
 }
@@ -1121,6 +1156,17 @@ function Metric({ label, value }: { label: string; value: string }) {
       <p className="text-xs font-medium text-slate-500">{label}</p>
       <p className="mt-2 text-lg font-semibold text-slate-950">{value}</p>
     </article>
+  );
+}
+
+function ReadinessItem({ label, ready, value }: { label: string; ready: boolean; value: string }) {
+  return (
+    <p className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+      <span className="font-semibold text-slate-500">{label}</span>
+      <span className={`rounded-full px-2 py-1 font-semibold ${ready ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+        {value}
+      </span>
+    </p>
   );
 }
 

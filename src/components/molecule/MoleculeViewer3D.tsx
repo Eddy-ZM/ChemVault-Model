@@ -20,6 +20,7 @@ type ThreeDMolViewer = {
   addLabel: (text: string, options: LabelOptions) => void;
   addSurface: (type: number, options: { opacity: number }) => void;
   pngURI: () => string;
+  resize?: () => void;
 };
 type ThreeDMolApi = { createViewer: (element: HTMLElement, options: { defaultcolors: unknown }) => ThreeDMolViewer; rasmolElementColors: unknown; SurfaceType: SurfaceType };
 
@@ -279,10 +280,35 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
     applyStyle();
   }, [ready, representation, background, showHydrogens, showAtomLabels, applyStyle]);
 
+  useEffect(() => {
+    if (!ready || !container.current || typeof ResizeObserver === 'undefined') return;
+
+    let frame = 0;
+    const observer = new ResizeObserver(() => {
+      window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        if (!viewer.current) return;
+        try {
+          viewer.current.resize?.();
+          if (model.current) viewer.current.zoomTo();
+          viewer.current.render();
+        } catch {
+          setError('3D viewer resize failed.');
+        }
+      });
+    });
+
+    observer.observe(container.current);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+    };
+  }, [ready]);
+
   return (
-    <div className="space-y-3">
+    <div className="flex min-h-0 flex-1 flex-col gap-3">
       {showHeader ? <h2 className="text-lg font-semibold">3D Viewer</h2> : null}
-      <div className="relative h-[55vh] min-h-[360px] w-full overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="relative min-h-[240px] flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white">
         <div ref={container} className="h-full w-full" />
         {!ready ? <div className="absolute inset-0 grid place-items-center text-sm font-semibold text-slate-600">Preparing viewer</div> : null}
         {error ? (
@@ -291,7 +317,7 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
           </div>
         ) : null}
       </div>
-      <div className="text-xs text-slate-500">High-fidelity molecular visualization engine</div>
+      <div className="shrink-0 text-xs text-slate-500">High-fidelity molecular visualization engine</div>
       {children}
     </div>
   );

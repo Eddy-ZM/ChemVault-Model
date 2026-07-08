@@ -18,8 +18,8 @@ export const ViewerPanel = forwardRef(function ViewerPanel(
   ref: ForwardedRef<MoleculeViewerHandle>
 ) {
   return (
-    <section className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-      <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+    <section className="flex h-full min-h-0 flex-col rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <div className="mb-4 flex shrink-0 flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <h2 className="text-2xl font-bold text-slate-950">3D Viewer</h2>
           <p className="mt-1 text-sm text-slate-600">{sourceLabel || 'Load a molecule to start visualisation.'}</p>

@@ -748,8 +748,8 @@ export function MoleculeStudio() {
             {activeMode === 'pdb' ? <PdbMode onLoadPdb={loadPdb} loading={loadingPdb} error={modeErrors.pdb} metadata={pdbMeta} /> : null}
           </div>
 
-          <div className="min-h-0 space-y-3 overflow-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-200 pb-3">
+          <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
+            <div className="flex shrink-0 items-center justify-between border-b border-slate-200 pb-3">
               <div>
                 <h2 className="text-sm font-semibold text-slate-950">3D Output Workspace</h2>
                 <p className="mt-1 text-xs text-slate-500">Inspect geometry, properties, display settings, and exports.</p>
@@ -767,31 +767,33 @@ export function MoleculeStudio() {
                 </span>
               </div>
             </div>
-            <ViewerPanel
-              ref={viewerRef}
-              loading={loading3D || loadingSearch || loadingPdb || loadingUpload}
-              hasStructure={Boolean(structure.data)}
-              sourceLabel={sourceLabel}
-              initialRepresentation={effectiveRepresentation}
-              onReady={() => {
-                if (structure.data) {
-                  viewerRef.current?.loadModel(structure.data, structure.format);
-                }
-              }}
-            >
-              <DisplayControls
-                representation={representation}
-                background={background}
-                showHydrogens={showHydrogens}
-                showAtomLabels={showAtomLabels}
-                allowCartoonRepresentation={allowCartoonRepresentation}
-                onRepresentationChange={setRepresentation}
-                onBackgroundChange={setBackground}
-                onToggleHydrogens={() => setShowHydrogens((value) => !value)}
-                onToggleAtomLabels={() => setShowAtomLabels((value) => !value)}
-                onResetView={() => viewerRef.current?.resetView()}
-              />
-            </ViewerPanel>
+            <div className="mt-3 min-h-0 flex-1">
+              <ViewerPanel
+                ref={viewerRef}
+                loading={loading3D || loadingSearch || loadingPdb || loadingUpload}
+                hasStructure={Boolean(structure.data)}
+                sourceLabel={sourceLabel}
+                initialRepresentation={effectiveRepresentation}
+                onReady={() => {
+                  if (structure.data) {
+                    viewerRef.current?.loadModel(structure.data, structure.format);
+                  }
+                }}
+              >
+                <DisplayControls
+                  representation={representation}
+                  background={background}
+                  showHydrogens={showHydrogens}
+                  showAtomLabels={showAtomLabels}
+                  allowCartoonRepresentation={allowCartoonRepresentation}
+                  onRepresentationChange={setRepresentation}
+                  onBackgroundChange={setBackground}
+                  onToggleHydrogens={() => setShowHydrogens((value) => !value)}
+                  onToggleAtomLabels={() => setShowAtomLabels((value) => !value)}
+                  onResetView={() => viewerRef.current?.resetView()}
+                />
+              </ViewerPanel>
+            </div>
           </div>
         </section>
       </main>

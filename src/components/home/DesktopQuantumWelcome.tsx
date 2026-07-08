@@ -12,6 +12,7 @@ export function DesktopQuantumWelcome() {
   const [dismissed, setDismissed] = useState(false);
   const [setupMode, setSetupMode] = useState<QuantumSetupDialogMode | null>(null);
   const [message, setMessage] = useState('');
+  const [selectedEngineLabel, setSelectedEngineLabel] = useState('');
 
   useEffect(() => {
     const api = window.chemVaultDesktop;
@@ -47,7 +48,8 @@ export function DesktopQuantumWelcome() {
   }
 
   function handleEngineSelected(_engine: QuantumEngineKind, label: string) {
-    setMessage(`${label} selected. Open Molecule Studio to run calculations with this engine.`);
+    setSelectedEngineLabel(label);
+    setMessage('');
     setDismissed(false);
   }
 
@@ -84,10 +86,19 @@ export function DesktopQuantumWelcome() {
             <button
               type="button"
               onClick={() => setSetupMode('configure')}
-              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-slate-800 hover:border-sky-300 hover:text-sky-900"
+              className={
+                selectedEngineLabel
+                  ? 'rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-left text-emerald-950 shadow-sm ring-2 ring-emerald-100 hover:border-emerald-400'
+                  : 'rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-slate-800 hover:border-sky-300 hover:text-sky-900'
+              }
             >
-              <span className="block text-sm font-bold">Use existing engines</span>
-              <span className="mt-1 block text-xs leading-5 text-slate-500">Scan this computer, choose a detected engine, or select an application.</span>
+              <span className="flex items-center justify-between gap-2 text-sm font-bold">
+                Use existing engines
+                {selectedEngineLabel ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-bold text-emerald-800">Selected</span> : null}
+              </span>
+              <span className={`mt-1 block text-xs leading-5 ${selectedEngineLabel ? 'text-emerald-800' : 'text-slate-500'}`}>
+                Scan this computer, choose a detected engine, or select an application.
+              </span>
             </button>
 
             <button
@@ -99,6 +110,23 @@ export function DesktopQuantumWelcome() {
               <span className="mt-1 block text-xs leading-5 text-slate-500">The setup panel remains available inside Molecule Studio.</span>
             </button>
           </div>
+
+          {selectedEngineLabel ? (
+            <div className="mt-4 rounded-2xl border border-emerald-200 bg-white px-4 py-4 shadow-sm">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Engine selected</p>
+                  <p className="mt-1 text-lg font-bold text-slate-950">{selectedEngineLabel}</p>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    Open Molecule Studio and use Professional Quantum Calculation to run jobs with this engine.
+                  </p>
+                </div>
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
+                  Ready to use
+                </span>
+              </div>
+            </div>
+          ) : null}
 
           <div className="mt-4 rounded-2xl border border-white bg-white/80 px-4 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">

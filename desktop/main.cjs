@@ -76,7 +76,9 @@ app.setName(APP_TITLE);
 ipcMain.handle('app:version-status', async () => getAppVersionStatus());
 ipcMain.handle('app:open-update-url', async (_event, url) => openUpdateUrl(url));
 ipcMain.handle('quantum:engine-status', async (_event, engine) => getQuantumEngineStatus(engine));
-ipcMain.handle('quantum:run', async (_event, request) => runQuantumCalculation(request));
+ipcMain.handle('quantum:run', async (event, request) => runQuantumCalculation(request, (progress) => {
+  event.sender.send('quantum:run-progress', progress);
+}));
 ipcMain.handle('quantum:external-config:get', async (_event, engine) => getExternalQuantumConfig(engine));
 ipcMain.handle('quantum:external-config:save', async (_event, config) => saveExternalQuantumConfig(config));
 ipcMain.handle('quantum:external-config:discover', async (_event, engine) => discoverAndSaveExternalQuantumConfig(engine));
@@ -680,17 +682,26 @@ async function getQuantumEngineStatus(engineValue) {
   };
 }
 
-async function runQuantumCalculation(request) {
+async function runQuantumCalculation(request, onProgress = () => {}) {
   const engineKind = normalizeEngineKind(request?.engine);
+  emitCalculationProgress(
+    onProgress,
+    engineKind,
+    'preparing',
+    2,
+    `Preparing ${QUANTUM_ENGINE_LABELS[engineKind] || 'quantum engine'} calculation.`
+  );
+
   if (isCommercialEngineKind(engineKind)) {
-    return runExternalQuantumCalculation(engineKind, request);
+    return runExternalQuantumCalculation(engineKind, request, onProgress);
   }
 
   if (engineKind === 'pyscf') {
-    return runPyscfCalculation(request);
+    return runPyscfCalculation(request, onProgress);
   }
 
   const startedAt = Date.now();
+  emitCalculationProgress(onProgress, 'xtb', 'checking-engine', 6, 'Checking xTB engine availability.', undefined, startedAt);
   const engine = resolveXtbEngine();
   const calculationMode = normalizeCalculationMode(request?.calculationMode);
   const baseResult = {
@@ -709,6 +720,7 @@ async function runQuantumCalculation(request) {
   };
 
   if (!engine) {
+    emitCalculationProgress(onProgress, 'xtb', 'error', 100, 'xTB engine was not found.', undefined, startedAt);
     return {
       ...baseResult,
       elapsedMs: Date.now() - startedAt,
@@ -718,6 +730,7 @@ async function runQuantumCalculation(request) {
 
   const xyz = normalizeQuantumInput(request?.xyz);
   if (!xyz) {
+    emitCalculationProgress(onProgress, 'xtb', 'error', 100, 'A valid 3D XYZ structure is required before running xTB.', undefined, startedAt);
     return {
       ...baseResult,
       elapsedMs: Date.now() - startedAt,
@@ -732,19 +745,33 @@ async function runQuantumCalculation(request) {
   const inputPath = path.join(workDir, 'input.xyz');
 
   try {
+    emitCalculationProgress(onProgress, 'xtb', 'writing-input', 18, 'Writing xTB XYZ input file.', undefined, startedAt);
     await fs.promises.writeFile(inputPath, xyz, 'utf8');
     const args = buildXtbArgs(inputPath, charge, unpairedElectrons, calculationMode);
-    const processResult = await runProcess(
+    emitCalculationProgress(onProgress, 'xtb', 'starting-engine', 28, 'Starting xTB calculation process.', undefined, startedAt);
+    const runStartedAt = Date.now();
+    const processResult = await runProcessWithProgress(
       engine.executable,
       args,
       {
         cwd: workDir,
         timeoutMs,
-        env: buildXtbEnv(engine)
+        env: buildXtbEnv(engine),
+        progress: (output) => emitCalculationProgress(
+          onProgress,
+          'xtb',
+          'running-engine',
+          estimateProgress(runStartedAt, timeoutMs, 32, 82),
+          'xTB is running the quantum calculation.',
+          output,
+          startedAt
+        )
       }
     );
     const output = `${processResult.stdout}\n${processResult.stderr}`.trim();
+    emitCalculationProgress(onProgress, 'xtb', 'reading-output', 86, 'Reading xTB result files.', outputTail(output), startedAt);
     const charges = await readCharges(workDir, xyz);
+    emitCalculationProgress(onProgress, 'xtb', 'parsing-output', 94, 'Parsing xTB energy, dipole, and charge output.', outputTail(output), startedAt);
     const energyHartree = parseEnergy(output);
     const dipoleDebye = parseDipole(output);
     const warnings = [];
@@ -754,7 +781,7 @@ async function runQuantumCalculation(request) {
     if (!dipoleDebye) warnings.push('Dipole moment was not found in xTB output.');
     if (charges.length === 0) warnings.push('Partial charges file was not produced by xTB.');
 
-    return {
+    const result = {
       ok: processResult.exitCode === 0,
       engine: 'xtb',
       engineLabel: QUANTUM_ENGINE_LABELS.xtb,
@@ -769,7 +796,26 @@ async function runQuantumCalculation(request) {
       outputTail: outputTail(output),
       error: processResult.exitCode === 0 ? undefined : `xTB exited with code ${processResult.exitCode}.`
     };
+    emitCalculationProgress(
+      onProgress,
+      'xtb',
+      result.ok ? 'complete' : 'error',
+      100,
+      result.ok ? 'xTB calculation completed.' : result.error,
+      result.outputTail,
+      startedAt
+    );
+    return result;
   } catch (error) {
+    emitCalculationProgress(
+      onProgress,
+      'xtb',
+      'error',
+      100,
+      error instanceof Error ? error.message : 'xTB calculation failed.',
+      undefined,
+      startedAt
+    );
     return {
       ...baseResult,
       elapsedMs: Date.now() - startedAt,
@@ -818,8 +864,17 @@ async function getExternalEngineStatus(engineKind) {
   };
 }
 
-async function runExternalQuantumCalculation(engineKind, request) {
+async function runExternalQuantumCalculation(engineKind, request, onProgress = () => {}) {
   const startedAt = Date.now();
+  emitCalculationProgress(
+    onProgress,
+    engineKind,
+    'checking-engine',
+    5,
+    `Loading ${QUANTUM_ENGINE_LABELS[engineKind] || 'external engine'} configuration.`,
+    undefined,
+    startedAt
+  );
   const config = await getExternalQuantumConfig(engineKind);
   const engineLabel = QUANTUM_ENGINE_LABELS[engineKind] || 'External engine';
   const calculationMode = normalizeCalculationMode(request?.calculationMode);
@@ -843,6 +898,7 @@ async function runExternalQuantumCalculation(engineKind, request) {
   };
 
   if (!config.executablePath || !isReadableFile(config.executablePath)) {
+    emitCalculationProgress(onProgress, engineKind, 'error', 100, `${engineLabel} executable is not configured or cannot be read.`, undefined, startedAt);
     return {
       ...baseResult,
       elapsedMs: Date.now() - startedAt,
@@ -852,6 +908,7 @@ async function runExternalQuantumCalculation(engineKind, request) {
 
   const xyz = normalizeQuantumInput(request?.xyz);
   if (!xyz) {
+    emitCalculationProgress(onProgress, engineKind, 'error', 100, 'A valid 3D XYZ structure is required before running an external engine.', undefined, startedAt);
     return {
       ...baseResult,
       elapsedMs: Date.now() - startedAt,
@@ -866,21 +923,43 @@ async function runExternalQuantumCalculation(engineKind, request) {
   const workDir = await fs.promises.mkdtemp(path.join(app.getPath('temp'), `chemvault-${engineKind}-`));
 
   try {
+    emitCalculationProgress(onProgress, engineKind, 'writing-input', 18, `Writing ${engineLabel} input files.`, undefined, startedAt);
     const job = engineKind === 'gaussian'
       ? await prepareGaussianJob(workDir, xyz, { charge, multiplicity, method, basisSet, routeOptions, calculationMode })
       : await prepareOrcaJob(workDir, xyz, { charge, multiplicity, method, basisSet, routeOptions, calculationMode });
+    emitCalculationProgress(onProgress, engineKind, 'starting-engine', 28, `Starting ${engineLabel} calculation process.`, undefined, startedAt);
+    const runStartedAt = Date.now();
     const processResult = engineKind === 'gaussian'
-      ? await runGaussianJob(config.executablePath, job, workDir, timeoutMs)
-      : await runProcess(config.executablePath, job.args, {
+      ? await runGaussianJob(config.executablePath, job, workDir, timeoutMs, (output) => emitCalculationProgress(
+        onProgress,
+        engineKind,
+        'running-engine',
+        estimateProgress(runStartedAt, timeoutMs, 32, 82),
+        `${engineLabel} is running the quantum calculation.`,
+        output,
+        startedAt
+      ))
+      : await runProcessWithProgress(config.executablePath, job.args, {
         cwd: workDir,
         timeoutMs,
-        env: buildExternalEngineEnv(engineKind, config.executablePath, workDir)
+        env: buildExternalEngineEnv(engineKind, config.executablePath, workDir),
+        progress: (output) => emitCalculationProgress(
+          onProgress,
+          engineKind,
+          'running-engine',
+          estimateProgress(runStartedAt, timeoutMs, 32, 82),
+          `${engineLabel} is running the quantum calculation.`,
+          output,
+          startedAt
+        )
       });
     const fileOutput = await readOptionalText(job.outputPath);
     const output = [processResult.stdout, processResult.stderr, fileOutput].filter(Boolean).join('\n').trim();
+    emitCalculationProgress(onProgress, engineKind, 'reading-output', 86, `Reading ${engineLabel} output files.`, outputTail(output), startedAt);
     const energyHartree = engineKind === 'gaussian' ? parseGaussianEnergy(output) : parseOrcaEnergy(output);
     const dipoleDebye = engineKind === 'gaussian' ? parseGaussianDipole(output) : parseOrcaDipole(output);
     const charges = engineKind === 'gaussian' ? parseGaussianCharges(output) : parseOrcaCharges(output);
+    emitCalculationProgress(onProgress, engineKind, 'parsing-output', 94, `Parsing ${engineLabel} energy, dipole, and population analysis.`, outputTail(output), startedAt);
     const completedOk = processResult.exitCode === 0 && (engineKind !== 'gaussian' || /Normal termination of Gaussian/iu.test(output));
     const warnings = [];
 
@@ -892,7 +971,7 @@ async function runExternalQuantumCalculation(engineKind, request) {
     if (!dipoleDebye) warnings.push('Dipole moment was not found in the external engine output.');
     if (charges.length === 0) warnings.push('Mulliken charges were not found in the external engine output.');
 
-    return {
+    const result = {
       ok: completedOk,
       engine: engineKind,
       engineLabel,
@@ -907,7 +986,26 @@ async function runExternalQuantumCalculation(engineKind, request) {
       outputTail: outputTail(output),
       error: completedOk ? undefined : diagnoseExternalEngineFailure(engineKind, processResult, output, config)
     };
+    emitCalculationProgress(
+      onProgress,
+      engineKind,
+      result.ok ? 'complete' : 'error',
+      100,
+      result.ok ? `${engineLabel} calculation completed.` : result.error,
+      result.outputTail,
+      startedAt
+    );
+    return result;
   } catch (error) {
+    emitCalculationProgress(
+      onProgress,
+      engineKind,
+      'error',
+      100,
+      error instanceof Error ? error.message : `${engineLabel} calculation failed.`,
+      undefined,
+      startedAt
+    );
     return {
       ...baseResult,
       elapsedMs: Date.now() - startedAt,
@@ -1620,21 +1718,40 @@ function replacementCount(value) {
   return (String(value).match(/\uFFFD/gu) || []).length;
 }
 
-async function runGaussianJob(executablePath, job, workDir, timeoutMs) {
+async function runGaussianJob(executablePath, job, workDir, timeoutMs, onOutput = () => {}) {
   const env = buildExternalEngineEnv('gaussian', executablePath, workDir);
+  const pollOutput = setInterval(async () => {
+    const fileOutput = await readOptionalText(job.outputPath);
+    if (fileOutput) onOutput(outputTail(fileOutput));
+  }, 1000);
+
   if (process.platform === 'win32') {
-    return runProcess(executablePath, [job.inputPath, job.outputPath], {
-      cwd: workDir,
-      timeoutMs,
-      env
-    });
+    try {
+      return await runProcessWithProgress(executablePath, [job.inputPath, job.outputPath], {
+        cwd: workDir,
+        timeoutMs,
+        env,
+        progress: onOutput
+      });
+    } finally {
+      clearInterval(pollOutput);
+      const fileOutput = await readOptionalText(job.outputPath);
+      if (fileOutput) onOutput(outputTail(fileOutput));
+    }
   }
 
-  return runProcess(executablePath, job.args, {
-    cwd: workDir,
-    timeoutMs,
-    env
-  });
+  try {
+    return await runProcessWithProgress(executablePath, job.args, {
+      cwd: workDir,
+      timeoutMs,
+      env,
+      progress: onOutput
+    });
+  } finally {
+    clearInterval(pollOutput);
+    const fileOutput = await readOptionalText(job.outputPath);
+    if (fileOutput) onOutput(outputTail(fileOutput));
+  }
 }
 
 function buildExternalEngineEnv(engineKind, executablePath, workDir) {
@@ -1797,8 +1914,9 @@ async function clearEngineSetupRequest() {
   return { ok: true };
 }
 
-async function runPyscfCalculation(request) {
+async function runPyscfCalculation(request, onProgress = () => {}) {
   const startedAt = Date.now();
+  emitCalculationProgress(onProgress, 'pyscf', 'preparing', 4, 'Preparing PySCF calculation request.', undefined, startedAt);
   const calculationMode = normalizeCalculationMode(request?.calculationMode);
   const method = sanitizeQuantumToken(request?.method) || 'B3LYP';
   const basisSet = sanitizeQuantumToken(request?.basisSet) || '6-31G';
@@ -1818,6 +1936,7 @@ async function runPyscfCalculation(request) {
   };
 
   if (calculationMode !== 'single-point') {
+    emitCalculationProgress(onProgress, 'pyscf', 'error', 100, 'PySCF geometry optimization is not available in this runner.', undefined, startedAt);
     return {
       ...baseResult,
       elapsedMs: Date.now() - startedAt,
@@ -1825,8 +1944,10 @@ async function runPyscfCalculation(request) {
     };
   }
 
+  emitCalculationProgress(onProgress, 'pyscf', 'checking-engine', 8, 'Checking local PySCF Python environment.', undefined, startedAt);
   const pyscfCommand = await resolvePyscfPythonCommand();
   if (!pyscfCommand?.probe.available) {
+    emitCalculationProgress(onProgress, 'pyscf', 'error', 100, 'PySCF is not installed.', undefined, startedAt);
     return {
       ...baseResult,
       elapsedMs: Date.now() - startedAt,
@@ -1836,6 +1957,7 @@ async function runPyscfCalculation(request) {
 
   const xyz = normalizeQuantumInput(request?.xyz);
   if (!xyz) {
+    emitCalculationProgress(onProgress, 'pyscf', 'error', 100, 'A valid 3D XYZ structure is required before running PySCF.', undefined, startedAt);
     return {
       ...baseResult,
       elapsedMs: Date.now() - startedAt,
@@ -1851,6 +1973,7 @@ async function runPyscfCalculation(request) {
   const scriptPath = path.join(workDir, 'chemvault_pyscf_job.py');
 
   try {
+    emitCalculationProgress(onProgress, 'pyscf', 'writing-input', 20, 'Writing PySCF input payload and runner script.', undefined, startedAt);
     await fs.promises.writeFile(
       inputPath,
       JSON.stringify({
@@ -1864,15 +1987,27 @@ async function runPyscfCalculation(request) {
     );
     await fs.promises.writeFile(scriptPath, pyscfJobScript(), 'utf8');
 
-    const processResult = await runProcess(pyscfCommand.executable, [...pyscfCommand.argsPrefix, scriptPath, inputPath], {
+    emitCalculationProgress(onProgress, 'pyscf', 'starting-engine', 30, 'Starting PySCF calculation process.', undefined, startedAt);
+    const runStartedAt = Date.now();
+    const processResult = await runProcessWithProgress(pyscfCommand.executable, [...pyscfCommand.argsPrefix, scriptPath, inputPath], {
       cwd: workDir,
       timeoutMs,
       env: {
         ...process.env,
         PYTHONUTF8: '1'
-      }
+      },
+      progress: (output) => emitCalculationProgress(
+        onProgress,
+        'pyscf',
+        'running-engine',
+        estimateProgress(runStartedAt, timeoutMs, 34, 84),
+        'PySCF is running the DFT/HF calculation.',
+        output,
+        startedAt
+      )
     });
     const output = `${processResult.stdout}\n${processResult.stderr}`.trim();
+    emitCalculationProgress(onProgress, 'pyscf', 'parsing-output', 92, 'Parsing PySCF JSON result, dipole, and Mulliken charges.', outputTail(output), startedAt);
     const parsed = parsePyscfResult(output);
     const warnings = [...(parsed?.warnings || [])];
 
@@ -1882,7 +2017,7 @@ async function runPyscfCalculation(request) {
     if (parsed && !parsed.dipoleDebye) warnings.push('Dipole moment was not returned by PySCF.');
     if (parsed && parsed.charges.length === 0) warnings.push('Mulliken charges were not returned by PySCF.');
 
-    return {
+    const result = {
       ok: processResult.exitCode === 0 && Boolean(parsed),
       engine: 'pyscf',
       engineLabel: QUANTUM_ENGINE_LABELS.pyscf,
@@ -1897,7 +2032,26 @@ async function runPyscfCalculation(request) {
       outputTail: outputTail(output),
       error: processResult.exitCode === 0 && parsed ? undefined : `PySCF exited with code ${processResult.exitCode}.`
     };
+    emitCalculationProgress(
+      onProgress,
+      'pyscf',
+      result.ok ? 'complete' : 'error',
+      100,
+      result.ok ? 'PySCF calculation completed.' : result.error,
+      result.outputTail,
+      startedAt
+    );
+    return result;
   } catch (error) {
+    emitCalculationProgress(
+      onProgress,
+      'pyscf',
+      'error',
+      100,
+      error instanceof Error ? error.message : 'PySCF calculation failed.',
+      undefined,
+      startedAt
+    );
     return {
       ...baseResult,
       elapsedMs: Date.now() - startedAt,
@@ -2514,7 +2668,7 @@ basis = str(payload.get("basisSet") or "6-31G").strip()
 spin = int(payload.get("spin") or 0)
 charge = int(payload.get("charge") or 0)
 
-mol = gto.M(atom=atoms, unit="Angstrom", basis=basis, charge=charge, spin=spin, verbose=0)
+mol = gto.M(atom=atoms, unit="Angstrom", basis=basis, charge=charge, spin=spin, verbose=3)
 method_upper = method.upper()
 warnings = []
 
@@ -2723,6 +2877,26 @@ function runProcessWithProgress(executable, args, options = {}) {
       resolve(result);
     });
   });
+}
+
+function emitCalculationProgress(onProgress, engine, phase, percent, message, output, startedAt) {
+  if (typeof onProgress !== 'function') return;
+  onProgress({
+    engine,
+    engineLabel: QUANTUM_ENGINE_LABELS[engine] || engine,
+    phase,
+    percent: Math.max(0, Math.min(100, Math.round(Number(percent) || 0))),
+    message: message || 'Running quantum calculation.',
+    elapsedMs: Number.isFinite(startedAt) ? Date.now() - startedAt : undefined,
+    outputTail: output ? outputTail(output) : undefined
+  });
+}
+
+function estimateProgress(startedAt, timeoutMs, min, max) {
+  const elapsed = Date.now() - startedAt;
+  const denominator = Math.max(30000, Number(timeoutMs) || QUANTUM_TIMEOUT_MS);
+  const fraction = Math.min(0.98, elapsed / denominator);
+  return min + (max - min) * fraction;
 }
 
 function emitInstallProgress(onProgress, engine, phase, percent, message, output, details = {}) {

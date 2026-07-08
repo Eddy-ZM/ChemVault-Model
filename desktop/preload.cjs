@@ -23,5 +23,10 @@ contextBridge.exposeInMainWorld('chemVaultDesktop', {
   discoverExternalQuantumConfig: (engine) => ipcRenderer.invoke('quantum:external-config:discover', engine),
   saveExternalQuantumConfig: (config) => ipcRenderer.invoke('quantum:external-config:save', config),
   selectQuantumEngineExecutable: (engine) => ipcRenderer.invoke('quantum:select-executable', engine),
+  onQuantumCalculationProgress: (handler) => {
+    const listener = (_event, progress) => handler(progress);
+    ipcRenderer.on('quantum:run-progress', listener);
+    return () => ipcRenderer.removeListener('quantum:run-progress', listener);
+  },
   runQuantumCalculation: (request) => ipcRenderer.invoke('quantum:run', request)
 });

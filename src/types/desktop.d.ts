@@ -9,6 +9,7 @@ import type {
   LocalEngineSelectResult,
   LocalEngineStatus,
   LocalOpenSourceEngineKind,
+  QuantumCalculationProgress,
   QuantumCalculationRequest,
   QuantumCalculationResult,
   QuantumEngineKind,
@@ -64,6 +65,7 @@ declare global {
       }>;
       saveExternalQuantumConfig: (config: ExternalQuantumEngineConfig) => Promise<ExternalQuantumEngineConfig>;
       selectQuantumEngineExecutable: (engine: CommercialQuantumEngineKind) => Promise<string | null>;
+      onQuantumCalculationProgress: (handler: (progress: QuantumCalculationProgress) => void) => () => void;
       runQuantumCalculation: (request: QuantumCalculationRequest) => Promise<QuantumCalculationResult>;
     };
   }

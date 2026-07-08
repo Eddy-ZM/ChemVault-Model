@@ -63,6 +63,25 @@ export type LocalEngineInstallProgress = {
   repairAction?: string;
 };
 
+export type QuantumCalculationProgress = {
+  engine: QuantumEngineKind;
+  engineLabel: string;
+  phase:
+    | 'preparing'
+    | 'checking-engine'
+    | 'writing-input'
+    | 'starting-engine'
+    | 'running-engine'
+    | 'reading-output'
+    | 'parsing-output'
+    | 'complete'
+    | 'error';
+  percent: number;
+  message: string;
+  elapsedMs?: number;
+  outputTail?: string;
+};
+
 export type EngineSetupRequest = {
   pending: boolean;
   engines: LocalOpenSourceEngineKind[];

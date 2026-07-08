@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { QuantumEngineSetupDialog, type QuantumSetupDialogMode } from '@/components/desktop/QuantumEngineSetupDialog';
+import { GlobalLoadingOverlay } from '@/components/ui/LoadingState';
 import type { ElectrostaticAnalysis } from '@/lib/chem/electrostaticAnalysis';
 import { analyzeElectrostatics, structureToXyz } from '@/lib/chem/electrostaticAnalysis';
 import type {
@@ -9,6 +10,7 @@ import type {
   ExternalQuantumEngineConfig,
   LocalEngineStatus,
   LocalOpenSourceEngineKind,
+  QuantumCalculationProgress,
   QuantumCalculationMode,
   QuantumCalculationResult,
   QuantumEngineKind,
@@ -191,6 +193,7 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
   const [setupMode, setSetupMode] = useState<QuantumSetupDialogMode | null>(null);
   const [result, setResult] = useState<QuantumCalculationResult | null>(null);
   const [error, setError] = useState('');
+  const [calculationProgress, setCalculationProgress] = useState<QuantumCalculationProgress | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -258,6 +261,14 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
   useEffect(() => {
     void loadLocalEngines();
     void loadEngineSetupRequest();
+  }, []);
+
+  useEffect(() => {
+    const api = window.chemVaultDesktop;
+    if (!api?.onQuantumCalculationProgress) return;
+    return api.onQuantumCalculationProgress((progress) => {
+      setCalculationProgress(progress);
+    });
   }, []);
 
   useEffect(() => {
@@ -389,6 +400,14 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
 
     setRunning(true);
     setError('');
+    setResult(null);
+    setCalculationProgress({
+      engine: selectedEngine,
+      engineLabel: engineLabel(selectedEngine),
+      phase: 'preparing',
+      percent: 2,
+      message: `Preparing ${engineLabel(selectedEngine)} calculation.`
+    });
     try {
       const commercialEngine = isCommercialEngine(selectedEngine);
       const nextResult = await api.runQuantumCalculation({
@@ -406,10 +425,29 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
       if (!nextResult.ok) {
         setError(nextResult.error || 'Quantum calculation did not complete.');
       }
+      setCalculationProgress({
+        engine: nextResult.engine,
+        engineLabel: nextResult.engineLabel,
+        phase: nextResult.ok ? 'complete' : 'error',
+        percent: 100,
+        message: nextResult.ok ? `${nextResult.engineLabel} calculation completed.` : nextResult.error || 'Quantum calculation did not complete.',
+        elapsedMs: nextResult.elapsedMs,
+        outputTail: nextResult.outputTail
+      });
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : 'Quantum calculation failed.');
+      setCalculationProgress({
+        engine: selectedEngine,
+        engineLabel: engineLabel(selectedEngine),
+        phase: 'error',
+        percent: 100,
+        message: runError instanceof Error ? runError.message : 'Quantum calculation failed.'
+      });
     } finally {
-      setRunning(false);
+      window.setTimeout(() => {
+        setRunning(false);
+        setCalculationProgress(null);
+      }, 900);
     }
   }
 
@@ -713,6 +751,58 @@ function ProfessionalQuantumPanel({ xyz }: { xyz: string | null }) {
           ) : null}
         </div>
       ) : null}
+
+      <GlobalLoadingOverlay
+        visible={running}
+        label={calculationProgress?.message || 'Running quantum calculation'}
+        description={`${calculationProgress?.engineLabel || engineLabel(selectedEngine)} calculation progress`}
+      >
+        <CalculationProgressDetails progress={calculationProgress} fallbackEngine={selectedEngine} />
+      </GlobalLoadingOverlay>
+    </div>
+  );
+}
+
+function CalculationProgressDetails({
+  fallbackEngine,
+  progress
+}: {
+  fallbackEngine: QuantumEngineKind;
+  progress: QuantumCalculationProgress | null;
+}) {
+  const percent = clampPercent(progress?.percent ?? 0);
+  const phase = progress?.phase ? calculationPhaseLabel(progress.phase) : 'Starting';
+  const elapsed = typeof progress?.elapsedMs === 'number' ? `${(progress.elapsedMs / 1000).toFixed(1)} s` : 'Starting';
+  const output = progress?.outputTail?.trim();
+
+  return (
+    <div className="mt-4 w-[min(78vw,560px)] space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left">
+      <div className="flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">
+        <span>{progress?.engineLabel || engineLabel(fallbackEngine)}</span>
+        <span>{percent}%</span>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-slate-200">
+        <div className="h-full rounded-full bg-sky-500 transition-all duration-500" style={{ width: `${percent}%` }} />
+      </div>
+      <div className="grid gap-2 sm:grid-cols-2">
+        <p className="rounded-xl bg-white px-3 py-2">
+          <span className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Stage</span>
+          <span className="mt-1 block text-sm font-semibold text-slate-900">{phase}</span>
+        </p>
+        <p className="rounded-xl bg-white px-3 py-2">
+          <span className="block text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Elapsed</span>
+          <span className="mt-1 block text-sm font-semibold text-slate-900">{elapsed}</span>
+        </p>
+      </div>
+      {output ? (
+        <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3 font-mono text-[11px] leading-5 text-slate-100">
+          {output}
+        </pre>
+      ) : (
+        <p className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2 text-xs leading-5 text-slate-500">
+          Waiting for the engine to produce terminal output.
+        </p>
+      )}
     </div>
   );
 }
@@ -992,6 +1082,26 @@ function AxisValue({ axis, unit, value }: { axis: string; unit: string; value: n
       <span className="mt-1 block font-mono text-xs font-semibold text-slate-800">{formatSigned(value)} {unit}</span>
     </p>
   );
+}
+
+function clampPercent(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function calculationPhaseLabel(phase: QuantumCalculationProgress['phase']) {
+  const labels: Record<QuantumCalculationProgress['phase'], string> = {
+    preparing: 'Preparing request',
+    'checking-engine': 'Checking engine',
+    'writing-input': 'Writing input files',
+    'starting-engine': 'Starting engine',
+    'running-engine': 'Engine running',
+    'reading-output': 'Reading output',
+    'parsing-output': 'Parsing results',
+    complete: 'Complete',
+    error: 'Needs attention'
+  };
+  return labels[phase];
 }
 
 function formatNumber(value: number) {

@@ -1,6 +1,7 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { QuantumEngineSetupDialog, type QuantumSetupDialogMode } from '@/components/desktop/QuantumEngineSetupDialog';
 import type { LocalEngineStatus, QuantumEngineKind } from '@/lib/chem/quantumTypes';
 
@@ -14,32 +15,59 @@ export function DesktopQuantumWelcome() {
   const [message, setMessage] = useState('');
   const [selectedEngineLabel, setSelectedEngineLabel] = useState('');
 
+  const pyscf = useMemo(() => engines.find((engine) => engine.engine === 'pyscf'), [engines]);
+  const readyEngines = engines.filter((engine) => engine.available);
+
+  const loadEngines = useCallback(async () => {
+    const api = window.chemVaultDesktop;
+    if (!api?.getLocalOpenSourceEngines) return;
+
+    setLoading(true);
+    try {
+      const statuses = await api.getLocalOpenSourceEngines();
+      setEngines(statuses);
+      const ready = statuses.find((engine) => engine.available);
+      if (ready) {
+        setSelectedEngineLabel((current) => current || ready.engineLabel);
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Could not inspect local quantum engines.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  const loadConfiguredEngine = useCallback(async () => {
+    const api = window.chemVaultDesktop;
+    if (!api?.getExternalQuantumConfig) return;
+
+    try {
+      const [gaussian, orca] = await Promise.all([
+        api.getExternalQuantumConfig('gaussian'),
+        api.getExternalQuantumConfig('orca')
+      ]);
+      if (gaussian?.executablePath) {
+        setSelectedEngineLabel('Gaussian');
+        return;
+      }
+      if (orca?.executablePath) {
+        setSelectedEngineLabel('ORCA');
+      }
+    } catch {
+      // The welcome panel should stay usable even if persisted engine config cannot be read.
+    }
+  }, []);
+
   useEffect(() => {
     const api = window.chemVaultDesktop;
     setIsDesktop(Boolean(api?.isDesktop));
     if (!api?.isDesktop) return;
 
     void loadEngines();
-  }, []);
-
-  const pyscf = useMemo(() => engines.find((engine) => engine.engine === 'pyscf'), [engines]);
-  const readyEngines = engines.filter((engine) => engine.available);
+    void loadConfiguredEngine();
+  }, [loadConfiguredEngine, loadEngines]);
 
   if (!isDesktop) return null;
-
-  async function loadEngines() {
-    const api = window.chemVaultDesktop;
-    if (!api?.getLocalOpenSourceEngines) return;
-
-    setLoading(true);
-    try {
-      setEngines(await api.getLocalOpenSourceEngines());
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Could not inspect local quantum engines.');
-    } finally {
-      setLoading(false);
-    }
-  }
 
   function openLaterDialog() {
     setSetupMode('later');
@@ -61,7 +89,9 @@ export function DesktopQuantumWelcome() {
             <div>
               <p className="text-sm font-bold text-sky-950">Professional quantum calculation</p>
               <p className="mt-1 max-w-2xl text-sm leading-6 text-sky-800">
-                Choose a desktop calculation path now, or configure it later inside Molecule Studio.
+                {selectedEngineLabel
+                  ? `${selectedEngineLabel} is configured. Continue to Molecule Studio to run calculations.`
+                  : 'Choose an existing licensed engine, configure a local engine, or continue without setting this up now.'}
               </p>
             </div>
             <button
@@ -73,83 +103,100 @@ export function DesktopQuantumWelcome() {
             </button>
           </div>
 
-          <div className="mt-4 grid gap-3 md:grid-cols-3">
-            <button
-              type="button"
-              onClick={() => setSetupMode('install')}
-              className="rounded-2xl border border-sky-300 bg-sky-100 px-4 py-3 text-left text-sky-950 shadow-sm hover:border-sky-400 hover:bg-sky-200 disabled:cursor-not-allowed disabled:border-slate-200 disabled:bg-slate-100 disabled:text-slate-500"
-            >
-              <span className="block text-sm font-bold">{pyscf?.available ? 'Update local PySCF' : 'Install local engine'}</span>
-              <span className="mt-1 block text-xs leading-5 text-sky-800">Open a guided installer with progress and terminal explanation.</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setSetupMode('configure')}
-              className={
-                selectedEngineLabel
-                  ? 'rounded-2xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-left text-emerald-950 shadow-sm ring-2 ring-emerald-100 hover:border-emerald-400'
-                  : 'rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-slate-800 hover:border-sky-300 hover:text-sky-900'
-              }
-            >
-              <span className="flex items-center justify-between gap-2 text-sm font-bold">
-                Use existing engines
-                {selectedEngineLabel ? <span className="rounded-full bg-emerald-100 px-2 py-1 text-[11px] font-bold text-emerald-800">Selected</span> : null}
-              </span>
-              <span className={`mt-1 block text-xs leading-5 ${selectedEngineLabel ? 'text-emerald-800' : 'text-slate-500'}`}>
-                Scan this computer, choose a detected engine, or select an application.
-              </span>
-            </button>
-
-            <button
-              type="button"
-              onClick={openLaterDialog}
-              className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-slate-800 hover:border-slate-300"
-            >
-              <span className="block text-sm font-bold">Set up later</span>
-              <span className="mt-1 block text-xs leading-5 text-slate-500">The setup panel remains available inside Molecule Studio.</span>
-            </button>
-          </div>
-
           {selectedEngineLabel ? (
             <div className="mt-4 rounded-2xl border border-emerald-200 bg-white px-4 py-4 shadow-sm">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Engine selected</p>
+                  <p className="text-xs font-semibold uppercase tracking-[0.14em] text-emerald-700">Ready to calculate</p>
                   <p className="mt-1 text-lg font-bold text-slate-950">{selectedEngineLabel}</p>
                   <p className="mt-1 text-sm leading-6 text-slate-600">
-                    Open Molecule Studio and use Professional Quantum Calculation to run jobs with this engine.
+                    Open Molecule Studio and use Professional Quantum Calculation with this configured engine. Installing PySCF is optional and not required for this setup.
                   </p>
                 </div>
-                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-800">
-                  Ready to use
-                </span>
+                <div className="flex flex-wrap gap-2">
+                  <Link
+                    href="/molecule"
+                    className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
+                  >
+                    Open Studio
+                  </Link>
+                  <button
+                    type="button"
+                    onClick={() => setSetupMode('configure')}
+                    className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-semibold text-emerald-800 hover:bg-white"
+                  >
+                    Change engine
+                  </button>
+                </div>
               </div>
             </div>
-          ) : null}
+          ) : (
+            <>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <button
+                  type="button"
+                  onClick={() => setSetupMode('configure')}
+                  className="rounded-2xl border border-sky-300 bg-white px-4 py-3 text-left text-sky-950 shadow-sm hover:border-sky-400 hover:bg-sky-50"
+                >
+                  <span className="block text-sm font-bold">Use existing engine</span>
+                  <span className="mt-1 block text-xs leading-5 text-sky-800">
+                    Select Gaussian, ORCA, xTB, or an existing Python environment already installed on this computer.
+                  </span>
+                </button>
 
-          <div className="mt-4 rounded-2xl border border-white bg-white/80 px-4 py-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Local engine status</p>
-              <button
-                type="button"
-                onClick={() => void loadEngines()}
-                disabled={loading}
-                className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                Refresh
-              </button>
+                <Link
+                  href="/molecule"
+                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-slate-800 hover:border-slate-300"
+                >
+                  <span className="block text-sm font-bold">Open Studio first</span>
+                  <span className="mt-1 block text-xs leading-5 text-slate-500">
+                    Continue now and configure calculation engines later from Structure Details.
+                  </span>
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={() => setSetupMode('install')}
+                  className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-left text-slate-800 hover:border-slate-300"
+                >
+                  <span className="block text-sm font-bold">{pyscf?.available ? 'Maintain PySCF' : 'Optional PySCF setup'}</span>
+                  <span className="mt-1 block text-xs leading-5 text-slate-500">
+                    Create a managed local PySCF environment only if you need this optional open-source engine.
+                  </span>
+                </button>
+              </div>
+
+              {readyEngines.length > 0 || message ? (
+                <div className="mt-4 rounded-2xl border border-white bg-white/80 px-4 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Optional local engine status</p>
+                    <button
+                      type="button"
+                      onClick={() => void loadEngines()}
+                      disabled={loading}
+                      className="rounded-lg border border-slate-200 px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Refresh
+                    </button>
+                  </div>
+                  <p className="mt-2 text-sm text-slate-700">
+                    {loading
+                      ? 'Scanning optional local engines.'
+                      : readyEngines.length > 0
+                      ? `Ready: ${readyEngines.map((engine) => engine.engineLabel).join(', ')}`
+                      : 'No optional local open-source engine is active. You can still use Molecule Studio.'}
+                  </p>
+                </div>
+              ) : null}
+            </>
+          )}
+
+          {!selectedEngineLabel && message ? <p className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">{message}</p> : null}
+          {selectedEngineLabel && message ? (
+            <div className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">
+              {message}
             </div>
-            <p className="mt-2 text-sm text-slate-700">
-              {loading
-                ? 'Scanning local engines.'
-                : readyEngines.length > 0
-                ? `Ready: ${readyEngines.map((engine) => engine.engineLabel).join(', ')}`
-                : 'No local open-source quantum engine is ready yet.'}
-            </p>
-          </div>
-
-          {message ? <p className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm text-slate-700">{message}</p> : null}
+          ) : null}
         </div>
       ) : null}
 

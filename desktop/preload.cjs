@@ -32,5 +32,6 @@ contextBridge.exposeInMainWorld('chemVaultDesktop', {
     ipcRenderer.on('quantum:run-progress', listener);
     return () => ipcRenderer.removeListener('quantum:run-progress', listener);
   },
-  runQuantumCalculation: (request) => ipcRenderer.invoke('quantum:run', request)
+  runQuantumCalculation: (request) => ipcRenderer.invoke('quantum:run', request),
+  cancelQuantumCalculation: (calculationId) => ipcRenderer.invoke('quantum:cancel', calculationId)
 });

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AuthUser, useAuth, userApiUrl } from '@/components/auth/AuthProvider';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { UserPortalSection, buildRegisterUrl, buildUserPortalUrl } from '@/lib/auth/chemvaultUserLinks';
+import { downloadText } from '@/lib/chem/fileExport';
 import { loadQuantumHistory, type QuantumHistoryEntry } from '@/lib/chem/quantumWorkflow';
 
 export type AccountPage = 'profile' | 'molecules' | 'settings';
@@ -389,6 +390,19 @@ function MoleculesContent({
       </div>
 
       <Panel title="Local Quantum Calculation Records" subtitle="Saved automatically after desktop quantum calculations on this computer.">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <p className="text-sm leading-6 text-slate-600">
+            These records keep the ChemVault preparation, engine, result summary, and quality review for completed desktop calculations.
+          </p>
+          <button
+            type="button"
+            onClick={() => exportLocalQuantumHistory(localQuantumHistory)}
+            disabled={!localQuantumHistory.length}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-sky-300 hover:text-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Export JSON
+          </button>
+        </div>
         {localQuantumHistory.length ? (
           <div className="grid gap-3">
             {localQuantumHistory.slice(0, 8).map((entry) => (
@@ -405,10 +419,11 @@ function MoleculesContent({
                     {entry.status}
                   </StatusBadge>
                 </div>
-                <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                <div className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
                   <Metric label="Atoms" value={String(entry.atomCount)} />
                   <Metric label="Energy" value={entry.energyHartree === null ? 'N/A' : `${entry.energyHartree.toFixed(4)} Eh`} />
                   <Metric label="Dipole" value={entry.dipoleDebye === null ? 'N/A' : `${entry.dipoleDebye.toFixed(4)} D`} />
+                  <Metric label="Quality" value={typeof entry.qualityScore === 'number' ? `${entry.qualityScore}/100` : 'N/A'} />
                   <Metric label="Charge / spin" value={`${entry.charge} / ${entry.unpairedElectrons}`} />
                 </div>
               </article>
@@ -604,6 +619,19 @@ function normalizeOrigin(origin: string) {
 
 function formatQuota(value: number | null | undefined) {
   return typeof value === 'number' ? String(value) : 'N/A';
+}
+
+function exportLocalQuantumHistory(entries: QuantumHistoryEntry[]) {
+  const generatedAt = new Date().toISOString();
+  downloadText(
+    `chemvault-quantum-history-${generatedAt.replace(/[:.]/g, '-')}.json`,
+    JSON.stringify({
+      generatedAt,
+      source: 'ChemVault Model local quantum history',
+      records: entries
+    }, null, 2),
+    'application/json'
+  );
 }
 
 function formatDateTime(value: Date) {

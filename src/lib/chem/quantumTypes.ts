@@ -12,7 +12,13 @@ export type GaussianTaskTemplateId =
   | 'frequency'
   | 'optimization-frequency'
   | 'td-dft'
-  | 'nmr';
+  | 'nmr'
+  | 'solvent-model'
+  | 'transition-state'
+  | 'irc'
+  | 'stability'
+  | 'frontier-orbitals'
+  | 'nbo';
 
 export type QuantumEngineStatus = {
   available: boolean;
@@ -110,6 +116,7 @@ export type ExternalQuantumEngineConfig = {
 };
 
 export type QuantumCalculationRequest = {
+  calculationId?: string;
   xyz: string;
   engine?: QuantumEngineKind;
   charge: number;
@@ -120,6 +127,12 @@ export type QuantumCalculationRequest = {
   calculationMode?: QuantumCalculationMode;
   gaussianTask?: GaussianTaskTemplateId;
   timeoutMs?: number;
+};
+
+export type QuantumCancelResult = {
+  ok: boolean;
+  calculationId?: string;
+  message: string;
 };
 
 export type QuantumAtomCharge = {
@@ -183,6 +196,7 @@ export type GaussianOpenResult = {
 
 export type QuantumCalculationResult = {
   ok: boolean;
+  cancelled?: boolean;
   engine: QuantumEngineKind;
   engineLabel: string;
   method: string;
@@ -198,6 +212,28 @@ export type QuantumCalculationResult = {
   } | null;
   charges: QuantumAtomCharge[];
   chargeModel: string;
+  frontierOrbitals?: {
+    alphaHomoEv: number | null;
+    alphaLumoEv: number | null;
+    betaHomoEv?: number | null;
+    betaLumoEv?: number | null;
+    gapEv: number | null;
+  } | null;
+  frequencySummary?: {
+    imaginaryCount: number;
+    lowestFrequencyCm1: number | null;
+    modes: Array<{
+      valueCm1: number;
+      intensityKmMol?: number | null;
+    }>;
+  } | null;
+  thermochemistry?: {
+    zeroPointCorrectionHartree: number | null;
+    thermalCorrectionToEnergyHartree: number | null;
+    thermalCorrectionToEnthalpyHartree: number | null;
+    thermalCorrectionToGibbsHartree: number | null;
+  } | null;
+  optimizedXyz?: string | null;
   elapsedMs: number;
   warnings: string[];
   outputTail: string;

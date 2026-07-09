@@ -139,8 +139,9 @@ or bundled, the app shows the missing engine status instead of pretending to run
 a professional calculation. ChemVault also performs preflight checks before a
 desktop calculation, including structure validity, atom count, electron count,
 charge, multiplicity, and common geometry problems. Completed desktop
+calculations can be cancelled while the engine is running. Completed desktop
 calculations are saved to a local calculation history that is visible from
-Molecule Studio and My Molecules.
+Molecule Studio and My Molecules, with JSON export for local project records.
 
 For commercial quantum chemistry software, ChemVault provides a local external
 engine port instead of bundling licensed software. In the desktop calculation
@@ -156,7 +157,13 @@ generated Gaussian input, apply common route templates, and open the generated
 files in GaussView when it is installed. ChemVault adds workflow-level Gaussian
 support through quick xTB screening before Gaussian refinement, common Gaussian
 task templates, parsed log highlights, failure diagnosis, recommended next
-actions, and report exports that include the ChemVault review summary.
+actions, and report exports that include the ChemVault review summary. The
+Gaussian bridge includes templates for single point, optimization, frequency,
+Opt+Freq, TD-DFT, NMR, SMD solvent, transition-state search, IRC, wavefunction
+stability, frontier orbitals, and NBO when the user's local Gaussian
+installation supports the requested analysis. ChemVault parses additional
+Gaussian results when present, including HOMO/LUMO energies, gap, frequency
+summary, thermal corrections, and the latest optimized geometry as XYZ.
 
 ### GitHub Actions
 

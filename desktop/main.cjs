@@ -68,10 +68,29 @@ const DEFAULT_EXTERNAL_ENGINE_CONFIG = {
     routeOptions: 'TightSCF'
   }
 };
+const ATOMIC_SYMBOLS = [
+  '',
+  'H', 'He',
+  'Li', 'Be', 'B', 'C', 'N', 'O', 'F', 'Ne',
+  'Na', 'Mg', 'Al', 'Si', 'P', 'S', 'Cl', 'Ar',
+  'K', 'Ca', 'Sc', 'Ti', 'V', 'Cr', 'Mn', 'Fe', 'Co', 'Ni', 'Cu', 'Zn',
+  'Ga', 'Ge', 'As', 'Se', 'Br', 'Kr',
+  'Rb', 'Sr', 'Y', 'Zr', 'Nb', 'Mo', 'Tc', 'Ru', 'Rh', 'Pd', 'Ag', 'Cd',
+  'In', 'Sn', 'Sb', 'Te', 'I', 'Xe',
+  'Cs', 'Ba', 'La', 'Ce', 'Pr', 'Nd', 'Pm', 'Sm', 'Eu', 'Gd', 'Tb', 'Dy',
+  'Ho', 'Er', 'Tm', 'Yb', 'Lu',
+  'Hf', 'Ta', 'W', 'Re', 'Os', 'Ir', 'Pt', 'Au', 'Hg',
+  'Tl', 'Pb', 'Bi', 'Po', 'At', 'Rn',
+  'Fr', 'Ra', 'Ac', 'Th', 'Pa', 'U', 'Np', 'Pu', 'Am', 'Cm', 'Bk', 'Cf',
+  'Es', 'Fm', 'Md', 'No', 'Lr',
+  'Rf', 'Db', 'Sg', 'Bh', 'Hs', 'Mt', 'Ds', 'Rg', 'Cn', 'Nh', 'Fl', 'Mc',
+  'Lv', 'Ts', 'Og'
+];
 
 let mainWindow = null;
 let staticServer = null;
 const userCookieJar = new Map();
+const activeQuantumProcesses = new Map();
 
 app.setName(APP_TITLE);
 
@@ -81,6 +100,7 @@ ipcMain.handle('quantum:engine-status', async (_event, engine) => getQuantumEngi
 ipcMain.handle('quantum:run', async (event, request) => runQuantumCalculation(request, (progress) => {
   event.sender.send('quantum:run-progress', progress);
 }));
+ipcMain.handle('quantum:cancel', async (_event, calculationId) => cancelQuantumCalculation(calculationId));
 ipcMain.handle('quantum:external-config:get', async (_event, engine) => getExternalQuantumConfig(engine));
 ipcMain.handle('quantum:external-config:save', async (_event, config) => saveExternalQuantumConfig(config));
 ipcMain.handle('quantum:external-config:discover', async (_event, engine) => discoverAndSaveExternalQuantumConfig(engine));
@@ -706,6 +726,7 @@ async function getQuantumEngineStatus(engineValue) {
 
 async function runQuantumCalculation(request, onProgress = () => {}) {
   const engineKind = normalizeEngineKind(request?.engine);
+  const calculationId = normalizeCalculationId(request?.calculationId);
   emitCalculationProgress(
     onProgress,
     engineKind,
@@ -715,11 +736,11 @@ async function runQuantumCalculation(request, onProgress = () => {}) {
   );
 
   if (isCommercialEngineKind(engineKind)) {
-    return runExternalQuantumCalculation(engineKind, request, onProgress);
+    return runExternalQuantumCalculation(engineKind, { ...request, calculationId }, onProgress);
   }
 
   if (engineKind === 'pyscf') {
-    return runPyscfCalculation(request, onProgress);
+    return runPyscfCalculation({ ...request, calculationId }, onProgress);
   }
 
   const startedAt = Date.now();
@@ -780,6 +801,7 @@ async function runQuantumCalculation(request, onProgress = () => {}) {
         cwd: workDir,
         timeoutMs,
         env: buildXtbEnv(engine),
+        jobId: calculationId,
         progress: (output) => emitCalculationProgress(
           onProgress,
           'xtb',
@@ -800,12 +822,14 @@ async function runQuantumCalculation(request, onProgress = () => {}) {
     const warnings = [];
 
     if (processResult.timedOut) warnings.push('xTB calculation timed out before completion.');
+    if (processResult.cancelled) warnings.push('Calculation was cancelled before completion.');
     if (energyHartree === null) warnings.push('Total energy was not found in xTB output.');
     if (!dipoleDebye) warnings.push('Dipole moment was not found in xTB output.');
     if (charges.length === 0) warnings.push('Partial charges file was not produced by xTB.');
 
     const result = {
-      ok: processResult.exitCode === 0,
+      ok: processResult.exitCode === 0 && !processResult.cancelled,
+      cancelled: processResult.cancelled || undefined,
       engine: 'xtb',
       engineLabel: QUANTUM_ENGINE_LABELS.xtb,
       method: 'GFN2-xTB',
@@ -818,7 +842,7 @@ async function runQuantumCalculation(request, onProgress = () => {}) {
       warnings,
       outputTail: outputTail(output),
       outputLog: output,
-      error: processResult.exitCode === 0 ? undefined : `xTB exited with code ${processResult.exitCode}.`
+      error: processResult.cancelled ? 'xTB calculation was cancelled by the user.' : processResult.exitCode === 0 ? undefined : `xTB exited with code ${processResult.exitCode}.`
     };
     emitCalculationProgress(
       onProgress,
@@ -907,6 +931,7 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
   const method = sanitizeQuantumToken(request?.method) || config.method;
   const basisSet = sanitizeQuantumToken(request?.basisSet) || config.basisSet;
   const routeOptions = sanitizeRouteOptions(request?.routeOptions || config.routeOptions || '');
+  const calculationId = normalizeCalculationId(request?.calculationId);
   const methodLabel = externalMethodLabel({ ...config, method, basisSet });
   const baseResult = {
     ok: false,
@@ -966,11 +991,12 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
         `${engineLabel} is running the quantum calculation.`,
         output,
         startedAt
-      ))
+      ), calculationId)
       : await runProcessWithProgress(config.executablePath, job.args, {
         cwd: workDir,
         timeoutMs,
         env: buildExternalEngineEnv(engineKind, config.executablePath, workDir),
+        jobId: calculationId,
         progress: (output) => emitCalculationProgress(
           onProgress,
           engineKind,
@@ -987,12 +1013,17 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
     const energyHartree = engineKind === 'gaussian' ? parseGaussianEnergy(output) : parseOrcaEnergy(output);
     const dipoleDebye = engineKind === 'gaussian' ? parseGaussianDipole(output) : parseOrcaDipole(output);
     const charges = engineKind === 'gaussian' ? parseGaussianCharges(output) : parseOrcaCharges(output);
+    const frontierOrbitals = engineKind === 'gaussian' ? parseGaussianFrontierOrbitals(output) : null;
+    const frequencySummary = engineKind === 'gaussian' ? parseGaussianFrequencySummary(output) : null;
+    const thermochemistry = engineKind === 'gaussian' ? parseGaussianThermochemistry(output) : null;
+    const optimizedXyz = engineKind === 'gaussian' ? parseGaussianOptimizedXyz(output) : null;
     emitCalculationProgress(onProgress, engineKind, 'parsing-output', 94, `Parsing ${engineLabel} energy, dipole, and population analysis.`, outputTail(output), startedAt);
-    const completedOk = processResult.exitCode === 0 && (engineKind !== 'gaussian' || /Normal termination of Gaussian/iu.test(output));
+    const completedOk = !processResult.cancelled && processResult.exitCode === 0 && (engineKind !== 'gaussian' || /Normal termination of Gaussian/iu.test(output));
     const warnings = [];
     const gaussianFiles = engineKind === 'gaussian' ? await collectGaussianFiles(job, fileOutput || output) : undefined;
 
     if (processResult.timedOut) warnings.push(`${engineLabel} calculation timed out before completion.`);
+    if (processResult.cancelled) warnings.push(`${engineLabel} calculation was cancelled before completion.`);
     if (engineKind === 'gaussian' && processResult.exitCode === 0 && !completedOk) {
       warnings.push('Gaussian did not report normal termination in the output log.');
     }
@@ -1005,6 +1036,7 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
 
     const result = {
       ok: completedOk,
+      cancelled: processResult.cancelled || undefined,
       engine: engineKind,
       engineLabel,
       method: methodLabel,
@@ -1014,6 +1046,10 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
       dipoleDebye,
       charges,
       chargeModel: `${engineLabel} Mulliken population analysis`,
+      frontierOrbitals,
+      frequencySummary,
+      thermochemistry,
+      optimizedXyz,
       elapsedMs: Date.now() - startedAt,
       warnings,
       outputTail: outputTail(output),
@@ -1841,7 +1877,7 @@ function replacementCount(value) {
   return (String(value).match(/\uFFFD/gu) || []).length;
 }
 
-async function runGaussianJob(executablePath, job, workDir, timeoutMs, onOutput = () => {}) {
+async function runGaussianJob(executablePath, job, workDir, timeoutMs, onOutput = () => {}, jobId = '') {
   const env = buildExternalEngineEnv('gaussian', executablePath, workDir);
   const pollOutput = setInterval(async () => {
     const fileOutput = await readOptionalText(job.outputPath);
@@ -1854,6 +1890,7 @@ async function runGaussianJob(executablePath, job, workDir, timeoutMs, onOutput 
         cwd: workDir,
         timeoutMs,
         env,
+        jobId,
         progress: onOutput
       });
     } finally {
@@ -1868,6 +1905,7 @@ async function runGaussianJob(executablePath, job, workDir, timeoutMs, onOutput 
       cwd: workDir,
       timeoutMs,
       env,
+      jobId,
       progress: onOutput
     });
   } finally {
@@ -1938,6 +1976,10 @@ function diagnoseExternalEngineFailure(engineKind, processResult, output, config
   const text = String(output || `${processResult.stdout || ''}\n${processResult.stderr || ''}`).trim();
   const executablePath = config?.executablePath || '';
   const executableDir = executablePath ? path.dirname(executablePath) : '';
+
+  if (processResult.cancelled) {
+    return `${engineLabel} calculation was cancelled by the user. Partial output may still be available in the calculation log.`;
+  }
 
   if (processResult.timedOut) {
     return `${engineLabel} timed out before completion. Increase timeout or run a smaller structure first.`;
@@ -2043,6 +2085,7 @@ async function runPyscfCalculation(request, onProgress = () => {}) {
   const calculationMode = normalizeCalculationMode(request?.calculationMode);
   const method = sanitizeQuantumToken(request?.method) || 'B3LYP';
   const basisSet = sanitizeQuantumToken(request?.basisSet) || '6-31G';
+  const calculationId = normalizeCalculationId(request?.calculationId);
   const baseResult = {
     ok: false,
     engine: 'pyscf',
@@ -2120,6 +2163,7 @@ async function runPyscfCalculation(request, onProgress = () => {}) {
         ...process.env,
         PYTHONUTF8: '1'
       },
+      jobId: calculationId,
       progress: (output) => emitCalculationProgress(
         onProgress,
         'pyscf',
@@ -2136,13 +2180,15 @@ async function runPyscfCalculation(request, onProgress = () => {}) {
     const warnings = [...(parsed?.warnings || [])];
 
     if (processResult.timedOut) warnings.push('PySCF calculation timed out before completion.');
+    if (processResult.cancelled) warnings.push('PySCF calculation was cancelled before completion.');
     if (!parsed) warnings.push('PySCF result JSON was not found in the calculation output.');
     if (parsed && parsed.energyHartree === null) warnings.push('Total energy was not found in the PySCF output.');
     if (parsed && !parsed.dipoleDebye) warnings.push('Dipole moment was not returned by PySCF.');
     if (parsed && parsed.charges.length === 0) warnings.push('Mulliken charges were not returned by PySCF.');
 
     const result = {
-      ok: processResult.exitCode === 0 && Boolean(parsed),
+      ok: processResult.exitCode === 0 && Boolean(parsed) && !processResult.cancelled,
+      cancelled: processResult.cancelled || undefined,
       engine: 'pyscf',
       engineLabel: QUANTUM_ENGINE_LABELS.pyscf,
       method: parsed?.method || `${method}/${basisSet}`,
@@ -2155,7 +2201,7 @@ async function runPyscfCalculation(request, onProgress = () => {}) {
       warnings,
       outputTail: outputTail(output),
       outputLog: output,
-      error: processResult.exitCode === 0 && parsed ? undefined : `PySCF exited with code ${processResult.exitCode}.`
+      error: processResult.cancelled ? 'PySCF calculation was cancelled by the user.' : processResult.exitCode === 0 && parsed ? undefined : `PySCF exited with code ${processResult.exitCode}.`
     };
     emitCalculationProgress(
       onProgress,
@@ -3239,11 +3285,24 @@ function runProcessWithProgress(executable, args, options = {}) {
     const stdout = [];
     const stderr = [];
     let timedOut = false;
+    let cancelled = false;
     let lastProgressAt = 0;
+    const jobId = normalizeCalculationId(options.jobId);
     const timer = setTimeout(() => {
       timedOut = true;
       child.kill('SIGTERM');
     }, options.timeoutMs || QUANTUM_TIMEOUT_MS);
+    if (jobId) {
+      activeQuantumProcesses.set(jobId, {
+        cancel: () => {
+          cancelled = true;
+          child.kill('SIGTERM');
+          setTimeout(() => {
+            if (!child.killed) child.kill('SIGKILL');
+          }, 5000);
+        }
+      });
+    }
 
     function pushProgress() {
       if (typeof options.progress !== 'function') return;
@@ -3263,16 +3322,19 @@ function runProcessWithProgress(executable, args, options = {}) {
     });
     child.on('error', (error) => {
       clearTimeout(timer);
-      const result = { exitCode: -1, stdout: '', stderr: error.message, timedOut };
+      if (jobId) activeQuantumProcesses.delete(jobId);
+      const result = { cancelled, exitCode: -1, stdout: '', stderr: error.message, timedOut };
       if (typeof options.progress === 'function') options.progress(error.message);
       resolve(result);
     });
     child.on('close', (exitCode) => {
       clearTimeout(timer);
+      if (jobId) activeQuantumProcesses.delete(jobId);
       const result = {
+        cancelled,
         exitCode: exitCode ?? -1,
         stdout: decodeTextBuffer(Buffer.concat(stdout)),
-        stderr: decodeTextBuffer(Buffer.concat(stderr)),
+        stderr: [decodeTextBuffer(Buffer.concat(stderr)), cancelled ? 'Cancelled by ChemVault user.' : ''].filter(Boolean).join('\n'),
         timedOut
       };
       if (typeof options.progress === 'function') {
@@ -3293,6 +3355,32 @@ function processEnvWithEnglishOutput(env) {
     PYTHONIOENCODING: 'utf-8',
     PYTHONUTF8: '1'
   };
+}
+
+function cancelQuantumCalculation(calculationId) {
+  const jobId = normalizeCalculationId(calculationId);
+  if (!jobId) return { ok: false, message: 'Calculation id is required.' };
+  const active = activeQuantumProcesses.get(jobId);
+  if (!active) {
+    return {
+      ok: false,
+      calculationId: jobId,
+      message: 'No running calculation was found for this id.'
+    };
+  }
+
+  active.cancel();
+  return {
+    ok: true,
+    calculationId: jobId,
+    message: 'Cancellation requested. ChemVault is stopping the engine process.'
+  };
+}
+
+function normalizeCalculationId(value) {
+  return String(value || '')
+    .replace(/[^a-zA-Z0-9_-]/gu, '')
+    .slice(0, 80);
 }
 
 function emitCalculationProgress(onProgress, engine, phase, percent, message, output, startedAt) {
@@ -3414,6 +3502,20 @@ function formatCoordinate(value) {
   return Number.isFinite(value) ? value.toFixed(8) : '0.00000000';
 }
 
+function numbersFromLine(value) {
+  return Array.from(String(value || '').matchAll(/[-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?/gu)).map((match) => Number(match[0])).filter(Number.isFinite);
+}
+
+function numberAfter(text, pattern) {
+  const match = String(text || '').match(pattern);
+  const value = match ? Number(match[1]) : null;
+  return Number.isFinite(value) ? value : null;
+}
+
+function atomicSymbol(atomicNumber) {
+  return ATOMIC_SYMBOLS[atomicNumber] || '';
+}
+
 async function readOptionalText(filePath) {
   try {
     return decodeTextBuffer(await fs.promises.readFile(filePath));
@@ -3523,7 +3625,13 @@ function normalizeGaussianTask(value, calculationMode = 'single-point') {
     normalized === 'frequency' ||
     normalized === 'optimization-frequency' ||
     normalized === 'td-dft' ||
-    normalized === 'nmr'
+    normalized === 'nmr' ||
+    normalized === 'solvent-model' ||
+    normalized === 'transition-state' ||
+    normalized === 'irc' ||
+    normalized === 'stability' ||
+    normalized === 'frontier-orbitals' ||
+    normalized === 'nbo'
   ) {
     return normalized;
   }
@@ -3536,6 +3644,12 @@ function gaussianTaskLabelFor(task) {
   if (task === 'optimization-frequency') return 'Optimization + frequency';
   if (task === 'td-dft') return 'TD-DFT excited states';
   if (task === 'nmr') return 'NMR shielding';
+  if (task === 'solvent-model') return 'Solvent model';
+  if (task === 'transition-state') return 'Transition-state search';
+  if (task === 'irc') return 'IRC pathway';
+  if (task === 'stability') return 'Wavefunction stability';
+  if (task === 'frontier-orbitals') return 'Frontier orbital analysis';
+  if (task === 'nbo') return 'NBO bridge';
   return 'Single point';
 }
 
@@ -3546,6 +3660,12 @@ function gaussianRouteKeywords(task, calculationMode = 'single-point') {
   if (normalized === 'optimization-frequency') return 'Opt Freq';
   if (normalized === 'td-dft') return 'TD(NStates=10)';
   if (normalized === 'nmr') return 'NMR=GIAO';
+  if (normalized === 'solvent-model') return 'SP SCRF=(SMD,Solvent=Water)';
+  if (normalized === 'transition-state') return 'Opt=(TS,CalcFC,NoEigenTest) Freq';
+  if (normalized === 'irc') return 'IRC=(CalcFC,MaxPoints=20)';
+  if (normalized === 'stability') return 'Stable=Opt';
+  if (normalized === 'frontier-orbitals') return 'SP';
+  if (normalized === 'nbo') return 'Pop=NBORead';
   return 'SP';
 }
 
@@ -3614,6 +3734,103 @@ function parseGaussianCharges(output) {
     });
   }
   return charges;
+}
+
+function parseGaussianFrontierOrbitals(output) {
+  const hartreeToEv = 27.211386245988;
+  const alphaOcc = [];
+  const alphaVirt = [];
+  const betaOcc = [];
+  const betaVirt = [];
+  for (const line of String(output || '').split(/\r?\n/u)) {
+    const match = line.match(/^\s*(Alpha|Beta)\s+(occ\.|virt\.)\s+eigenvalues\s+--\s+(.+)$/iu);
+    if (!match) continue;
+    const target = match[1].toLowerCase() === 'alpha'
+      ? match[2].toLowerCase().startsWith('occ') ? alphaOcc : alphaVirt
+      : match[2].toLowerCase().startsWith('occ') ? betaOcc : betaVirt;
+    target.push(...numbersFromLine(match[3]));
+  }
+
+  const alphaHomo = alphaOcc.length ? alphaOcc[alphaOcc.length - 1] * hartreeToEv : null;
+  const alphaLumo = alphaVirt.length ? alphaVirt[0] * hartreeToEv : null;
+  const betaHomo = betaOcc.length ? betaOcc[betaOcc.length - 1] * hartreeToEv : null;
+  const betaLumo = betaVirt.length ? betaVirt[0] * hartreeToEv : null;
+  const gap = alphaHomo !== null && alphaLumo !== null ? alphaLumo - alphaHomo : null;
+  if (alphaHomo === null && alphaLumo === null && betaHomo === null && betaLumo === null) return null;
+  return {
+    alphaHomoEv: alphaHomo,
+    alphaLumoEv: alphaLumo,
+    betaHomoEv: betaHomo,
+    betaLumoEv: betaLumo,
+    gapEv: gap
+  };
+}
+
+function parseGaussianFrequencySummary(output) {
+  const frequencies = [];
+  const intensities = [];
+  for (const line of String(output || '').split(/\r?\n/u)) {
+    const frequencyMatch = line.match(/^\s*Frequencies\s+--\s+(.+)$/iu);
+    if (frequencyMatch) {
+      frequencies.push(...numbersFromLine(frequencyMatch[1]));
+      continue;
+    }
+    const intensityMatch = line.match(/^\s*IR\s+Inten\s+--\s+(.+)$/iu);
+    if (intensityMatch) {
+      intensities.push(...numbersFromLine(intensityMatch[1]));
+    }
+  }
+  if (!frequencies.length) return null;
+  return {
+    imaginaryCount: frequencies.filter((value) => value < 0).length,
+    lowestFrequencyCm1: Math.min(...frequencies),
+    modes: frequencies.slice(0, 24).map((value, index) => ({
+      valueCm1: value,
+      intensityKmMol: Number.isFinite(intensities[index]) ? intensities[index] : null
+    }))
+  };
+}
+
+function parseGaussianThermochemistry(output) {
+  const text = String(output || '');
+  const zeroPointCorrectionHartree = numberAfter(text, /Zero-point\s+correction=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/iu);
+  const thermalCorrectionToEnergyHartree = numberAfter(text, /Thermal\s+correction\s+to\s+Energy=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/iu);
+  const thermalCorrectionToEnthalpyHartree = numberAfter(text, /Thermal\s+correction\s+to\s+Enthalpy=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/iu);
+  const thermalCorrectionToGibbsHartree = numberAfter(text, /Thermal\s+correction\s+to\s+Gibbs\s+Free\s+Energy=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/iu);
+  if (
+    zeroPointCorrectionHartree === null &&
+    thermalCorrectionToEnergyHartree === null &&
+    thermalCorrectionToEnthalpyHartree === null &&
+    thermalCorrectionToGibbsHartree === null
+  ) {
+    return null;
+  }
+  return {
+    zeroPointCorrectionHartree,
+    thermalCorrectionToEnergyHartree,
+    thermalCorrectionToEnthalpyHartree,
+    thermalCorrectionToGibbsHartree
+  };
+}
+
+function parseGaussianOptimizedXyz(output) {
+  const blocks = Array.from(String(output || '').matchAll(/(?:Standard|Input)\s+orientation:\s*\n\s*-+\s*\n[\s\S]*?\n\s*-+\s*\n([\s\S]*?)\n\s*-+/giu));
+  const last = blocks.at(-1);
+  if (!last) return null;
+  const atoms = [];
+  for (const line of last[1].split(/\r?\n/u)) {
+    const parts = line.trim().split(/\s+/u);
+    if (parts.length < 6) continue;
+    const atomicNumber = Number(parts[1]);
+    const x = Number(parts[3]);
+    const y = Number(parts[4]);
+    const z = Number(parts[5]);
+    const element = atomicSymbol(atomicNumber);
+    if (!element || ![x, y, z].every(Number.isFinite)) continue;
+    atoms.push(`${element} ${formatCoordinate(x)} ${formatCoordinate(y)} ${formatCoordinate(z)}`);
+  }
+  if (!atoms.length) return null;
+  return [String(atoms.length), 'Optimized geometry parsed by ChemVault Model', ...atoms, ''].join('\n');
 }
 
 function parseOrcaEnergy(output) {

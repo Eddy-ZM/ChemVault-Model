@@ -171,6 +171,7 @@ export function createQuantumPdfDocument(result: QuantumCalculationResult, conte
     ['Elapsed time', `${(result.elapsedMs / 1000).toFixed(1)} s`]
   ]);
   if (result.dipoleDebye) drawPdfDipoleCard(layout, result);
+  drawPdfAdvancedResults(layout, result);
   drawPdfChargeTable(layout, result);
   if (result.warnings.length > 0) drawPdfWarnings(layout, result.warnings);
   drawPdfReview(layout, context);
@@ -321,6 +322,48 @@ function drawPdfDipoleCard(layout: PdfLayout, result: QuantumCalculationResult) 
     drawPdfText(layout, `${formatSigned(value)} D`, x + 10, axisBottom + 11, { color: '#0f172a', font: 'F3', size: 10.5 });
   });
   layout.y = bottom - 16;
+}
+
+function drawPdfAdvancedResults(layout: PdfLayout, result: QuantumCalculationResult) {
+  const rows: Array<[string, string]> = [];
+  if (result.frontierOrbitals) {
+    rows.push(
+      ['Alpha HOMO', result.frontierOrbitals.alphaHomoEv === null ? 'N/A' : `${formatNumber(result.frontierOrbitals.alphaHomoEv)} eV`],
+      ['Alpha LUMO', result.frontierOrbitals.alphaLumoEv === null ? 'N/A' : `${formatNumber(result.frontierOrbitals.alphaLumoEv)} eV`],
+      ['HOMO-LUMO gap', result.frontierOrbitals.gapEv === null ? 'N/A' : `${formatNumber(result.frontierOrbitals.gapEv)} eV`]
+    );
+  }
+  if (result.frequencySummary) {
+    rows.push(
+      ['Imaginary modes', String(result.frequencySummary.imaginaryCount)],
+      ['Lowest frequency', result.frequencySummary.lowestFrequencyCm1 === null ? 'N/A' : `${formatNumber(result.frequencySummary.lowestFrequencyCm1)} cm-1`],
+      ['Parsed modes', String(result.frequencySummary.modes.length)]
+    );
+  }
+  if (result.thermochemistry) {
+    rows.push(
+      ['ZPE correction', result.thermochemistry.zeroPointCorrectionHartree === null ? 'N/A' : `${formatNumber(result.thermochemistry.zeroPointCorrectionHartree)} Eh`],
+      ['Thermal Gibbs', result.thermochemistry.thermalCorrectionToGibbsHartree === null ? 'N/A' : `${formatNumber(result.thermochemistry.thermalCorrectionToGibbsHartree)} Eh`]
+    );
+  }
+  if (!rows.length) return;
+
+  drawPdfSectionTitle(layout, 'Advanced parsed results');
+  const columns = 2;
+  const gap = 10;
+  const cardWidth = (PDF_CONTENT_WIDTH - gap) / columns;
+  const cardHeight = 50;
+  rows.forEach(([label, value], index) => {
+    if (index % columns === 0) ensurePdfSpace(layout, cardHeight + 12);
+    const column = index % columns;
+    const x = PDF_MARGIN + column * (cardWidth + gap);
+    const bottom = layout.y - cardHeight;
+    drawPdfRect(layout, x, bottom, cardWidth, cardHeight, { fill: '#f8fafc', stroke: '#e2e8f0' });
+    drawPdfText(layout, label, x + 12, layout.y - 16, { color: '#64748b', font: 'F2', size: 8 });
+    drawPdfWrappedText(layout, value, x + 12, layout.y - 34, cardWidth - 24, { color: '#020617', font: 'F2', size: 11, lineHeight: 11, maxLines: 1 });
+    if (column === columns - 1 || index === rows.length - 1) layout.y = bottom - 10;
+  });
+  layout.y -= 4;
 }
 
 function drawPdfChargeTable(layout: PdfLayout, result: QuantumCalculationResult) {
@@ -576,12 +619,13 @@ function quantumSummaryRows(result: QuantumCalculationResult, context: QuantumEx
     ['Calculation mode', result.gaussianTaskLabel || result.calculationMode],
     ['Total charge', String(context.charge)],
     ['Unpaired electrons', String(context.unpairedElectrons)],
+    ['ChemVault quality score', typeof context.diagnosis?.qualityScore === 'number' ? `${context.diagnosis.qualityScore}/100` : 'N/A'],
     ['Status', result.ok ? 'Completed' : result.error || 'Not completed']
   ];
 }
 
 function computedPropertyRows(result: QuantumCalculationResult) {
-  return [
+  const rows = [
     ['Total energy', result.energyHartree === null ? 'N/A' : `${formatNumber(result.energyHartree)} Eh`],
     ['Dipole magnitude', result.dipoleDebye ? `${formatNumber(result.dipoleDebye.total)} D` : 'N/A'],
     ['Dipole X', result.dipoleDebye ? `${formatSigned(result.dipoleDebye.x)} D` : 'N/A'],
@@ -591,6 +635,26 @@ function computedPropertyRows(result: QuantumCalculationResult) {
     ['Charge model', result.chargeModel],
     ['Elapsed time', `${(result.elapsedMs / 1000).toFixed(1)} s`]
   ];
+  if (result.frontierOrbitals) {
+    rows.push(
+      ['Alpha HOMO', result.frontierOrbitals.alphaHomoEv === null ? 'N/A' : `${formatNumber(result.frontierOrbitals.alphaHomoEv)} eV`],
+      ['Alpha LUMO', result.frontierOrbitals.alphaLumoEv === null ? 'N/A' : `${formatNumber(result.frontierOrbitals.alphaLumoEv)} eV`],
+      ['HOMO-LUMO gap', result.frontierOrbitals.gapEv === null ? 'N/A' : `${formatNumber(result.frontierOrbitals.gapEv)} eV`]
+    );
+  }
+  if (result.frequencySummary) {
+    rows.push(
+      ['Imaginary frequencies', String(result.frequencySummary.imaginaryCount)],
+      ['Lowest frequency', result.frequencySummary.lowestFrequencyCm1 === null ? 'N/A' : `${formatNumber(result.frequencySummary.lowestFrequencyCm1)} cm-1`]
+    );
+  }
+  if (result.thermochemistry) {
+    rows.push(
+      ['Zero-point correction', result.thermochemistry.zeroPointCorrectionHartree === null ? 'N/A' : `${formatNumber(result.thermochemistry.zeroPointCorrectionHartree)} Eh`],
+      ['Thermal correction to Gibbs', result.thermochemistry.thermalCorrectionToGibbsHartree === null ? 'N/A' : `${formatNumber(result.thermochemistry.thermalCorrectionToGibbsHartree)} Eh`]
+    );
+  }
+  return rows;
 }
 
 function reviewRowsForExport(context: QuantumExportDocumentContext) {
@@ -599,7 +663,9 @@ function reviewRowsForExport(context: QuantumExportDocumentContext) {
   return [
     ['Status', diagnosis.title],
     ['Severity', diagnosis.severity],
+    ['Quality score', typeof diagnosis.qualityScore === 'number' ? `${diagnosis.qualityScore}/100` : 'N/A'],
     ['Summary', diagnosis.summary],
+    ['Quality factors', diagnosis.qualityFactors?.length ? diagnosis.qualityFactors.join(' | ') : 'N/A'],
     ['Recommended actions', diagnosis.suggestedActions.length ? diagnosis.suggestedActions.join(' | ') : 'No additional action suggested.']
   ];
 }

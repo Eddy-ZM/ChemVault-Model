@@ -16,6 +16,7 @@ import type {
   QuantumCalculationProgress,
   QuantumCalculationRequest,
   QuantumCalculationResult,
+  QuantumCancelResult,
   QuantumEngineKind,
   QuantumEngineStatus
 } from '@/lib/chem/quantumTypes';
@@ -75,6 +76,7 @@ declare global {
       openGaussianInGaussView: (request: GaussianBridgeRequest) => Promise<GaussianOpenResult>;
       onQuantumCalculationProgress: (handler: (progress: QuantumCalculationProgress) => void) => () => void;
       runQuantumCalculation: (request: QuantumCalculationRequest) => Promise<QuantumCalculationResult>;
+      cancelQuantumCalculation: (calculationId: string) => Promise<QuantumCancelResult>;
     };
   }
 }

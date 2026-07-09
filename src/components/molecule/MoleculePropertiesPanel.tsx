@@ -1391,14 +1391,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         </label>
       </div>
 
-      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-        <PreflightPanel
-          preflight={preflight}
-          preparation={preparedStructure}
-          onExportPrepared={exportPreparedXyz}
-          onPrepare={prepareCurrentStructure}
-          onResetPrepared={resetPreparedStructure}
-        />
+      <div className="mt-4">
         <OperationPlanPanel
           activeProject={activeProject}
           canQueue={Boolean(calculationXyz && preflight.canRun)}
@@ -1428,6 +1421,16 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
           onRunQueue={runQueuedCalculations}
           onRunQuickScreen={runQuickScreenThenGaussian}
           onSendToGaussian={sendCurrentSetupToGaussian}
+        />
+      </div>
+
+      <div className="mt-4">
+        <PreflightPanel
+          preflight={preflight}
+          preparation={preparedStructure}
+          onExportPrepared={exportPreparedXyz}
+          onPrepare={prepareCurrentStructure}
+          onResetPrepared={resetPreparedStructure}
         />
       </div>
 
@@ -2251,9 +2254,9 @@ function OperationPlanPanel({
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Operation plan</p>
-          <h4 className="mt-1 text-sm font-bold text-slate-950">Run, screen, or hand off from one place</h4>
+          <h4 className="mt-1 text-base font-bold text-slate-950">Start with the current calculation</h4>
           <p className="mt-1 text-xs leading-5 text-slate-600">
-            Use this panel for the next calculation. Queue and project tools stay folded until you need them.
+            Run the selected engine first. Use screening, queue, and project records only when the workflow needs them.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -2262,97 +2265,109 @@ function OperationPlanPanel({
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.72fr)]">
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <div className={`rounded-2xl border px-4 py-3 ${engineReady ? 'border-emerald-200 bg-emerald-50' : 'border-amber-200 bg-amber-50'}`}>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Engine</p>
+          <p className="mt-2 text-sm font-bold text-slate-950">{activeEngineLabel}</p>
+          <p className={`mt-1 text-xs font-semibold ${engineReady ? 'text-emerald-800' : 'text-amber-800'}`}>
+            {engineReady ? 'Ready to run' : 'Setup needed'}
+          </p>
+        </div>
         <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Primary action</p>
-          <div className="mt-3 flex flex-wrap gap-2">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Queue</p>
+          <p className="mt-2 text-sm font-bold text-slate-950">{queueStatus}</p>
+          <p className="mt-1 text-xs font-semibold text-slate-500">
+            {items.length ? 'Use only for batch runs' : 'Not required for one calculation'}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Records</p>
+          <p className="mt-2 text-sm font-bold text-slate-950">{recordStatus}</p>
+          <button
+            type="button"
+            onClick={onOpenHistory}
+            className="mt-2 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+          >
+            History ({historyCount})
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Step 1 - Required</p>
+            <h5 className="mt-1 text-sm font-bold text-slate-950">Run the selected engine</h5>
+            <p className="mt-1 text-xs leading-5 text-slate-600">
+              Uses the current 3D structure, charge, spin, engine, and method settings.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={onRunCalculation}
               disabled={!canRun}
               title={canRun ? 'Run the selected engine with the current structure and settings.' : 'Complete readiness checks before running this calculation.'}
-              className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="min-w-[190px] rounded-xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               {running ? 'Calculating' : 'Run Calculation'}
             </button>
-            <button
-              type="button"
-              onClick={onRunQuickScreen}
-              disabled={!canRunQuickScreen}
-              title={canRunQuickScreen ? 'Run xTB screening before Gaussian refinement.' : quickScreenIssue || 'Quick screening is not ready.'}
-              className="rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-            >
-              Quick xTB screen {'->'} Gaussian
-            </button>
-            <button
-              type="button"
-              onClick={onSendToGaussian}
-              className="rounded-xl border border-sky-300 bg-white px-4 py-2.5 text-sm font-semibold text-sky-800 hover:bg-sky-50"
-            >
-              {currentEngine === 'gaussian' && !canSendResult ? 'Open Gaussian setup' : 'Send setup to Gaussian'}
-            </button>
           </div>
+        </div>
 
-          {quickScreenIssue ? (
-            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-800">Quick screening unavailable</p>
-                  <p className="mt-1 text-xs leading-5 text-amber-900">{quickScreenIssue}</p>
-                </div>
-                <div className="flex shrink-0 flex-wrap gap-2">
-                  <button
-                    type="button"
-                    onClick={onConfigureExistingEngine}
-                    className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
-                  >
-                    Configure xTB
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onRefreshLocalEngines}
-                    className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
-                  >
-                    Refresh
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onSendToGaussian}
-                    className="rounded-xl border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-50"
-                  >
-                    Use Gaussian
-                  </button>
-                </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onSendToGaussian}
+            className="rounded-xl border border-sky-300 bg-white px-4 py-2.5 text-sm font-semibold text-sky-800 hover:bg-sky-50"
+          >
+            {currentEngine === 'gaussian' && !canSendResult ? 'Open Gaussian setup' : 'Send setup to Gaussian'}
+          </button>
+          <button
+            type="button"
+            onClick={onRunQuickScreen}
+            disabled={!canRunQuickScreen}
+            title={canRunQuickScreen ? 'Run xTB screening before Gaussian refinement.' : quickScreenIssue || 'Quick screening is not ready.'}
+            className="rounded-xl border border-sky-300 bg-white px-4 py-2.5 text-sm font-semibold text-sky-800 hover:bg-sky-50 disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+          >
+            Quick xTB screen {'->'} Gaussian
+          </button>
+        </div>
+
+        {quickScreenIssue ? (
+          <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-800">Optional xTB screening unavailable</p>
+                <p className="mt-1 text-xs leading-5 text-amber-900">{quickScreenIssue}</p>
+              </div>
+              <div className="flex shrink-0 flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={onConfigureExistingEngine}
+                  className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                >
+                  Configure xTB
+                </button>
+                <button
+                  type="button"
+                  onClick={onRefreshLocalEngines}
+                  className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                >
+                  Refresh
+                </button>
               </div>
             </div>
-          ) : null}
-
-          {message ? <p className="mt-3 rounded-xl border border-sky-200 bg-white px-3 py-2 text-xs leading-5 text-sky-800">{message}</p> : null}
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Current state</p>
-          <div className="mt-3 grid gap-2">
-            <ReadinessItem label="Engine" ready={engineReady} value={activeEngineLabel} />
-            <ReadinessItem label="Queue" ready={!queueRunning} value={queueStatus} />
-            <ReadinessItem label="Records" ready={projectCount > 0} value={recordStatus} />
           </div>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={onOpenHistory}
-              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-            >
-              History ({historyCount})
-            </button>
-          </div>
-        </div>
+        ) : null}
+
+        {message ? <p className="mt-3 rounded-xl border border-sky-200 bg-white px-3 py-2 text-xs leading-5 text-sky-800">{message}</p> : null}
       </div>
 
       <div className="mt-3 grid gap-3 lg:grid-cols-2">
         <details className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
           <summary className="cursor-pointer text-sm font-bold text-slate-950">
-            Optional queue
+            Step 2 - Optional queue
             <span className="ml-2 rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-slate-500">{items.length ? `${items.length} item${items.length === 1 ? '' : 's'}` : 'Empty'}</span>
           </summary>
           <p className="mt-2 text-xs leading-5 text-slate-600">
@@ -2424,7 +2439,7 @@ function OperationPlanPanel({
 
         <details className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
           <summary className="cursor-pointer text-sm font-bold text-slate-950">
-            Records and export
+            Step 3 - Records and export
             <span className="ml-2 rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-slate-500">{projectCount} project{projectCount === 1 ? '' : 's'}</span>
           </summary>
           {activeProject ? (

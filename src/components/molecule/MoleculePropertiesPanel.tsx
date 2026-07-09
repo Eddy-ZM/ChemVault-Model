@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { QuantumEngineSetupDialog, type QuantumSetupDialogMode } from '@/components/desktop/QuantumEngineSetupDialog';
 import { GlobalLoadingOverlay } from '@/components/ui/LoadingState';
 import type { ElectrostaticAnalysis } from '@/lib/chem/electrostaticAnalysis';
@@ -16,7 +16,13 @@ import type {
   QuantumEngineKind,
   QuantumEngineStatus
 } from '@/lib/chem/quantumTypes';
-import { downloadText, safeFileBaseName } from '@/lib/chem/fileExport';
+import { downloadBinary, downloadText, safeFileBaseName } from '@/lib/chem/fileExport';
+import {
+  CHEMVAULT_COPYRIGHT_NOTICE,
+  createQuantumExcelWorkbook,
+  createQuantumPdfDocument,
+  createQuantumWordDocument
+} from '@/lib/chem/quantumExport';
 import { MoleculeProperties } from '@/lib/chem/types';
 import { formatValue } from '@/lib/chem/moleculeUtils';
 
@@ -500,6 +506,33 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     );
   }
 
+  function exportQuantumExcel() {
+    if (!result) return;
+    downloadBinary(
+      `${exportBaseName}_${exportTimestamp()}_data.xlsx`,
+      createQuantumExcelWorkbook(result, { charge, metadata, unpairedElectrons }),
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    );
+  }
+
+  function exportQuantumWord() {
+    if (!result) return;
+    downloadBinary(
+      `${exportBaseName}_${exportTimestamp()}_report.docx`,
+      createQuantumWordDocument(result, { charge, metadata, unpairedElectrons }),
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
+    );
+  }
+
+  function exportQuantumPdf() {
+    if (!result) return;
+    downloadBinary(
+      `${exportBaseName}_${exportTimestamp()}_report.pdf`,
+      createQuantumPdfDocument(result, { charge, metadata, unpairedElectrons }),
+      'application/pdf'
+    );
+  }
+
   return (
     <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -768,7 +801,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
             <div>
               <p className="text-sm font-bold text-slate-950">Calculation export</p>
               <p className="mt-1 text-xs leading-5 text-slate-500">
-                Export the completed summary, charges, vectors, warnings, and engine log with a ChemVault footer watermark.
+                Export the completed summary, charges, vectors, warnings, engine log, document properties, and fixed ChemVault copyright metadata.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -778,6 +811,27 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
                 className="rounded-xl bg-slate-950 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-800"
               >
                 Export Report
+              </button>
+              <button
+                type="button"
+                onClick={exportQuantumExcel}
+                className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-800 hover:bg-white"
+              >
+                Excel
+              </button>
+              <button
+                type="button"
+                onClick={exportQuantumWord}
+                className="rounded-xl border border-sky-300 bg-sky-50 px-4 py-2 text-xs font-semibold text-sky-800 hover:bg-white"
+              >
+                Word
+              </button>
+              <button
+                type="button"
+                onClick={exportQuantumPdf}
+                className="rounded-xl border border-rose-300 bg-rose-50 px-4 py-2 text-xs font-semibold text-rose-800 hover:bg-white"
+              >
+                PDF
               </button>
               <button
                 type="button"
@@ -835,7 +889,10 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
           {result.outputTail ? (
             <details className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
               <summary className="cursor-pointer text-sm font-semibold text-slate-800">Calculation log</summary>
-              <pre className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-3 text-xs leading-5 text-slate-700">{result.outputTail}</pre>
+              <AutoScrollLog
+                value={result.outputTail}
+                className="mt-3 max-h-64 overflow-auto whitespace-pre-wrap rounded-xl bg-white p-3 text-xs leading-5 text-slate-700"
+              />
             </details>
           ) : null}
         </div>
@@ -862,7 +919,8 @@ function CalculationProgressDetails({
   const percent = clampPercent(progress?.percent ?? 0);
   const phase = progress?.phase ? calculationPhaseLabel(progress.phase) : 'Starting';
   const elapsed = typeof progress?.elapsedMs === 'number' ? `${(progress.elapsedMs / 1000).toFixed(1)} s` : 'Starting';
-  const output = progress?.outputTail?.trim();
+  const output = progress?.outputTail || '';
+  const hasOutput = output.trim().length > 0;
 
   return (
     <div className="mt-4 w-[min(78vw,560px)] space-y-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 text-left">
@@ -883,16 +941,33 @@ function CalculationProgressDetails({
           <span className="mt-1 block text-sm font-semibold text-slate-900">{elapsed}</span>
         </p>
       </div>
-      {output ? (
-        <pre className="max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3 font-mono text-[11px] leading-5 text-slate-100">
-          {output}
-        </pre>
+      {hasOutput ? (
+        <AutoScrollLog
+          value={output}
+          className="max-h-40 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3 font-mono text-[11px] leading-5 text-slate-100"
+        />
       ) : (
         <p className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2 text-xs leading-5 text-slate-500">
           Waiting for the engine to produce terminal output.
         </p>
       )}
     </div>
+  );
+}
+
+function AutoScrollLog({ className, value }: { className: string; value: string }) {
+  const logRef = useRef<HTMLPreElement>(null);
+
+  useEffect(() => {
+    const node = logRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [value]);
+
+  return (
+    <pre ref={logRef} className={className}>
+      {value}
+    </pre>
   );
 }
 
@@ -1232,6 +1307,11 @@ function buildQuantumReportHtml(result: QuantumCalculationResult, context: Quant
 <head>
   <meta charset="utf-8" />
   <title>ChemVault quantum calculation report</title>
+  <meta name="author" content="ChemVault" />
+  <meta name="generator" content="ChemVault Model" />
+  <meta name="subject" content="Quantum calculation results generated by ChemVault Model" />
+  <meta name="keywords" content="ChemVault, quantum calculation, molecule, molecular model" />
+  <meta name="copyright" content="${escapeHtml(CHEMVAULT_COPYRIGHT_NOTICE)}" />
   <style>
     body { margin: 0; background: #f8fafc; color: #0f172a; font-family: Inter, Arial, sans-serif; }
     main { max-width: 1040px; margin: 0 auto; padding: 40px 28px; }
@@ -1302,7 +1382,7 @@ function buildQuantumReportHtml(result: QuantumCalculationResult, context: Quant
       <pre>${escapeHtml(log)}</pre>
     </section>
 
-    <footer class="watermark">Generated by ChemVault Model | chemvault.science</footer>
+    <footer class="watermark">${escapeHtml(CHEMVAULT_COPYRIGHT_NOTICE)}</footer>
   </main>
 </body>
 </html>`;
@@ -1314,6 +1394,15 @@ function buildQuantumLogText(result: QuantumCalculationResult, context: QuantumE
   return [
     'ChemVault Model Quantum Calculation Log',
     `Generated: ${generatedAt}`,
+    '',
+    'Document properties',
+    'Title: ChemVault Quantum Calculation Report',
+    'Author: ChemVault',
+    'Generator: ChemVault Model',
+    'Subject: Quantum calculation results generated by ChemVault Model',
+    'Keywords: ChemVault, quantum calculation, molecule, molecular model',
+    `Copyright: ${CHEMVAULT_COPYRIGHT_NOTICE}`,
+    '',
     `Molecule: ${exportMoleculeLabel(context.metadata)}`,
     `Engine: ${result.engineLabel}`,
     `Method: ${result.method}`,
@@ -1330,7 +1419,7 @@ function buildQuantumLogText(result: QuantumCalculationResult, context: QuantumE
     'Engine log',
     log,
     '',
-    'Generated by ChemVault Model | chemvault.science'
+    CHEMVAULT_COPYRIGHT_NOTICE
   ].join('\n');
 }
 

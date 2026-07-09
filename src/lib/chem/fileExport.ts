@@ -1,5 +1,13 @@
 export function downloadText(name: string, content: string, mime = 'text/plain') {
   const blob = new Blob([content], { type: `${mime};charset=utf-8` });
+  downloadBlob(name, blob);
+}
+
+export function downloadBinary(name: string, content: BlobPart, mime = 'application/octet-stream') {
+  downloadBlob(name, new Blob([content], { type: mime }));
+}
+
+function downloadBlob(name: string, blob: Blob) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;

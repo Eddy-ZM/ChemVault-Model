@@ -531,6 +531,15 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     [preflight, result]
   );
   const calculationXyz = preparedStructure?.ok && preparedStructure.xyz ? preparedStructure.xyz : xyz;
+  const xtbEngineStatus = localEngines.find((engine) => engine.engine === 'xtb');
+  const quickScreenReady = Boolean(calculationXyz && !running && !queueRunning && xtbEngineStatus?.available);
+  const quickScreenIssue = quickScreenReady
+    ? ''
+    : quickScreenIssueMessage({
+        hasStructure: Boolean(calculationXyz),
+        loading: localEngineLoading,
+        status: xtbEngineStatus
+      });
   const canRun = Boolean(calculationXyz && status?.available && preflight.canRun && !running && !queueRunning && (selectedEngine !== 'pyscf' || calculationMode === 'single-point'));
 
   async function loadLocalEngines() {
@@ -751,6 +760,13 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   }
 
   async function runQuickScreenThenGaussian() {
+    if (!xtbEngineStatus?.available) {
+      const message = quickScreenIssue || 'xTB is not ready. Configure an existing xTB executable or use Gaussian directly.';
+      setWorkflowMessage(message);
+      setError('');
+      return;
+    }
+
     const screenResult = await executeCalculation({
       calculationMode: 'single-point',
       engine: 'xtb',
@@ -1392,12 +1408,15 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
           onResetPrepared={resetPreparedStructure}
         />
         <WorkflowBridgePanel
-          canRunQuickScreen={Boolean(calculationXyz && !running)}
+          canRunQuickScreen={quickScreenReady}
           currentEngine={selectedEngine}
           historyCount={historyEntries.length}
           latestResult={result}
           message={workflowMessage}
+          quickScreenIssue={quickScreenIssue}
+          onConfigureExistingEngine={() => setSetupMode('configure')}
           onOpenHistory={() => setHistoryOpen(true)}
+          onRefreshLocalEngines={loadLocalEngines}
           onRunQuickScreen={runQuickScreenThenGaussian}
           onSendToGaussian={sendCurrentSetupToGaussian}
         />
@@ -2172,7 +2191,10 @@ function WorkflowBridgePanel({
   historyCount,
   latestResult,
   message,
+  quickScreenIssue,
+  onConfigureExistingEngine,
   onOpenHistory,
+  onRefreshLocalEngines,
   onRunQuickScreen,
   onSendToGaussian
 }: {
@@ -2181,7 +2203,10 @@ function WorkflowBridgePanel({
   historyCount: number;
   latestResult: QuantumCalculationResult | null;
   message: string;
+  quickScreenIssue: string;
+  onConfigureExistingEngine: () => void;
   onOpenHistory: () => void;
+  onRefreshLocalEngines: () => void;
   onRunQuickScreen: () => void;
   onSendToGaussian: () => void;
 }) {
@@ -2194,11 +2219,45 @@ function WorkflowBridgePanel({
       <p className="mt-2 text-xs leading-5 text-slate-600">
         Use ChemVault to validate geometry, run a quick screen, keep records, then hand off clean Gaussian files for high-precision work.
       </p>
+      {quickScreenIssue ? (
+        <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-800">Quick screening unavailable</p>
+              <p className="mt-1 text-xs leading-5 text-amber-900">{quickScreenIssue}</p>
+            </div>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={onConfigureExistingEngine}
+                className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+              >
+                Configure xTB
+              </button>
+              <button
+                type="button"
+                onClick={onRefreshLocalEngines}
+                className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+              >
+                Refresh status
+              </button>
+              <button
+                type="button"
+                onClick={onSendToGaussian}
+                className="rounded-xl border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-50"
+              >
+                Use Gaussian setup
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <div className="mt-3 flex flex-wrap gap-2">
         <button
           type="button"
           onClick={onRunQuickScreen}
           disabled={!canRunQuickScreen}
+          title={canRunQuickScreen ? 'Run xTB screening before Gaussian refinement.' : quickScreenIssue || 'Quick screening is not ready.'}
           className="rounded-xl bg-sky-700 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           Quick xTB screen {'->'} Gaussian
@@ -2206,10 +2265,9 @@ function WorkflowBridgePanel({
         <button
           type="button"
           onClick={onSendToGaussian}
-          disabled={currentEngine === 'gaussian' && !canSendResult}
           className="rounded-xl border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Send setup to Gaussian
+          {currentEngine === 'gaussian' && !canSendResult ? 'Open Gaussian setup' : 'Send setup to Gaussian'}
         </button>
         <button
           type="button"
@@ -3050,6 +3108,22 @@ function ReadinessItem({ label, ready, value }: { label: string; ready: boolean;
       </span>
     </p>
   );
+}
+
+function quickScreenIssueMessage({
+  hasStructure,
+  loading,
+  status
+}: {
+  hasStructure: boolean;
+  loading: boolean;
+  status?: LocalEngineStatus;
+}) {
+  if (!hasStructure) return 'Load a 3D structure before running xTB screening.';
+  if (loading) return 'ChemVault is checking whether xTB is available on this computer.';
+  if (!status) return 'xTB has not been scanned yet. Refresh local engine status or configure an existing xTB executable.';
+  if (!status.available) return status.message || 'xTB is not installed or is not available on this computer.';
+  return '';
 }
 
 function BridgeStatus({ label, status }: { label: string; status?: { available: boolean; message: string; path?: string } }) {

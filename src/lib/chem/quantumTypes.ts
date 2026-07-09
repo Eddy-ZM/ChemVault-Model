@@ -58,9 +58,13 @@ export type LocalEngineInstallProgress = {
   percent: number;
   message: string;
   attempt?: string;
+  command?: string;
+  cwd?: string;
   diagnosis?: string;
+  operation?: string;
   outputTail?: string;
   repairAction?: string;
+  targetPath?: string;
 };
 
 export type QuantumCalculationProgress = {

@@ -90,6 +90,12 @@
       "artifactName": "ChemVault-Model-Setup-${version}-${os}-${arch}.${ext}",
       "oneClick": false,
       "perMachine": false,
+      "language": "1033",
+      "installerLanguages": [
+        "en_US"
+      ],
+      "multiLanguageInstaller": false,
+      "displayLanguageSelector": false,
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,

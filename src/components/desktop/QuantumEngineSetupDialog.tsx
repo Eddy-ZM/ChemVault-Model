@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { EngineSpinner } from '@/components/ui/LoadingState';
 import type {
   CommercialQuantumEngineKind,
@@ -323,14 +323,17 @@ function InstallView({
             <div className="cv-progress-fill h-full rounded-full bg-sky-700" style={{ width: `${progress.percent}%` }} />
           </div>
           <div className="mt-4 grid gap-3 lg:grid-cols-2">
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Step explanation</p>
-              <p className="mt-2 text-sm leading-6 text-slate-700">{explainInstallStep(progress)}</p>
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Terminal interpretation</p>
-              <p className="mt-2 text-sm leading-6 text-slate-700">{explainTerminalOutput(progress.outputTail)}</p>
-            </div>
+            <InstallMonitorCard title="Live operation" value={progress.operation || progress.message} />
+            <InstallMonitorCard title="Current phase" value={installPhaseLabel(progress.phase)} />
+            {progress.command ? (
+              <InstallMonitorCard title="Running command" value={progress.command} monospace wide />
+            ) : null}
+            {progress.targetPath ? (
+              <InstallMonitorCard title="Target path" value={progress.targetPath} monospace />
+            ) : null}
+            {progress.cwd ? (
+              <InstallMonitorCard title="Working directory" value={progress.cwd} monospace />
+            ) : null}
           </div>
           {progress.attempt || progress.diagnosis || progress.repairAction ? (
             <div className="mt-4 grid gap-3 lg:grid-cols-3">
@@ -346,9 +349,7 @@ function InstallView({
             </div>
           ) : null}
           {progress.outputTail ? (
-            <pre className="mt-4 max-h-52 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3 text-xs leading-5 text-slate-100">
-              {progress.outputTail}
-            </pre>
+            <AutoScrollTerminal value={progress.outputTail} />
           ) : null}
         </div>
       ) : null}
@@ -367,12 +368,28 @@ function InstallView({
   );
 }
 
-function InstallMonitorCard({ title, value }: { title: string; value: string }) {
+function InstallMonitorCard({ monospace = false, title, value, wide = false }: { monospace?: boolean; title: string; value: string; wide?: boolean }) {
   return (
-    <div className="rounded-xl border border-sky-100 bg-sky-50 p-3">
+    <div className={`rounded-xl border border-sky-100 bg-sky-50 p-3 ${wide ? 'lg:col-span-2' : ''}`}>
       <p className="text-xs font-bold uppercase tracking-[0.14em] text-sky-700">{title}</p>
-      <p className="mt-2 text-xs leading-5 text-sky-900">{value}</p>
+      <p className={`mt-2 break-words text-xs leading-5 text-sky-900 ${monospace ? 'font-mono' : ''}`}>{value}</p>
     </div>
+  );
+}
+
+function AutoScrollTerminal({ value }: { value: string }) {
+  const terminalRef = useRef<HTMLPreElement>(null);
+
+  useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.scrollTop = terminal.scrollHeight;
+  }, [value]);
+
+  return (
+    <pre ref={terminalRef} className="mt-4 max-h-52 overflow-auto whitespace-pre-wrap rounded-xl bg-slate-950 p-3 text-xs leading-5 text-slate-100">
+      {value}
+    </pre>
   );
 }
 
@@ -597,35 +614,17 @@ function normalizeCommercialDiscovery(engine: CommercialQuantumEngineKind, value
   };
 }
 
-function explainInstallStep(progress: LocalEngineInstallProgress) {
-  switch (progress.phase) {
-    case 'checking':
-      return 'ChemVault is checking whether Python 3 is available and whether a usable PySCF environment already exists.';
-    case 'creating-environment':
-      return 'The command is creating an isolated Python virtual environment under the ChemVault user data folder.';
-    case 'installing-dependencies':
-      return 'The command is upgrading pip, wheel, and setuptools so Python can install scientific packages reliably.';
-    case 'installing-engine':
-      return 'The command is downloading and installing PySCF into the managed environment. This step depends on network speed and package availability.';
-    case 'verifying':
-      return 'ChemVault is importing PySCF from the new environment and reading its version to verify that the engine can run.';
-    case 'complete':
-      return 'The engine has passed verification and can be used for local DFT/HF calculations.';
-    case 'error':
-      return 'The setup command returned an error or the verification step did not pass.';
-    default:
-      return 'ChemVault is processing the engine setup step.';
-  }
-}
-
-function explainTerminalOutput(output?: string) {
-  const text = output || '';
-  if (!text.trim()) return 'No terminal output yet. The process is starting or waiting for the next command response.';
-  if (/error|failed|traceback|could not/iu.test(text)) return 'The terminal output contains an error signal. Check the last lines for the package, Python, or network failure that stopped setup.';
-  if (/successfully installed|successfully uninstalled/iu.test(text)) return 'The package manager reports a successful package operation. ChemVault will still verify PySCF before marking the engine ready.';
-  if (/requirement already satisfied/iu.test(text)) return 'Some dependencies are already installed, so pip is reusing the existing packages instead of downloading them again.';
-  if (/downloading|collecting/iu.test(text)) return 'pip is resolving or downloading Python packages. This is expected during the PySCF installation step.';
-  return 'The terminal output is informational. ChemVault will interpret the final process result after verification finishes.';
+function installPhaseLabel(phase: LocalEngineInstallProgress['phase']) {
+  const labels: Record<LocalEngineInstallProgress['phase'], string> = {
+    checking: 'Checking environment',
+    'creating-environment': 'Creating environment',
+    'installing-dependencies': 'Installing dependencies',
+    'installing-engine': 'Installing engine',
+    verifying: 'Verifying engine',
+    complete: 'Complete',
+    error: 'Needs attention'
+  };
+  return labels[phase];
 }
 
 function explainInstallResult(result: LocalEngineInstallResult) {

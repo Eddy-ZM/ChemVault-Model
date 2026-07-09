@@ -57,6 +57,7 @@ type Props = {
 
 type QuantumExportContext = {
   charge: number;
+  includeLog?: boolean;
   metadata?: Metadata;
   unpairedElectrons: number;
 };
@@ -215,6 +216,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   const [calculationProgress, setCalculationProgress] = useState<QuantumCalculationProgress | null>(null);
   const [enginePreferenceNotice, setEnginePreferenceNotice] = useState<QuantumEnginePreference | null>(null);
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
+  const [exportIncludeLog, setExportIncludeLog] = useState(false);
 
   useEffect(() => {
     const preference = loadQuantumEnginePreference();
@@ -516,6 +518,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       `${exportBaseName}_${exportTimestamp()}_report.html`,
       buildQuantumReportHtml(result, {
         charge,
+        includeLog: exportIncludeLog,
         metadata,
         unpairedElectrons
       }),
@@ -540,7 +543,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     if (!result) return;
     downloadBinary(
       `${exportBaseName}_${exportTimestamp()}_data.xlsx`,
-      createQuantumExcelWorkbook(result, { charge, metadata, unpairedElectrons }),
+      createQuantumExcelWorkbook(result, { charge, includeLog: exportIncludeLog, metadata, unpairedElectrons }),
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     );
   }
@@ -549,7 +552,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     if (!result) return;
     downloadBinary(
       `${exportBaseName}_${exportTimestamp()}_report.docx`,
-      createQuantumWordDocument(result, { charge, metadata, unpairedElectrons }),
+      createQuantumWordDocument(result, { charge, includeLog: exportIncludeLog, metadata, unpairedElectrons }),
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     );
   }
@@ -558,7 +561,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     if (!result) return;
     downloadBinary(
       `${exportBaseName}_${exportTimestamp()}_report.pdf`,
-      createQuantumPdfDocument(result, { charge, metadata, unpairedElectrons }),
+      createQuantumPdfDocument(result, { charge, includeLog: exportIncludeLog, metadata, unpairedElectrons }),
       'application/pdf'
     );
   }
@@ -883,8 +886,17 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
             <div>
               <p className="text-sm font-bold text-slate-950">Calculation export</p>
               <p className="mt-1 text-xs leading-5 text-slate-500">
-                Export the completed summary, charges, vectors, warnings, engine log, document properties, and ChemVault copyright footer.
+                Export the completed summary, charges, vectors, warnings, document properties, and ChemVault copyright footer.
               </p>
+              <label className="mt-3 inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700">
+                <input
+                  type="checkbox"
+                  checked={exportIncludeLog}
+                  onChange={(event) => setExportIncludeLog(event.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-sky-700"
+                />
+                Include engine log in report files
+              </label>
             </div>
             <div className="flex flex-wrap gap-2">
               <button
@@ -1386,6 +1398,7 @@ function exportTimestamp() {
 
 function buildQuantumReportHtml(result: QuantumCalculationResult, context: QuantumExportContext) {
   const generatedAt = new Date().toLocaleString();
+  const includeLog = Boolean(context.includeLog);
   const log = result.outputLog || result.outputTail || 'No engine log was returned.';
   const warnings = result.warnings.length
     ? result.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join('')
@@ -1478,10 +1491,10 @@ function buildQuantumReportHtml(result: QuantumCalculationResult, context: Quant
       <ul>${warnings}</ul>
     </section>
 
-    <section class="panel">
+    ${includeLog ? `<section class="panel">
       <h2>Engine log</h2>
       <pre>${escapeHtml(log)}</pre>
-    </section>
+    </section>` : ''}
 
     <footer class="watermark">${escapeHtml(CHEMVAULT_COPYRIGHT_NOTICE)}</footer>
   </main>

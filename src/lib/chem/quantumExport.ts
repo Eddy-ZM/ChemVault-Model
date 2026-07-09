@@ -11,6 +11,7 @@ export type QuantumExportMetadata = {
 
 export type QuantumExportDocumentContext = {
   charge: number;
+  includeLog?: boolean;
   metadata?: QuantumExportMetadata;
   unpairedElectrons: number;
 };
@@ -39,17 +40,17 @@ type ZipEntry = {
 
 export function createQuantumExcelWorkbook(result: QuantumCalculationResult, context: QuantumExportDocumentContext) {
   const generatedAt = new Date();
+  const includeLog = Boolean(context.includeLog);
   const summaryRows = quantumSummaryRows(result, context, generatedAt);
   const warnings = result.warnings.length ? result.warnings : ['No warnings returned.'];
   const chargeRows = result.charges.map((atom) => [String(atom.index), atom.element, `${formatSigned(atom.charge)} e`]);
-  const logLines = boundedLogLines(logText(result));
 
   const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <workbookPr/>
   <sheets>
     <sheet name="Summary" sheetId="1" r:id="rId1"/>
-    <sheet name="Engine Log" sheetId="2" r:id="rId2"/>
+    ${includeLog ? '<sheet name="Engine Log" sheetId="2" r:id="rId2"/>' : ''}
   </sheets>
 </workbook>`;
 
@@ -66,29 +67,36 @@ export function createQuantumExcelWorkbook(result: QuantumCalculationResult, con
     [],
     ['Copyright', CHEMVAULT_COPYRIGHT_NOTICE]
   ];
-  const logSheetRows = [
-    ['ChemVault Quantum Calculation Engine Log'],
-    ['Generated', generatedAt.toISOString()],
-    ['Copyright', CHEMVAULT_COPYRIGHT_NOTICE],
-    [],
-    ...logLines.map((line) => [line])
-  ];
 
-  return createZip([
-    { path: '[Content_Types].xml', content: xlsxContentTypes() },
+  const entries: ZipEntry[] = [
+    { path: '[Content_Types].xml', content: xlsxContentTypes(includeLog) },
     { path: '_rels/.rels', content: packageRelationships('xlsx') },
     { path: 'docProps/core.xml', content: coreProperties(generatedAt) },
     { path: 'docProps/app.xml', content: appProperties('Microsoft Excel') },
     { path: 'docProps/custom.xml', content: customProperties() },
     { path: 'xl/workbook.xml', content: workbook },
-    { path: 'xl/_rels/workbook.xml.rels', content: workbookRelationships() },
+    { path: 'xl/_rels/workbook.xml.rels', content: workbookRelationships(includeLog) },
     { path: 'xl/worksheets/sheet1.xml', content: worksheetXml(summarySheetRows) },
-    { path: 'xl/worksheets/sheet2.xml', content: worksheetXml(logSheetRows) }
-  ]);
+  ];
+
+  if (includeLog) {
+    const logLines = boundedLogLines(logText(result));
+    const logSheetRows = [
+      ['ChemVault Quantum Calculation Engine Log'],
+      ['Generated', generatedAt.toISOString()],
+      ['Copyright', CHEMVAULT_COPYRIGHT_NOTICE],
+      [],
+      ...logLines.map((line) => [line])
+    ];
+    entries.push({ path: 'xl/worksheets/sheet2.xml', content: worksheetXml(logSheetRows) });
+  }
+
+  return createZip(entries);
 }
 
 export function createQuantumWordDocument(result: QuantumCalculationResult, context: QuantumExportDocumentContext) {
   const generatedAt = new Date();
+  const includeLog = Boolean(context.includeLog);
   const warnings = result.warnings.length ? result.warnings : ['No warnings returned.'];
   const body = [
     docParagraph(CHEMVAULT_TITLE, true),
@@ -107,8 +115,12 @@ export function createQuantumWordDocument(result: QuantumCalculationResult, cont
     ]),
     docParagraph('Warnings', true),
     ...warnings.map((warning) => docParagraph(warning)),
-    docParagraph('Engine Log', true),
-    ...logText(result).split(/\r?\n/u).map((line) => docParagraph(line || ' ')),
+    ...(includeLog
+      ? [
+          docParagraph('Engine Log', true),
+          ...logText(result).split(/\r?\n/u).map((line) => docParagraph(line || ' '))
+        ]
+      : []),
     docParagraph(CHEMVAULT_COPYRIGHT_NOTICE, true),
     '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>'
   ].join('');
@@ -132,6 +144,7 @@ export function createQuantumWordDocument(result: QuantumCalculationResult, cont
 
 export function createQuantumPdfDocument(result: QuantumCalculationResult, context: QuantumExportDocumentContext) {
   const generatedAt = new Date();
+  const includeLog = Boolean(context.includeLog);
   const layout = createPdfLayout();
   drawPdfHero(layout, result, context, generatedAt);
   drawPdfMetricGrid(layout, [
@@ -144,7 +157,7 @@ export function createQuantumPdfDocument(result: QuantumCalculationResult, conte
   if (result.dipoleDebye) drawPdfDipoleCard(layout, result);
   drawPdfChargeTable(layout, result);
   if (result.warnings.length > 0) drawPdfWarnings(layout, result.warnings);
-  drawPdfEngineLog(layout, result);
+  if (includeLog) drawPdfEngineLog(layout, result);
   const pageContents = finishPdfLayout(layout);
 
   const objects: string[] = [
@@ -570,14 +583,14 @@ function docTable(rows: string[][]) {
     .join('')}</w:tbl>`;
 }
 
-function xlsxContentTypes() {
+function xlsxContentTypes(includeLog = true) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-  <Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+  ${includeLog ? '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' : ''}
   <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
   <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
   <Override PartName="/docProps/custom.xml" ContentType="application/vnd.openxmlformats-officedocument.custom-properties+xml"/>
@@ -612,11 +625,11 @@ function packageRelationships(kind: 'xlsx' | 'docx') {
 </Relationships>`;
 }
 
-function workbookRelationships() {
+function workbookRelationships(includeLog = true) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-  <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>
+  ${includeLog ? '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>' : ''}
 </Relationships>`;
 }
 

@@ -883,7 +883,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
             <div>
               <p className="text-sm font-bold text-slate-950">Calculation export</p>
               <p className="mt-1 text-xs leading-5 text-slate-500">
-                Export the completed summary, charges, vectors, warnings, engine log, document properties, and fixed ChemVault copyright metadata.
+                Export the completed summary, charges, vectors, warnings, engine log, document properties, and ChemVault copyright footer.
               </p>
             </div>
             <div className="flex flex-wrap gap-2">

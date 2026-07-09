@@ -15,7 +15,7 @@ function downloadBlob(name: string, blob: Blob) {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  URL.revokeObjectURL(url);
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 export type FileFormat = 'sdf' | 'mol' | 'xyz' | 'pdb' | 'cif' | 'smi' | 'smiles' | 'txt';

@@ -1,0 +1,18 @@
+ Entering Gaussian System
+ #p B3LYP/6-31G(d) TD(NStates=10) NMR Pop=NBORead
+
+ SCF Done:  E(RB3LYP) =  -40.1234567890     A.U. after    8 cycles
+
+ Excited State   1:      Singlet-A      4.1123 eV  301.49 nm  f=0.0214
+ Excited State   2:      Singlet-A      5.0050 eV  247.72 nm  f=0.0000
+
+ Natural Population Analysis:
+  Atom No    Charge        Core      Valence    Rydberg      Total
+    1 C       0.1120      1.9990      3.8890     0.0000     5.8880
+    2 O      -0.5120      1.9990      6.5130     0.0000     8.5120
+ Summary of Natural Population Analysis
+
+  1  C    Isotropic =   128.4567   Anisotropy =   12.3456
+  2  O    Isotropic =   220.1250   Anisotropy =   18.0000
+
+ Normal termination of Gaussian 16

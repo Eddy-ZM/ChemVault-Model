@@ -142,6 +142,19 @@ export function DesktopUpdateGate() {
             : `You can continue briefly, but this device will be asked again after ${deferralHours} hours.`}
         </p>
 
+        <div className="mt-4 grid gap-2 rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs text-slate-600 sm:grid-cols-2">
+          <p>
+            <span className="block font-semibold uppercase tracking-[0.12em] text-slate-400">Current</span>
+            <span className="mt-1 block font-mono text-slate-800">{status.currentVersion}</span>
+            {status.currentBuildId ? <span className="mt-1 block break-all font-mono text-[11px]">{status.currentBuildId}</span> : null}
+          </p>
+          <p>
+            <span className="block font-semibold uppercase tracking-[0.12em] text-slate-400">Latest</span>
+            <span className="mt-1 block font-mono text-slate-800">{status.latestVersion}</span>
+            {status.latestBuildId ? <span className="mt-1 block break-all font-mono text-[11px]">{status.latestBuildId}</span> : null}
+          </p>
+        </div>
+
         {checking ? (
           <LoadingState
             compact
@@ -170,6 +183,15 @@ export function DesktopUpdateGate() {
           >
             {checking ? 'Checking' : 'Check again'}
           </button>
+          {status.releaseNotesUrl ? (
+            <button
+              type="button"
+              onClick={() => window.open(status.releaseNotesUrl, '_blank', 'noopener,noreferrer')}
+              className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Release notes
+            </button>
+          ) : null}
           <button
             type="button"
             onClick={() => void openUpdate()}

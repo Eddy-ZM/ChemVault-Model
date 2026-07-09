@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
 const { TextDecoder } = require('node:util');
+const gaussianParsers = require('./gaussian-parsers.cjs');
 
 const APP_TITLE = 'ChemVault Model';
 const DEFAULT_API_BASE = 'https://model.chemvault.science/api/chem';
@@ -1010,13 +1011,16 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
     const fileOutput = await readOptionalText(job.outputPath);
     const output = [processResult.stdout, processResult.stderr, fileOutput].filter(Boolean).join('\n').trim();
     emitCalculationProgress(onProgress, engineKind, 'reading-output', 86, `Reading ${engineLabel} output files.`, outputTail(output), startedAt);
+    const gaussianPopulation = engineKind === 'gaussian' ? parseGaussianPopulation(output) : null;
     const energyHartree = engineKind === 'gaussian' ? parseGaussianEnergy(output) : parseOrcaEnergy(output);
     const dipoleDebye = engineKind === 'gaussian' ? parseGaussianDipole(output) : parseOrcaDipole(output);
-    const charges = engineKind === 'gaussian' ? parseGaussianCharges(output) : parseOrcaCharges(output);
+    const charges = engineKind === 'gaussian' ? gaussianPopulation.charges : parseOrcaCharges(output);
     const frontierOrbitals = engineKind === 'gaussian' ? parseGaussianFrontierOrbitals(output) : null;
     const frequencySummary = engineKind === 'gaussian' ? parseGaussianFrequencySummary(output) : null;
     const thermochemistry = engineKind === 'gaussian' ? parseGaussianThermochemistry(output) : null;
     const optimizedXyz = engineKind === 'gaussian' ? parseGaussianOptimizedXyz(output) : null;
+    const excitedStates = engineKind === 'gaussian' ? parseGaussianExcitedStates(output) : null;
+    const nmrShielding = engineKind === 'gaussian' ? parseGaussianNmrShielding(output) : null;
     emitCalculationProgress(onProgress, engineKind, 'parsing-output', 94, `Parsing ${engineLabel} energy, dipole, and population analysis.`, outputTail(output), startedAt);
     const completedOk = !processResult.cancelled && processResult.exitCode === 0 && (engineKind !== 'gaussian' || /Normal termination of Gaussian/iu.test(output));
     const warnings = [];
@@ -1045,11 +1049,13 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
       energyHartree,
       dipoleDebye,
       charges,
-      chargeModel: `${engineLabel} Mulliken population analysis`,
+      chargeModel: engineKind === 'gaussian' ? gaussianPopulation.model : `${engineLabel} Mulliken population analysis`,
       frontierOrbitals,
       frequencySummary,
       thermochemistry,
       optimizedXyz,
+      excitedStates,
+      nmrShielding,
       elapsedMs: Date.now() - startedAt,
       warnings,
       outputTail: outputTail(output),
@@ -2017,36 +2023,7 @@ function diagnoseExternalEngineFailure(engineKind, processResult, output, config
 }
 
 function summarizeGaussianError(output) {
-  const lines = String(output || '').split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
-  if (lines.length === 0) return '';
-
-  const markers = [
-    /Error termination/iu,
-    /QPErr/iu,
-    /Erroneous write/iu,
-    /End of file/iu,
-    /Syntax error/iu,
-    /Illegal/iu,
-    /Unknown center/iu,
-    /Charge and multiplicity/iu,
-    /Basis set data/iu,
-    /Convergence failure/iu,
-    /Problem with the distance matrix/iu,
-    /Atoms too close/iu,
-    /No data on checkpoint file/iu
-  ];
-  const selected = [];
-
-  for (let index = 0; index < lines.length; index += 1) {
-    if (!markers.some((marker) => marker.test(lines[index]))) continue;
-    const start = Math.max(0, index - 2);
-    const end = Math.min(lines.length, index + 3);
-    for (const line of lines.slice(start, end)) {
-      if (!selected.includes(line)) selected.push(line);
-    }
-  }
-
-  return selected.slice(-8).join(' ');
+  return gaussianParsers.summarizeGaussianLogError(output);
 }
 
 async function openLocalEngineFolder() {
@@ -3705,132 +3682,43 @@ function parseDipole(output) {
 }
 
 function parseGaussianEnergy(output) {
-  const matches = Array.from(output.matchAll(/SCF\s+Done:\s+E\([^)]+\)\s+=\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/giu));
-  const last = matches.at(-1);
-  return last ? Number(last[1]) : null;
+  return gaussianParsers.parseGaussianEnergy(output);
 }
 
 function parseGaussianDipole(output) {
-  const matches = Array.from(output.matchAll(/X=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)\s+Y=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)\s+Z=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)\s+Tot=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/giu));
-  const last = matches.at(-1);
-  return last
-    ? {
-        x: Number(last[1]),
-        y: Number(last[2]),
-        z: Number(last[3]),
-        total: Number(last[4])
-      }
-    : null;
+  return gaussianParsers.parseGaussianDipole(output);
 }
 
 function parseGaussianCharges(output) {
-  const section = output.match(/Mulliken\s+charges:[\s\S]*?(?:Sum\s+of\s+Mulliken\s+charges|Dipole moment|Quadrupole moment|Job cpu time)/iu)?.[0] || '';
-  const charges = [];
-  for (const match of section.matchAll(/^\s*(\d+)\s+([A-Za-z]{1,2})\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/gmu)) {
-    charges.push({
-      index: Number(match[1]),
-      element: match[2],
-      charge: Number(match[3])
-    });
-  }
-  return charges;
+  return gaussianParsers.parseGaussianCharges(output);
+}
+
+function parseGaussianPopulation(output) {
+  return gaussianParsers.parseGaussianPopulation(output);
 }
 
 function parseGaussianFrontierOrbitals(output) {
-  const hartreeToEv = 27.211386245988;
-  const alphaOcc = [];
-  const alphaVirt = [];
-  const betaOcc = [];
-  const betaVirt = [];
-  for (const line of String(output || '').split(/\r?\n/u)) {
-    const match = line.match(/^\s*(Alpha|Beta)\s+(occ\.|virt\.)\s+eigenvalues\s+--\s+(.+)$/iu);
-    if (!match) continue;
-    const target = match[1].toLowerCase() === 'alpha'
-      ? match[2].toLowerCase().startsWith('occ') ? alphaOcc : alphaVirt
-      : match[2].toLowerCase().startsWith('occ') ? betaOcc : betaVirt;
-    target.push(...numbersFromLine(match[3]));
-  }
-
-  const alphaHomo = alphaOcc.length ? alphaOcc[alphaOcc.length - 1] * hartreeToEv : null;
-  const alphaLumo = alphaVirt.length ? alphaVirt[0] * hartreeToEv : null;
-  const betaHomo = betaOcc.length ? betaOcc[betaOcc.length - 1] * hartreeToEv : null;
-  const betaLumo = betaVirt.length ? betaVirt[0] * hartreeToEv : null;
-  const gap = alphaHomo !== null && alphaLumo !== null ? alphaLumo - alphaHomo : null;
-  if (alphaHomo === null && alphaLumo === null && betaHomo === null && betaLumo === null) return null;
-  return {
-    alphaHomoEv: alphaHomo,
-    alphaLumoEv: alphaLumo,
-    betaHomoEv: betaHomo,
-    betaLumoEv: betaLumo,
-    gapEv: gap
-  };
+  return gaussianParsers.parseGaussianFrontierOrbitals(output);
 }
 
 function parseGaussianFrequencySummary(output) {
-  const frequencies = [];
-  const intensities = [];
-  for (const line of String(output || '').split(/\r?\n/u)) {
-    const frequencyMatch = line.match(/^\s*Frequencies\s+--\s+(.+)$/iu);
-    if (frequencyMatch) {
-      frequencies.push(...numbersFromLine(frequencyMatch[1]));
-      continue;
-    }
-    const intensityMatch = line.match(/^\s*IR\s+Inten\s+--\s+(.+)$/iu);
-    if (intensityMatch) {
-      intensities.push(...numbersFromLine(intensityMatch[1]));
-    }
-  }
-  if (!frequencies.length) return null;
-  return {
-    imaginaryCount: frequencies.filter((value) => value < 0).length,
-    lowestFrequencyCm1: Math.min(...frequencies),
-    modes: frequencies.slice(0, 24).map((value, index) => ({
-      valueCm1: value,
-      intensityKmMol: Number.isFinite(intensities[index]) ? intensities[index] : null
-    }))
-  };
+  return gaussianParsers.parseGaussianFrequencySummary(output);
 }
 
 function parseGaussianThermochemistry(output) {
-  const text = String(output || '');
-  const zeroPointCorrectionHartree = numberAfter(text, /Zero-point\s+correction=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/iu);
-  const thermalCorrectionToEnergyHartree = numberAfter(text, /Thermal\s+correction\s+to\s+Energy=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/iu);
-  const thermalCorrectionToEnthalpyHartree = numberAfter(text, /Thermal\s+correction\s+to\s+Enthalpy=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/iu);
-  const thermalCorrectionToGibbsHartree = numberAfter(text, /Thermal\s+correction\s+to\s+Gibbs\s+Free\s+Energy=\s*([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/iu);
-  if (
-    zeroPointCorrectionHartree === null &&
-    thermalCorrectionToEnergyHartree === null &&
-    thermalCorrectionToEnthalpyHartree === null &&
-    thermalCorrectionToGibbsHartree === null
-  ) {
-    return null;
-  }
-  return {
-    zeroPointCorrectionHartree,
-    thermalCorrectionToEnergyHartree,
-    thermalCorrectionToEnthalpyHartree,
-    thermalCorrectionToGibbsHartree
-  };
+  return gaussianParsers.parseGaussianThermochemistry(output);
 }
 
 function parseGaussianOptimizedXyz(output) {
-  const blocks = Array.from(String(output || '').matchAll(/(?:Standard|Input)\s+orientation:\s*\n\s*-+\s*\n[\s\S]*?\n\s*-+\s*\n([\s\S]*?)\n\s*-+/giu));
-  const last = blocks.at(-1);
-  if (!last) return null;
-  const atoms = [];
-  for (const line of last[1].split(/\r?\n/u)) {
-    const parts = line.trim().split(/\s+/u);
-    if (parts.length < 6) continue;
-    const atomicNumber = Number(parts[1]);
-    const x = Number(parts[3]);
-    const y = Number(parts[4]);
-    const z = Number(parts[5]);
-    const element = atomicSymbol(atomicNumber);
-    if (!element || ![x, y, z].every(Number.isFinite)) continue;
-    atoms.push(`${element} ${formatCoordinate(x)} ${formatCoordinate(y)} ${formatCoordinate(z)}`);
-  }
-  if (!atoms.length) return null;
-  return [String(atoms.length), 'Optimized geometry parsed by ChemVault Model', ...atoms, ''].join('\n');
+  return gaussianParsers.parseGaussianOptimizedXyz(output);
+}
+
+function parseGaussianExcitedStates(output) {
+  return gaussianParsers.parseGaussianExcitedStates(output);
+}
+
+function parseGaussianNmrShielding(output) {
+  return gaussianParsers.parseGaussianNmrShielding(output);
 }
 
 function parseOrcaEnergy(output) {

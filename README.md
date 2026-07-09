@@ -112,6 +112,12 @@ ChemVault Model separates quantum-related features by platform:
   executable, and parses output for energy, dipole moment, and Mulliken charges.
 - Apple app: no required quantum engine integration for this project stage.
 
+The desktop workflow includes a structure preparation step for quantum input.
+Users can standardize the current XYZ geometry before calculation, export the
+prepared XYZ for review, and switch back to the loaded structure at any time.
+This preparation step cleans coordinate formatting and centers the geometry; it
+does not replace force-field, DFT, or ab initio optimization.
+
 The Windows desktop app checks for xTB in this order:
 
 ```text
@@ -157,13 +163,18 @@ generated Gaussian input, apply common route templates, and open the generated
 files in GaussView when it is installed. ChemVault adds workflow-level Gaussian
 support through quick xTB screening before Gaussian refinement, common Gaussian
 task templates, parsed log highlights, failure diagnosis, recommended next
-actions, and report exports that include the ChemVault review summary. The
+actions, one-click route repair suggestions for common Gaussian failures, and
+report exports that include the ChemVault review summary. The
 Gaussian bridge includes templates for single point, optimization, frequency,
 Opt+Freq, TD-DFT, NMR, SMD solvent, transition-state search, IRC, wavefunction
 stability, frontier orbitals, and NBO when the user's local Gaussian
 installation supports the requested analysis. ChemVault parses additional
 Gaussian results when present, including HOMO/LUMO energies, gap, frequency
-summary, thermal corrections, and the latest optimized geometry as XYZ.
+summary, thermal corrections, TD-DFT excited states, NMR isotropic shielding,
+natural population charges, and the latest optimized geometry as XYZ. The app
+also includes Gaussian log compatibility samples and export file checks so
+future updates can verify that PDF, Word, Excel, and native Gaussian package
+exports remain readable.
 
 ### GitHub Actions
 

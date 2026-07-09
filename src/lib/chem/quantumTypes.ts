@@ -234,6 +234,18 @@ export type QuantumCalculationResult = {
     thermalCorrectionToGibbsHartree: number | null;
   } | null;
   optimizedXyz?: string | null;
+  excitedStates?: Array<{
+    state: number;
+    label: string;
+    energyEv: number;
+    wavelengthNm: number;
+    oscillatorStrength?: number | null;
+  }> | null;
+  nmrShielding?: Array<{
+    index: number;
+    element: string;
+    isotropicPpm: number;
+  }> | null;
   elapsedMs: number;
   warnings: string[];
   outputTail: string;

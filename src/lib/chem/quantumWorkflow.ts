@@ -27,6 +27,14 @@ export type QuantumPreparationStep = {
   detail: string;
 };
 
+export type QuantumStructurePreparationResult = {
+  ok: boolean;
+  xyz: string | null;
+  summary: string;
+  changes: string[];
+  warnings: string[];
+};
+
 export type QuantumPreflightResult = {
   atomCount: number;
   atoms: QuantumWorkflowAtom[];
@@ -45,6 +53,11 @@ export type QuantumPreflightResult = {
 export type QuantumResultDiagnosis = {
   qualityFactors?: string[];
   qualityScore?: number;
+  routeFixes?: Array<{
+    label: string;
+    routeOption: string;
+    detail: string;
+  }>;
   severity: 'success' | 'warning' | 'error';
   title: string;
   summary: string;
@@ -433,6 +446,61 @@ export function validateQuantumPreflight(options: {
   };
 }
 
+export function prepareQuantumStructure(xyz: string | null | undefined): QuantumStructurePreparationResult {
+  const issues: QuantumWorkflowIssue[] = [];
+  const atoms = parseXyzAtoms(xyz, issues);
+  if (!atoms.length || issues.some((issue) => issue.severity === 'error')) {
+    return {
+      ok: false,
+      xyz: null,
+      summary: 'The current structure could not be standardized because the XYZ geometry has blocking issues.',
+      changes: [],
+      warnings: issues.map((issue) => `${issue.title}: ${issue.detail}`)
+    };
+  }
+
+  const centroid = atoms.reduce(
+    (accumulator, atom) => ({
+      x: accumulator.x + atom.x / atoms.length,
+      y: accumulator.y + atom.y / atoms.length,
+      z: accumulator.z + atom.z / atoms.length
+    }),
+    { x: 0, y: 0, z: 0 }
+  );
+  const normalizedAtoms = atoms.map((atom) => ({
+    ...atom,
+    x: cleanCoordinate(atom.x - centroid.x),
+    y: cleanCoordinate(atom.y - centroid.y),
+    z: cleanCoordinate(atom.z - centroid.z)
+  }));
+  const fragmentCount = estimateFragmentCount(atoms);
+  const changes = [
+    'Centered the geometry around its coordinate centroid.',
+    'Normalized element symbols and XYZ coordinate precision.',
+    'Generated a clean XYZ block for quantum-engine input and export.'
+  ];
+  const warnings = issues
+    .filter((issue) => issue.severity !== 'info')
+    .map((issue) => `${issue.title}: ${issue.detail}`);
+
+  if (fragmentCount > 1) {
+    warnings.push(`The standardized geometry still appears to contain ${fragmentCount} disconnected fragments.`);
+  }
+
+  return {
+    ok: true,
+    xyz: [
+      String(normalizedAtoms.length),
+      'Prepared by ChemVault Model for quantum calculation',
+      ...normalizedAtoms.map((atom) => `${atom.element} ${formatPreparedCoordinate(atom.x)} ${formatPreparedCoordinate(atom.y)} ${formatPreparedCoordinate(atom.z)}`),
+      ''
+    ].join('\n'),
+    summary: 'Structure standardized for ChemVault quantum input. This is not a force-field or DFT optimization.',
+    changes,
+    warnings
+  };
+}
+
 export function diagnoseQuantumCalculation(
   result: QuantumCalculationResult,
   preflight?: QuantumPreflightResult
@@ -484,13 +552,37 @@ export function diagnoseQuantumCalculation(
   if (/convergence failure|scf has not converged|convergence criterion not met|failed to converge/iu.test(text)) {
     suggestedActions.push('Try SCF=XQC or a smaller basis set, then rerun.');
     suggestedActions.push('Use xTB or Opt first to improve the starting geometry.');
-    return failureDiagnosis('SCF convergence failed', 'The electronic structure iteration did not converge cleanly.', highlights, suggestedActions, quality);
+    return failureDiagnosis('SCF convergence failed', 'The electronic structure iteration did not converge cleanly.', highlights, suggestedActions, quality, [
+      {
+        label: 'Add SCF repair',
+        routeOption: 'SCF=(XQC,MaxCycle=512)',
+        detail: 'Adds a more robust SCF fallback and allows more cycles.'
+      }
+    ]);
+  }
+
+  if (/link\s+9999|l9999\.exe|maximum number of optimization cycles|optimization stopped|number of steps exceeded/iu.test(text)) {
+    suggestedActions.push('Use a better starting geometry or run a quick xTB optimization before Gaussian refinement.');
+    suggestedActions.push('Try Opt=CalcFC or increase optimization cycles if the current structure is chemically reasonable.');
+    return failureDiagnosis('Optimization did not converge', 'Gaussian stopped before reaching a stable optimized geometry.', highlights, suggestedActions, quality, [
+      {
+        label: 'Add Opt repair',
+        routeOption: 'Opt=(CalcFC,MaxCycles=200)',
+        detail: 'Requests an initial force-constant estimate and gives the optimizer more cycles.'
+      }
+    ]);
   }
 
   if (/basis set data|basis functions|unknown center|atomic number out of range|pseudo|ecp/iu.test(text)) {
     suggestedActions.push('Choose a basis set that supports every element in the structure.');
     suggestedActions.push('For heavy elements, use an appropriate ECP or a basis family available in your Gaussian installation.');
     return failureDiagnosis('Basis set or element mismatch', 'The selected method or basis set does not match the molecular elements.', highlights, suggestedActions, quality);
+  }
+
+  if (/qperr|unknown keyword|unrecognized route|end of file in zsymb|symbolic z-matrix/iu.test(text)) {
+    suggestedActions.push('Open the Gaussian input preview and simplify custom route options.');
+    suggestedActions.push('Export the GJF and verify route syntax in GaussView if the route is specialized.');
+    return failureDiagnosis('Gaussian input syntax issue', 'Gaussian rejected a route keyword or input section.', highlights, suggestedActions, quality);
   }
 
   if (/license|licensed|permission|access denied|denied/iu.test(text)) {
@@ -507,6 +599,30 @@ export function diagnoseQuantumCalculation(
   if (/erroneous write|disk|scratch|no space|quota/iu.test(text)) {
     suggestedActions.push('Free disk space or change the Gaussian scratch directory.');
     return failureDiagnosis('Scratch or disk write issue', 'The engine could not write required temporary or checkpoint data.', highlights, suggestedActions, quality);
+  }
+
+  if (/checkpoint file|no data on checkpoint|chkbasis|fileio|read-write file/iu.test(text)) {
+    suggestedActions.push('Run a fresh calculation to create a new checkpoint, then generate FCHK or CUBE again.');
+    suggestedActions.push('Avoid Guess=Read or Geom=Checkpoint unless a matching checkpoint exists.');
+    return failureDiagnosis('Checkpoint file issue', 'Gaussian could not read or write the checkpoint data required by this job.', highlights, suggestedActions, quality);
+  }
+
+  if (/galloc|malloc|not enough memory|memory allocation|ntrerr/iu.test(text)) {
+    suggestedActions.push('Reduce method/basis cost, use a smaller active region, or adjust Gaussian memory settings.');
+    suggestedActions.push('Use xTB screening before sending the final structure to Gaussian.');
+    return failureDiagnosis('Memory allocation issue', 'Gaussian likely exceeded available memory or scratch capacity.', highlights, suggestedActions, quality);
+  }
+
+  if (/nbo.*not found|nbo.*unavailable|unknown keyword.*nbo|pop=nbo/iu.test(text)) {
+    suggestedActions.push('Confirm that licensed NBO support is installed for this Gaussian setup.');
+    suggestedActions.push('Rerun with Pop=Full or another standard population route if NBO is not available.');
+    return failureDiagnosis('NBO support is unavailable', 'The selected local Gaussian/NBO installation could not run the requested NBO analysis.', highlights, suggestedActions, quality, [
+      {
+        label: 'Use Mulliken route',
+        routeOption: 'Pop=Full',
+        detail: 'Falls back to a standard Gaussian population analysis that ChemVault can parse.'
+      }
+    ]);
   }
 
   if (/normal termination of gaussian/iu.test(text) && result.energyHartree === null) {
@@ -725,13 +841,15 @@ function failureDiagnosis(
   summary: string,
   highlights: string[],
   suggestedActions: string[],
-  quality: { factors: string[]; score: number }
+  quality: { factors: string[]; score: number },
+  routeFixes: QuantumResultDiagnosis['routeFixes'] = []
 ): QuantumResultDiagnosis {
   return withQuality({
     severity: 'error',
     title,
     summary,
     highlights,
+    routeFixes,
     suggestedActions: uniqueStrings(suggestedActions).slice(0, 5)
   }, quality);
 }
@@ -816,9 +934,11 @@ function extractLogHighlights(text: string) {
     /distance matrix/iu,
     /atoms too close/iu,
     /basis set/iu,
+    /qperr|unknown keyword/iu,
     /license/iu,
-    /l\d+\.exe|link 0/iu,
-    /erroneous write/iu
+    /l\d+\.exe|link 0|link\s+9999/iu,
+    /checkpoint|fileio/iu,
+    /erroneous write|memory allocation|galloc|malloc/iu
   ];
   return uniqueStrings(lines.filter((line) => markers.some((marker) => marker.test(line))).slice(-6));
 }
@@ -831,6 +951,15 @@ function normalizeElement(value: string | undefined) {
 
 function finiteInteger(value: number, fallback: number) {
   return Number.isFinite(value) ? Math.trunc(value) : fallback;
+}
+
+function cleanCoordinate(value: number) {
+  if (!Number.isFinite(value)) return 0;
+  return Math.abs(value) < 1e-10 ? 0 : value;
+}
+
+function formatPreparedCoordinate(value: number) {
+  return cleanCoordinate(value).toFixed(8);
 }
 
 function moleculeName(metadata?: QuantumHistoryMetadata) {

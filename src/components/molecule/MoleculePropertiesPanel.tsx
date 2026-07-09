@@ -38,11 +38,13 @@ import {
   createQuantumHistoryEntry,
   diagnoseQuantumCalculation,
   loadQuantumHistory,
+  prepareQuantumStructure,
   saveQuantumHistoryEntry,
   validateQuantumPreflight,
   type QuantumHistoryEntry,
   type QuantumPreflightResult,
   type QuantumResultDiagnosis,
+  type QuantumStructurePreparationResult,
   type QuantumWorkflowIssue
 } from '@/lib/chem/quantumWorkflow';
 import { MoleculeProperties } from '@/lib/chem/types';
@@ -339,6 +341,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   const [historyOpen, setHistoryOpen] = useState(false);
   const [workflowMessage, setWorkflowMessage] = useState('');
   const [activeCalculationId, setActiveCalculationId] = useState('');
+  const [preparedStructure, setPreparedStructure] = useState<QuantumStructurePreparationResult | null>(null);
 
   useEffect(() => {
     const preference = loadQuantumEnginePreference();
@@ -355,6 +358,10 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   useEffect(() => {
     setHistoryEntries(loadQuantumHistory());
   }, []);
+
+  useEffect(() => {
+    setPreparedStructure(null);
+  }, [xyz]);
 
   useEffect(() => {
     let cancelled = false;
@@ -472,7 +479,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       method: isCommercialEngine(selectedEngine) ? externalConfig.method : selectedEngine === 'pyscf' ? pyscfMethod : 'gfn2',
       routeOptions: isCommercialEngine(selectedEngine) ? externalConfig.routeOptions : undefined,
       unpairedElectrons,
-      xyz
+      xyz: preparedStructure?.ok && preparedStructure.xyz ? preparedStructure.xyz : xyz
     }),
     [
       calculationMode,
@@ -483,6 +490,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       gaussianTask,
       pyscfBasisSet,
       pyscfMethod,
+      preparedStructure,
       selectedEngine,
       unpairedElectrons,
       xyz
@@ -492,7 +500,8 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     () => (result ? diagnoseQuantumCalculation(result, preflight) : null),
     [preflight, result]
   );
-  const canRun = Boolean(xyz && status?.available && preflight.canRun && !running && (selectedEngine !== 'pyscf' || calculationMode === 'single-point'));
+  const calculationXyz = preparedStructure?.ok && preparedStructure.xyz ? preparedStructure.xyz : xyz;
+  const canRun = Boolean(calculationXyz && status?.available && preflight.canRun && !running && (selectedEngine !== 'pyscf' || calculationMode === 'single-point'));
 
   async function loadLocalEngines() {
     const api = window.chemVaultDesktop;
@@ -733,6 +742,39 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     setWorkflowMessage('Gaussian follow-up is selected. Review the preflight panel and Gaussian input preview, then run the high-precision calculation.');
   }
 
+  function prepareCurrentStructure() {
+    const prepared = prepareQuantumStructure(xyz);
+    setPreparedStructure(prepared);
+    if (prepared.ok) {
+      setError('');
+      setWorkflowMessage(prepared.summary);
+    } else {
+      setError(prepared.warnings[0] || prepared.summary);
+      setWorkflowMessage(prepared.summary);
+    }
+  }
+
+  function resetPreparedStructure() {
+    setPreparedStructure(null);
+    setWorkflowMessage('Loaded structure restored. Calculations will use the original 3D coordinates.');
+  }
+
+  function exportPreparedXyz() {
+    if (!preparedStructure?.xyz) return;
+    downloadText(`${exportBaseName}_${exportTimestamp()}_prepared.xyz`, preparedStructure.xyz, 'chemical/x-xyz');
+  }
+
+  function applyGaussianRouteFix(routeOption: string, label: string) {
+    if (selectedEngine !== 'gaussian') return;
+    setExternalConfig((config) => ({
+      ...config,
+      engine: 'gaussian',
+      routeOptions: appendRouteOption(config.routeOptions || '', routeOption)
+    }));
+    setAdvancedSettingsOpen(true);
+    setWorkflowMessage(`${label} applied to Gaussian route options. Review the input preview, then rerun the calculation.`);
+  }
+
   async function executeCalculation(options: {
     calculationMode?: QuantumCalculationMode;
     engine?: QuantumEngineKind;
@@ -740,7 +782,8 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     startMessage?: string;
   } = {}) {
     const api = window.chemVaultDesktop;
-    if (!api?.runQuantumCalculation || !xyz) return null;
+    const activeXyz = preparedStructure?.ok && preparedStructure.xyz ? preparedStructure.xyz : xyz;
+    if (!api?.runQuantumCalculation || !activeXyz) return null;
 
     const runEngine = options.engine || selectedEngine;
     const runMode = options.calculationMode || calculationMode;
@@ -755,7 +798,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       method: commercialEngine ? externalConfig.method : runEngine === 'pyscf' ? pyscfMethod : 'gfn2',
       routeOptions: commercialEngine ? externalConfig.routeOptions : undefined,
       unpairedElectrons,
-      xyz
+      xyz: activeXyz
     });
 
     if (!validation.canRun) {
@@ -787,7 +830,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     try {
       const nextResult = await api.runQuantumCalculation({
         calculationId,
-        xyz,
+        xyz: activeXyz,
         engine: runEngine,
         charge,
         unpairedElectrons,
@@ -1018,8 +1061,8 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   const gaussianCubeReady = Boolean(gaussianCube?.contentBase64 || gaussianCube?.contentText);
   const gaussianSuiteReady = Boolean(gaussianInputReady || gaussianOutputReady || gaussianCheckpointReady || gaussianFchkReady || gaussianCubeReady);
   const gaussianInputPreview = useMemo(
-    () => selectedEngine === 'gaussian' && xyz
-      ? buildGaussianInputPreview(xyz, {
+    () => selectedEngine === 'gaussian' && calculationXyz
+      ? buildGaussianInputPreview(calculationXyz, {
           basisSet: externalConfig.basisSet,
           calculationMode,
           charge,
@@ -1029,7 +1072,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
           unpairedElectrons
         })
       : '',
-    [calculationMode, charge, externalConfig.basisSet, externalConfig.method, externalConfig.routeOptions, gaussianTask, selectedEngine, unpairedElectrons, xyz]
+    [calculationMode, calculationXyz, charge, externalConfig.basisSet, externalConfig.method, externalConfig.routeOptions, gaussianTask, selectedEngine, unpairedElectrons]
   );
 
   return (
@@ -1152,9 +1195,15 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
-        <PreflightPanel preflight={preflight} />
+        <PreflightPanel
+          preflight={preflight}
+          preparation={preparedStructure}
+          onExportPrepared={exportPreparedXyz}
+          onPrepare={prepareCurrentStructure}
+          onResetPrepared={resetPreparedStructure}
+        />
         <WorkflowBridgePanel
-          canRunQuickScreen={Boolean(xyz && !running)}
+          canRunQuickScreen={Boolean(calculationXyz && !running)}
           currentEngine={selectedEngine}
           historyCount={historyEntries.length}
           latestResult={result}
@@ -1630,9 +1679,14 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
             <Metric label="Elapsed time" value={`${(result.elapsedMs / 1000).toFixed(1)} s`} />
           </div>
 
-          {resultDiagnosis ? <ResultDiagnosisPanel diagnosis={resultDiagnosis} /> : null}
+          {resultDiagnosis ? (
+            <ResultDiagnosisPanel
+              diagnosis={resultDiagnosis}
+              onApplyRouteFix={selectedEngine === 'gaussian' ? applyGaussianRouteFix : undefined}
+            />
+          ) : null}
 
-          {(result.frontierOrbitals || result.frequencySummary || result.thermochemistry || result.optimizedXyz) ? (
+          {(result.frontierOrbitals || result.frequencySummary || result.thermochemistry || result.optimizedXyz || result.excitedStates || result.nmrShielding) ? (
             <AdvancedGaussianResultPanel result={result} onExportOptimizedXyz={exportOptimizedXyz} />
           ) : null}
 
@@ -1765,7 +1819,19 @@ function AutoScrollLog({ className, value }: { className: string; value: string 
   );
 }
 
-function PreflightPanel({ preflight }: { preflight: QuantumPreflightResult }) {
+function PreflightPanel({
+  onExportPrepared,
+  onPrepare,
+  onResetPrepared,
+  preflight,
+  preparation
+}: {
+  onExportPrepared: () => void;
+  onPrepare: () => void;
+  onResetPrepared: () => void;
+  preflight: QuantumPreflightResult;
+  preparation: QuantumStructurePreparationResult | null;
+}) {
   const topIssues = preflight.issues.slice(0, 4);
   const tone = preflight.issueCount.errors > 0
     ? 'border-rose-200 bg-rose-50 text-rose-800'
@@ -1819,6 +1885,63 @@ function PreflightPanel({ preflight }: { preflight: QuantumPreflightResult }) {
           </div>
         </details>
       ) : null}
+      <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-bold text-slate-950">Structure preparation</p>
+            <p className="mt-1 text-xs leading-5 text-slate-600">
+              Standardize the current XYZ coordinates before calculation. This centers and formats the geometry; it does not replace a force-field or DFT optimization.
+            </p>
+          </div>
+          {preparation?.ok ? (
+            <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-semibold text-emerald-800">
+              Prepared
+            </span>
+          ) : null}
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            onClick={onPrepare}
+            className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800"
+          >
+            Standardize XYZ
+          </button>
+          <button
+            type="button"
+            onClick={onExportPrepared}
+            disabled={!preparation?.xyz}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Export prepared XYZ
+          </button>
+          <button
+            type="button"
+            onClick={onResetPrepared}
+            disabled={!preparation}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Use loaded structure
+          </button>
+        </div>
+        {preparation ? (
+          <div className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-5 ${
+            preparation.ok ? 'border-emerald-200 bg-white text-slate-700' : 'border-rose-200 bg-rose-50 text-rose-800'
+          }`}>
+            <p className="font-semibold">{preparation.summary}</p>
+            {preparation.changes.length ? (
+              <ul className="mt-2 space-y-1">
+                {preparation.changes.map((change) => <li key={change}>{change}</li>)}
+              </ul>
+            ) : null}
+            {preparation.warnings.length ? (
+              <div className="mt-2 space-y-1 text-amber-800">
+                {preparation.warnings.slice(0, 3).map((warning) => <p key={warning}>{warning}</p>)}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }
@@ -1881,7 +2004,13 @@ function WorkflowBridgePanel({
   );
 }
 
-function ResultDiagnosisPanel({ diagnosis }: { diagnosis: QuantumResultDiagnosis }) {
+function ResultDiagnosisPanel({
+  diagnosis,
+  onApplyRouteFix
+}: {
+  diagnosis: QuantumResultDiagnosis;
+  onApplyRouteFix?: (routeOption: string, label: string) => void;
+}) {
   const tone = diagnosis.severity === 'success'
     ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
     : diagnosis.severity === 'error'
@@ -1916,6 +2045,24 @@ function ResultDiagnosisPanel({ diagnosis }: { diagnosis: QuantumResultDiagnosis
           ))}
         </div>
       ) : null}
+      {onApplyRouteFix && diagnosis.routeFixes?.length ? (
+        <div className="mt-3 rounded-xl bg-white/70 px-3 py-3">
+          <p className="text-xs font-bold">Route repair options</p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            {diagnosis.routeFixes.map((fix) => (
+              <button
+                key={`${fix.label}-${fix.routeOption}`}
+                type="button"
+                onClick={() => onApplyRouteFix(fix.routeOption, fix.label)}
+                title={fix.detail}
+                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+              >
+                {fix.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {diagnosis.highlights.length > 0 ? (
         <details className="mt-3 rounded-xl bg-white/70 px-3 py-2">
           <summary className="cursor-pointer text-xs font-semibold">Parsed log highlights</summary>
@@ -1940,6 +2087,8 @@ function AdvancedGaussianResultPanel({
   const orbitals = result.frontierOrbitals;
   const frequencies = result.frequencySummary;
   const thermo = result.thermochemistry;
+  const excitedStates = result.excitedStates;
+  const nmrShielding = result.nmrShielding;
 
   return (
     <details className="rounded-2xl border border-slate-200 bg-white px-4 py-3" open>
@@ -1981,6 +2130,44 @@ function AdvancedGaussianResultPanel({
             <MetricCompact label="Thermal energy" value={thermo.thermalCorrectionToEnergyHartree === null ? 'N/A' : `${formatNumber(thermo.thermalCorrectionToEnergyHartree)} Eh`} />
             <MetricCompact label="Thermal enthalpy" value={thermo.thermalCorrectionToEnthalpyHartree === null ? 'N/A' : `${formatNumber(thermo.thermalCorrectionToEnthalpyHartree)} Eh`} />
             <MetricCompact label="Thermal Gibbs" value={thermo.thermalCorrectionToGibbsHartree === null ? 'N/A' : `${formatNumber(thermo.thermalCorrectionToGibbsHartree)} Eh`} />
+          </div>
+        ) : null}
+
+        {excitedStates?.length ? (
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div className="grid grid-cols-[64px_minmax(0,1fr)_minmax(86px,0.6fr)_minmax(86px,0.6fr)_minmax(72px,0.5fr)] bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+              <span>State</span>
+              <span>Label</span>
+              <span>Energy</span>
+              <span>Wavelength</span>
+              <span>f</span>
+            </div>
+            {excitedStates.slice(0, 8).map((state) => (
+              <div key={`${state.state}-${state.energyEv}`} className="grid grid-cols-[64px_minmax(0,1fr)_minmax(86px,0.6fr)_minmax(86px,0.6fr)_minmax(72px,0.5fr)] border-t border-slate-100 px-3 py-2 text-xs text-slate-700">
+                <span className="font-mono">{state.state}</span>
+                <span className="truncate">{state.label || 'Excited state'}</span>
+                <span>{formatNumber(state.energyEv)} eV</span>
+                <span>{formatNumber(state.wavelengthNm)} nm</span>
+                <span>{state.oscillatorStrength === null || state.oscillatorStrength === undefined ? 'N/A' : formatNumber(state.oscillatorStrength)}</span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {nmrShielding?.length ? (
+          <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+            <div className="grid grid-cols-[64px_80px_minmax(0,1fr)] bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-slate-500">
+              <span>Atom</span>
+              <span>Elem</span>
+              <span>Isotropic shielding</span>
+            </div>
+            {nmrShielding.slice(0, 12).map((item) => (
+              <div key={`${item.index}-${item.element}`} className="grid grid-cols-[64px_80px_minmax(0,1fr)] border-t border-slate-100 px-3 py-2 text-xs text-slate-700">
+                <span className="font-mono">{item.index}</span>
+                <span className="font-semibold text-slate-950">{item.element}</span>
+                <span>{formatNumber(item.isotropicPpm)} ppm</span>
+              </div>
+            ))}
           </div>
         ) : null}
 
@@ -2547,6 +2734,15 @@ function gaussianTaskTimeout(task: GaussianTaskTemplateId) {
   return 900000;
 }
 
+function appendRouteOption(current: string, addition: string) {
+  const normalized = addition.trim();
+  if (!normalized) return current.trim();
+  const existing = current.trim();
+  if (!existing) return normalized;
+  if (existing.toLowerCase().includes(normalized.toLowerCase())) return existing;
+  return `${existing} ${normalized}`.trim();
+}
+
 function formatGaussianCoordinate(value: number) {
   return Number.isFinite(value) ? value.toFixed(8) : '0.00000000';
 }
@@ -2634,6 +2830,14 @@ function buildQuantumReportHtml(result: QuantumCalculationResult, context: Quant
     ...(result.thermochemistry ? [
       ['Zero-point correction', result.thermochemistry.zeroPointCorrectionHartree === null ? 'N/A' : `${formatNumber(result.thermochemistry.zeroPointCorrectionHartree)} Eh`],
       ['Thermal correction to Gibbs', result.thermochemistry.thermalCorrectionToGibbsHartree === null ? 'N/A' : `${formatNumber(result.thermochemistry.thermalCorrectionToGibbsHartree)} Eh`]
+    ] : []),
+    ...(result.excitedStates?.length ? [
+      ['Excited states parsed', String(result.excitedStates.length)],
+      ['First excited state', `${formatNumber(result.excitedStates[0].energyEv)} eV / ${formatNumber(result.excitedStates[0].wavelengthNm)} nm`]
+    ] : []),
+    ...(result.nmrShielding?.length ? [
+      ['NMR shieldings parsed', String(result.nmrShielding.length)],
+      ['First isotropic shielding', `${result.nmrShielding[0].element}${result.nmrShielding[0].index}: ${formatNumber(result.nmrShielding[0].isotropicPpm)} ppm`]
     ] : []),
     ...(result.optimizedXyz ? [['Optimized geometry', 'Parsed as XYZ and available for export']] : [])
   ];
@@ -2775,6 +2979,14 @@ function buildQuantumLogText(result: QuantumCalculationResult, context: QuantumE
     ...(result.thermochemistry ? [
       `Zero-point correction: ${result.thermochemistry.zeroPointCorrectionHartree === null ? 'N/A' : `${formatNumber(result.thermochemistry.zeroPointCorrectionHartree)} Eh`}`,
       `Thermal correction to Gibbs: ${result.thermochemistry.thermalCorrectionToGibbsHartree === null ? 'N/A' : `${formatNumber(result.thermochemistry.thermalCorrectionToGibbsHartree)} Eh`}`
+    ] : []),
+    ...(result.excitedStates?.length ? [
+      `Excited states parsed: ${result.excitedStates.length}`,
+      `First excited state: ${formatNumber(result.excitedStates[0].energyEv)} eV / ${formatNumber(result.excitedStates[0].wavelengthNm)} nm`
+    ] : []),
+    ...(result.nmrShielding?.length ? [
+      `NMR shieldings parsed: ${result.nmrShielding.length}`,
+      `First isotropic shielding: ${result.nmrShielding[0].element}${result.nmrShielding[0].index}: ${formatNumber(result.nmrShielding[0].isotropicPpm)} ppm`
     ] : [])
   ];
   return [

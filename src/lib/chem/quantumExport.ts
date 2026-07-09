@@ -346,6 +346,18 @@ function drawPdfAdvancedResults(layout: PdfLayout, result: QuantumCalculationRes
       ['Thermal Gibbs', result.thermochemistry.thermalCorrectionToGibbsHartree === null ? 'N/A' : `${formatNumber(result.thermochemistry.thermalCorrectionToGibbsHartree)} Eh`]
     );
   }
+  if (result.excitedStates?.length) {
+    rows.push(
+      ['Excited states parsed', String(result.excitedStates.length)],
+      ['First excited state', `${formatNumber(result.excitedStates[0].energyEv)} eV / ${formatNumber(result.excitedStates[0].wavelengthNm)} nm`]
+    );
+  }
+  if (result.nmrShielding?.length) {
+    rows.push(
+      ['NMR shieldings parsed', String(result.nmrShielding.length)],
+      ['First isotropic shielding', `${result.nmrShielding[0].element}${result.nmrShielding[0].index}: ${formatNumber(result.nmrShielding[0].isotropicPpm)} ppm`]
+    );
+  }
   if (!rows.length) return;
 
   drawPdfSectionTitle(layout, 'Advanced parsed results');
@@ -652,6 +664,18 @@ function computedPropertyRows(result: QuantumCalculationResult) {
     rows.push(
       ['Zero-point correction', result.thermochemistry.zeroPointCorrectionHartree === null ? 'N/A' : `${formatNumber(result.thermochemistry.zeroPointCorrectionHartree)} Eh`],
       ['Thermal correction to Gibbs', result.thermochemistry.thermalCorrectionToGibbsHartree === null ? 'N/A' : `${formatNumber(result.thermochemistry.thermalCorrectionToGibbsHartree)} Eh`]
+    );
+  }
+  if (result.excitedStates?.length) {
+    rows.push(
+      ['Excited states parsed', String(result.excitedStates.length)],
+      ['First excited state', `${formatNumber(result.excitedStates[0].energyEv)} eV / ${formatNumber(result.excitedStates[0].wavelengthNm)} nm`]
+    );
+  }
+  if (result.nmrShielding?.length) {
+    rows.push(
+      ['NMR shieldings parsed', String(result.nmrShielding.length)],
+      ['First isotropic shielding', `${result.nmrShielding[0].element}${result.nmrShielding[0].index}: ${formatNumber(result.nmrShielding[0].isotropicPpm)} ppm`]
     );
   }
   return rows;

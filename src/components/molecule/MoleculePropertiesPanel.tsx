@@ -214,6 +214,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   const [error, setError] = useState('');
   const [calculationProgress, setCalculationProgress] = useState<QuantumCalculationProgress | null>(null);
   const [enginePreferenceNotice, setEnginePreferenceNotice] = useState<QuantumEnginePreference | null>(null);
+  const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
 
   useEffect(() => {
     const preference = loadQuantumEnginePreference();
@@ -503,6 +504,11 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       ? `Ready${status?.source ? ` from ${status.source}` : ''}${status?.version ? `: ${status.version}` : ''}.`
       : status?.message || 'Selected quantum engine is not available yet.';
   const showLocalEngineManager = !isCommercialEngine(selectedEngine) || setupRequestEngines.length > 0 || Boolean(localEngineMessage);
+  const advancedNeedsSetup = !statusLoading && !engineReady;
+  const advancedSettingsExpanded = advancedSettingsOpen || advancedNeedsSetup;
+  const advancedSettingsSummary = advancedNeedsSetup
+    ? 'Setup is required before this engine can calculate.'
+    : `${selectedEngineOption.label} is configured. Local engines and port settings are folded.`;
 
   function exportQuantumReport() {
     if (!result) return;
@@ -615,61 +621,94 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         </div>
       </div>
 
-      {showLocalEngineManager ? (
-        <LocalEngineManager
-          engines={localEngines}
-          loading={localEngineLoading}
-          message={localEngineMessage}
-          setupPromptDismissed={setupPromptDismissed}
-          setupRequestEngines={setupRequestEngines}
-          onDismissSetup={clearEngineSetupRequest}
-          onConfigureExisting={() => setSetupMode('configure')}
-          onInstall={() => setSetupMode('install')}
-          onOpenFolder={openLocalEngineFolder}
-          onRefresh={loadLocalEngines}
-        />
+      <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto]">
+        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <span className="block text-xs font-medium text-slate-500">Total charge</span>
+          <input
+            type="number"
+            value={charge}
+            min={-20}
+            max={20}
+            step={1}
+            onChange={(event) => setCharge(Number(event.target.value))}
+            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-400"
+          />
+        </label>
+        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <span className="block text-xs font-medium text-slate-500">Unpaired electrons</span>
+          <input
+            type="number"
+            value={unpairedElectrons}
+            min={0}
+            max={20}
+            step={1}
+            onChange={(event) => setUnpairedElectrons(Number(event.target.value))}
+            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-400"
+          />
+        </label>
+        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <span className="block text-xs font-medium text-slate-500">Calculation type</span>
+          <select
+            value={calculationMode}
+            onChange={(event) => setCalculationMode(event.target.value as 'single-point' | 'geometry-optimization')}
+            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-400"
+          >
+            <option value="single-point">Single-point analysis</option>
+            <option value="geometry-optimization">Geometry optimization</option>
+          </select>
+        </label>
+        <button
+          type="button"
+          onClick={runCalculation}
+          disabled={!canRun}
+          className="self-end rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {running ? 'Calculating' : 'Run Calculation'}
+        </button>
+      </div>
+
+      {!xyz ? (
+        <p className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+          Load a 3D SDF, MOL, XYZ, or PDB structure before running the desktop quantum engine.
+        </p>
       ) : null}
 
-      <QuantumEngineSetupDialog
-        mode={setupMode}
-        onClose={() => setSetupMode(null)}
-        onEngineSelected={handleSetupEngineSelected}
-        onEnginesChanged={() => {
-          void loadLocalEngines();
-          setConfigRevision((value) => value + 1);
-        }}
-      />
+      {error ? (
+        <p className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-800">{error}</p>
+      ) : null}
 
-      {enginePreferenceNotice ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 py-6">
-          <div className="w-full max-w-lg rounded-3xl border border-emerald-200 bg-white p-5 shadow-2xl">
-            <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Engine preference applied</p>
-            <h4 className="mt-2 text-xl font-bold text-slate-950">{enginePreferenceNotice.label} is ready in Molecule Studio</h4>
-            <p className="mt-2 text-sm leading-6 text-slate-600">
-              The engine you configured from the welcome screen has been saved and selected here. You can run Professional Quantum Calculation with this engine without configuring it again.
-            </p>
-            <div className="mt-4 flex flex-wrap justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => {
-                  setEnginePreferenceNotice(null);
-                  setSetupMode('configure');
-                }}
-                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Change engine
-              </button>
-              <button
-                type="button"
-                onClick={() => setEnginePreferenceNotice(null)}
-                className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
-              >
-                Continue
-              </button>
-            </div>
+      <div className="mt-4 rounded-2xl border border-slate-200 bg-white p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h4 className="text-sm font-bold text-slate-950">Engine setup and advanced options</h4>
+            <p className="mt-1 text-xs leading-5 text-slate-600">{advancedSettingsSummary}</p>
           </div>
+          <button
+            type="button"
+            onClick={() => setAdvancedSettingsOpen((value) => !value)}
+            disabled={advancedNeedsSetup}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {advancedSettingsExpanded ? 'Collapse' : 'Expand settings'}
+          </button>
         </div>
-      ) : null}
+
+        {advancedSettingsExpanded ? (
+          <>
+            {showLocalEngineManager ? (
+              <LocalEngineManager
+                engines={localEngines}
+                loading={localEngineLoading}
+                message={localEngineMessage}
+                setupPromptDismissed={setupPromptDismissed}
+                setupRequestEngines={setupRequestEngines}
+                onDismissSetup={clearEngineSetupRequest}
+                onConfigureExisting={() => setSetupMode('configure')}
+                onInstall={() => setSetupMode('install')}
+                onOpenFolder={openLocalEngineFolder}
+                onRefresh={loadLocalEngines}
+              />
+            ) : null}
 
       {selectedEngine === 'pyscf' ? (
         <div className="mt-4 rounded-3xl border border-slate-200 bg-slate-50 p-4">
@@ -793,61 +832,49 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
           {configMessage ? <p className="mt-3 text-xs leading-5 text-slate-600">{configMessage}</p> : null}
         </div>
       ) : null}
-
-      <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto]">
-        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-          <span className="block text-xs font-medium text-slate-500">Total charge</span>
-          <input
-            type="number"
-            value={charge}
-            min={-20}
-            max={20}
-            step={1}
-            onChange={(event) => setCharge(Number(event.target.value))}
-            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-400"
-          />
-        </label>
-        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-          <span className="block text-xs font-medium text-slate-500">Unpaired electrons</span>
-          <input
-            type="number"
-            value={unpairedElectrons}
-            min={0}
-            max={20}
-            step={1}
-            onChange={(event) => setUnpairedElectrons(Number(event.target.value))}
-            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-400"
-          />
-        </label>
-        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-          <span className="block text-xs font-medium text-slate-500">Calculation type</span>
-          <select
-            value={calculationMode}
-            onChange={(event) => setCalculationMode(event.target.value as 'single-point' | 'geometry-optimization')}
-            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-400"
-          >
-            <option value="single-point">Single-point analysis</option>
-            <option value="geometry-optimization">Geometry optimization</option>
-          </select>
-        </label>
-        <button
-          type="button"
-          onClick={runCalculation}
-          disabled={!canRun}
-          className="self-end rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-        >
-          {running ? 'Calculating' : 'Run Calculation'}
-        </button>
+          </>
+        ) : null}
       </div>
 
-      {!xyz ? (
-        <p className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
-          Load a 3D SDF, MOL, XYZ, or PDB structure before running the desktop quantum engine.
-        </p>
-      ) : null}
+      <QuantumEngineSetupDialog
+        mode={setupMode}
+        onClose={() => setSetupMode(null)}
+        onEngineSelected={handleSetupEngineSelected}
+        onEnginesChanged={() => {
+          void loadLocalEngines();
+          setConfigRevision((value) => value + 1);
+        }}
+      />
 
-      {error ? (
-        <p className="mt-3 rounded-2xl border border-rose-200 bg-rose-50 px-4 py-3 text-sm leading-6 text-rose-800">{error}</p>
+      {enginePreferenceNotice ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 py-6">
+          <div className="w-full max-w-lg rounded-3xl border border-emerald-200 bg-white p-5 shadow-2xl">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Engine preference applied</p>
+            <h4 className="mt-2 text-xl font-bold text-slate-950">{enginePreferenceNotice.label} is ready in Molecule Studio</h4>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              The engine you configured from the welcome screen has been saved and selected here. You can run Professional Quantum Calculation with this engine without configuring it again.
+            </p>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEnginePreferenceNotice(null);
+                  setSetupMode('configure');
+                }}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Change engine
+              </button>
+              <button
+                type="button"
+                onClick={() => setEnginePreferenceNotice(null)}
+                className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
       ) : null}
 
       {result ? (

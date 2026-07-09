@@ -8,6 +8,7 @@ import { LoadingState } from '@/components/ui/LoadingState';
 import { UserPortalSection, buildRegisterUrl, buildUserPortalUrl } from '@/lib/auth/chemvaultUserLinks';
 import { downloadText } from '@/lib/chem/fileExport';
 import { loadQuantumHistory, type QuantumHistoryEntry } from '@/lib/chem/quantumWorkflow';
+import { loadQuantumProjects, type QuantumProjectRecord } from '@/lib/chem/quantumProjectWorkspace';
 
 export type AccountPage = 'profile' | 'molecules' | 'settings';
 
@@ -70,6 +71,7 @@ export function UserAccountPage({ page }: { page: AccountPage }) {
   const [syncing, setSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const [localQuantumHistory, setLocalQuantumHistory] = useState<QuantumHistoryEntry[]>([]);
+  const [localQuantumProjects, setLocalQuantumProjects] = useState<QuantumProjectRecord[]>([]);
 
   const fetchEntitlements = useCallback(async () => {
     if (!user) {
@@ -114,6 +116,7 @@ export function UserAccountPage({ page }: { page: AccountPage }) {
 
   useEffect(() => {
     setLocalQuantumHistory(loadQuantumHistory());
+    setLocalQuantumProjects(loadQuantumProjects());
   }, [page]);
 
   const handleSync = async () => {
@@ -222,6 +225,7 @@ export function UserAccountPage({ page }: { page: AccountPage }) {
             <MoleculesContent
               entitlements={entitlements}
               localQuantumHistory={localQuantumHistory}
+              localQuantumProjects={localQuantumProjects}
               moleculesUrl={moleculesUrl}
               permissions={permissions}
             />
@@ -347,11 +351,13 @@ function ProfileContent({
 function MoleculesContent({
   entitlements,
   localQuantumHistory,
+  localQuantumProjects,
   moleculesUrl,
   permissions
 }: {
   entitlements: MoleculeEntitlements | null;
   localQuantumHistory: QuantumHistoryEntry[];
+  localQuantumProjects: QuantumProjectRecord[];
   moleculesUrl: string;
   permissions: string[];
 }) {
@@ -388,6 +394,49 @@ function MoleculesContent({
           </div>
         </Panel>
       </div>
+
+      <Panel title="Local ChemVault Projects" subtitle="Molecule-level project records saved by the desktop quantum workspace.">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <p className="text-sm leading-6 text-slate-600">
+            Projects group repeated calculations for the same molecule, including engine, quality review, energy and dipole summaries.
+          </p>
+          <button
+            type="button"
+            onClick={() => exportLocalQuantumProjects(localQuantumProjects)}
+            disabled={!localQuantumProjects.length}
+            className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:border-sky-300 hover:text-sky-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Export Projects
+          </button>
+        </div>
+        {localQuantumProjects.length ? (
+          <div className="grid gap-3 md:grid-cols-2">
+            {localQuantumProjects.slice(0, 6).map((project) => (
+              <article key={project.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-bold text-slate-950">{project.moleculeName}</h3>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      {project.latestEngineLabel} / {project.calculationCount} run{project.calculationCount === 1 ? '' : 's'} / {formatDateTime(new Date(project.updatedAt))}
+                    </p>
+                  </div>
+                  <StatusBadge tone={project.latestStatus === 'completed' ? 'success' : project.latestStatus === 'failed' ? 'warning' : 'neutral'}>
+                    {project.latestStatus}
+                  </StatusBadge>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                  <Metric label="Energy" value={project.latestEnergyHartree === null ? 'N/A' : `${project.latestEnergyHartree.toFixed(4)} Eh`} />
+                  <Metric label="Dipole" value={project.latestDipoleDebye === null ? 'N/A' : `${project.latestDipoleDebye.toFixed(4)} D`} />
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+            No local ChemVault projects yet. Run a desktop quantum calculation to create one automatically.
+          </p>
+        )}
+      </Panel>
 
       <Panel title="Local Quantum Calculation Records" subtitle="Saved automatically after desktop quantum calculations on this computer.">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -629,6 +678,19 @@ function exportLocalQuantumHistory(entries: QuantumHistoryEntry[]) {
       generatedAt,
       source: 'ChemVault Model local quantum history',
       records: entries
+    }, null, 2),
+    'application/json'
+  );
+}
+
+function exportLocalQuantumProjects(projects: QuantumProjectRecord[]) {
+  const generatedAt = new Date().toISOString();
+  downloadText(
+    `chemvault-quantum-projects-${generatedAt.replace(/[:.]/g, '-')}.json`,
+    JSON.stringify({
+      generatedAt,
+      source: 'ChemVault Model local project workspace',
+      projects
     }, null, 2),
     'application/json'
   );

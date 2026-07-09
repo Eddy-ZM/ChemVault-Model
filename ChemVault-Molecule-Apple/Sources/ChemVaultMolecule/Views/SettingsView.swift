@@ -17,6 +17,15 @@ struct SettingsView: View {
                     MetricTile(title: "Remote Config", value: appState.config.remoteConfigURL.absoluteString)
                 }
             }
+
+            CVPanel("Quantum Scope") {
+                VStack(alignment: .leading, spacing: 10) {
+                    Label("Apple app displays supported local or cloud quantum results.", systemImage: "atom")
+                    Label("Windows ChemVault Model handles local Gaussian, ORCA, PySCF, and engine setup workflows.", systemImage: "desktopcomputer")
+                }
+                .font(.subheadline)
+                .foregroundStyle(CVTheme.secondaryText)
+            }
         }
         .frame(minWidth: 520, minHeight: 360)
     }

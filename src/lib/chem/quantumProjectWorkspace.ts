@@ -1,0 +1,223 @@
+import type { QuantumCalculationResult, QuantumEngineKind } from '@/lib/chem/quantumTypes';
+import type { QuantumHistoryMetadata, QuantumPreflightResult, QuantumResultDiagnosis } from '@/lib/chem/quantumWorkflow';
+
+export type QuantumProjectCalculation = {
+  id: string;
+  createdAt: string;
+  engine: QuantumEngineKind;
+  engineLabel: string;
+  method: string;
+  mode: string;
+  status: 'completed' | 'failed' | 'needs-review';
+  energyHartree: number | null;
+  dipoleDebye: number | null;
+  atomCount: number;
+  charge: number;
+  unpairedElectrons: number;
+  warningsCount: number;
+  diagnosisTitle: string;
+  qualityScore?: number;
+};
+
+export type QuantumProjectRecord = {
+  id: string;
+  lookupKey: string;
+  createdAt: string;
+  updatedAt: string;
+  moleculeName: string;
+  identifier?: string;
+  formula?: string | null;
+  smiles?: string | null;
+  calculationCount: number;
+  latestEngineLabel: string;
+  latestStatus: QuantumProjectCalculation['status'];
+  latestEnergyHartree: number | null;
+  latestDipoleDebye: number | null;
+  calculations: QuantumProjectCalculation[];
+};
+
+export type QuantumProjectBundle = {
+  schema: 'chemvault.quantum.project.v1';
+  exportedAt: string;
+  copyright: string;
+  project: QuantumProjectRecord;
+};
+
+const PROJECTS_KEY = 'chemvault.model.quantumProjects.v1';
+const PROJECT_LIMIT = 30;
+const CALCULATIONS_PER_PROJECT_LIMIT = 40;
+const CHEMVAULT_COPYRIGHT_NOTICE = 'Copyright (c) ChemVault. All rights reserved.';
+
+export function loadQuantumProjects(): QuantumProjectRecord[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(PROJECTS_KEY) || '[]');
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(isProjectRecord).slice(0, PROJECT_LIMIT);
+  } catch {
+    return [];
+  }
+}
+
+export function saveQuantumProjectFromCalculation(options: {
+  charge: number;
+  diagnosis: QuantumResultDiagnosis;
+  metadata?: QuantumHistoryMetadata;
+  preflight: QuantumPreflightResult;
+  result: QuantumCalculationResult;
+  unpairedElectrons: number;
+}): QuantumProjectRecord[] {
+  const calculation = projectCalculationFromResult(options);
+  const key = projectKey(options.metadata);
+  const now = new Date().toISOString();
+  const projects = loadQuantumProjects();
+  const existing = projects.find((project) => (project.lookupKey || projectRecordKey(project)) === key);
+  const nextProject: QuantumProjectRecord = existing
+    ? {
+        ...existing,
+        updatedAt: now,
+        calculationCount: existing.calculationCount + 1,
+        latestEngineLabel: calculation.engineLabel,
+        latestStatus: calculation.status,
+        latestEnergyHartree: calculation.energyHartree,
+        latestDipoleDebye: calculation.dipoleDebye,
+        calculations: [calculation, ...existing.calculations.filter((item) => item.id !== calculation.id)].slice(0, CALCULATIONS_PER_PROJECT_LIMIT)
+      }
+    : {
+        id: `qproj_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+        lookupKey: key,
+        createdAt: now,
+        updatedAt: now,
+        moleculeName: moleculeName(options.metadata),
+        identifier: moleculeIdentifier(options.metadata),
+        formula: options.metadata?.formula ?? null,
+        smiles: options.metadata?.smiles ?? null,
+        calculationCount: 1,
+        latestEngineLabel: calculation.engineLabel,
+        latestStatus: calculation.status,
+        latestEnergyHartree: calculation.energyHartree,
+        latestDipoleDebye: calculation.dipoleDebye,
+        calculations: [calculation]
+      };
+
+  const nextProjects = [nextProject, ...projects.filter((project) => project.id !== nextProject.id)]
+    .sort((first, second) => Date.parse(second.updatedAt) - Date.parse(first.updatedAt))
+    .slice(0, PROJECT_LIMIT);
+
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(PROJECTS_KEY, JSON.stringify(nextProjects));
+  }
+  return nextProjects;
+}
+
+export function exportQuantumProjectBundle(project: QuantumProjectRecord): string {
+  const bundle: QuantumProjectBundle = {
+    schema: 'chemvault.quantum.project.v1',
+    exportedAt: new Date().toISOString(),
+    copyright: CHEMVAULT_COPYRIGHT_NOTICE,
+    project
+  };
+  return JSON.stringify(bundle, null, 2);
+}
+
+export function importQuantumProjectBundle(content: string): QuantumProjectRecord[] {
+  const parsed = JSON.parse(content) as Partial<QuantumProjectBundle> | QuantumProjectRecord;
+  const project = 'schema' in parsed ? parsed.project : parsed;
+  if (!isProjectRecord(project)) {
+    throw new Error('This file is not a valid ChemVault quantum project bundle.');
+  }
+
+  const projects = loadQuantumProjects();
+  const normalized: QuantumProjectRecord = {
+    ...project,
+    lookupKey: project.lookupKey || projectRecordKey(project),
+    updatedAt: new Date().toISOString(),
+    calculations: project.calculations.slice(0, CALCULATIONS_PER_PROJECT_LIMIT),
+    calculationCount: Math.max(project.calculationCount, project.calculations.length)
+  };
+  const nextProjects = [normalized, ...projects.filter((item) => item.id !== normalized.id)]
+    .sort((first, second) => Date.parse(second.updatedAt) - Date.parse(first.updatedAt))
+    .slice(0, PROJECT_LIMIT);
+
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(PROJECTS_KEY, JSON.stringify(nextProjects));
+  }
+  return nextProjects;
+}
+
+export function clearQuantumProjects() {
+  if (typeof window !== 'undefined') {
+    window.localStorage.removeItem(PROJECTS_KEY);
+  }
+  return [];
+}
+
+function projectCalculationFromResult(options: {
+  charge: number;
+  diagnosis: QuantumResultDiagnosis;
+  preflight: QuantumPreflightResult;
+  result: QuantumCalculationResult;
+  unpairedElectrons: number;
+}): QuantumProjectCalculation {
+  const { diagnosis, preflight, result } = options;
+  return {
+    id: `qrun_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`,
+    createdAt: new Date().toISOString(),
+    engine: result.engine,
+    engineLabel: result.engineLabel,
+    method: result.method,
+    mode: result.gaussianTaskLabel || result.calculationMode,
+    status: result.ok && diagnosis.severity === 'success' ? 'completed' : result.ok ? 'needs-review' : 'failed',
+    energyHartree: result.energyHartree,
+    dipoleDebye: result.dipoleDebye?.total ?? null,
+    atomCount: preflight.atomCount,
+    charge: options.charge,
+    unpairedElectrons: options.unpairedElectrons,
+    warningsCount: result.warnings.length,
+    diagnosisTitle: diagnosis.title,
+    qualityScore: diagnosis.qualityScore
+  };
+}
+
+function projectKey(metadata?: QuantumHistoryMetadata | QuantumProjectRecord) {
+  if (!metadata) return 'unknown';
+  if ('moleculeName' in metadata) return projectRecordKey(metadata);
+  return [
+    metadata.pdbId ? `pdb:${metadata.pdbId}` : '',
+    metadata.cid ? `cid:${metadata.cid}` : '',
+    metadata.smiles ? `smiles:${metadata.smiles}` : '',
+    metadata.fileName ? `file:${metadata.fileName}` : '',
+    metadata.name ? `name:${metadata.name}` : ''
+  ].filter(Boolean)[0] || 'unknown';
+}
+
+function projectRecordKey(project: QuantumProjectRecord) {
+  return [
+    project.identifier ? `identifier:${project.identifier}` : '',
+    project.smiles ? `smiles:${project.smiles}` : '',
+    project.moleculeName ? `name:${project.moleculeName}` : ''
+  ].filter(Boolean)[0] || project.id;
+}
+
+function moleculeName(metadata?: QuantumHistoryMetadata) {
+  return metadata?.name || metadata?.pdbId || metadata?.cid || metadata?.fileName || metadata?.smiles || 'Unnamed molecule';
+}
+
+function moleculeIdentifier(metadata?: QuantumHistoryMetadata) {
+  if (metadata?.pdbId) return `PDB ${metadata.pdbId}`;
+  if (metadata?.cid) return `CID ${metadata.cid}`;
+  if (metadata?.fileName) return metadata.fileName;
+  return metadata?.smiles || undefined;
+}
+
+function isProjectRecord(value: unknown): value is QuantumProjectRecord {
+  const record = value as QuantumProjectRecord;
+  return Boolean(
+    record
+    && typeof record.id === 'string'
+    && typeof record.createdAt === 'string'
+    && typeof record.updatedAt === 'string'
+    && typeof record.moleculeName === 'string'
+    && Array.isArray(record.calculations)
+  );
+}

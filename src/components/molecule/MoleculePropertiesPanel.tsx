@@ -47,6 +47,13 @@ import {
   type QuantumStructurePreparationResult,
   type QuantumWorkflowIssue
 } from '@/lib/chem/quantumWorkflow';
+import {
+  exportQuantumProjectBundle,
+  importQuantumProjectBundle,
+  loadQuantumProjects,
+  saveQuantumProjectFromCalculation,
+  type QuantumProjectRecord
+} from '@/lib/chem/quantumProjectWorkspace';
 import { MoleculeProperties } from '@/lib/chem/types';
 import { formatValue } from '@/lib/chem/moleculeUtils';
 
@@ -80,6 +87,23 @@ type QuantumExportContext = {
   metadata?: Metadata;
   preflightIssues?: QuantumWorkflowIssue[];
   unpairedElectrons: number;
+};
+
+type QuantumQueueItem = {
+  id: string;
+  createdAt: string;
+  label: string;
+  engine: QuantumEngineKind;
+  engineLabel: string;
+  calculationMode: QuantumCalculationMode;
+  gaussianTask?: GaussianTaskTemplateId;
+  charge: number;
+  unpairedElectrons: number;
+  method: string;
+  basisSet?: string;
+  routeOptions?: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  message?: string;
 };
 
 const cards: Array<{ key: keyof MoleculeProperties; label: string; unit?: string }> = [
@@ -339,6 +363,10 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   const [cubeKind, setCubeKind] = useState('density=scf');
   const [historyEntries, setHistoryEntries] = useState<QuantumHistoryEntry[]>([]);
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [projectRecords, setProjectRecords] = useState<QuantumProjectRecord[]>([]);
+  const [projectMessage, setProjectMessage] = useState('');
+  const [queueItems, setQueueItems] = useState<QuantumQueueItem[]>([]);
+  const [queueRunning, setQueueRunning] = useState(false);
   const [workflowMessage, setWorkflowMessage] = useState('');
   const [activeCalculationId, setActiveCalculationId] = useState('');
   const [preparedStructure, setPreparedStructure] = useState<QuantumStructurePreparationResult | null>(null);
@@ -357,10 +385,12 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
 
   useEffect(() => {
     setHistoryEntries(loadQuantumHistory());
+    setProjectRecords(loadQuantumProjects());
   }, []);
 
   useEffect(() => {
     setPreparedStructure(null);
+    setProjectMessage('');
   }, [xyz]);
 
   useEffect(() => {
@@ -501,7 +531,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     [preflight, result]
   );
   const calculationXyz = preparedStructure?.ok && preparedStructure.xyz ? preparedStructure.xyz : xyz;
-  const canRun = Boolean(calculationXyz && status?.available && preflight.canRun && !running && (selectedEngine !== 'pyscf' || calculationMode === 'single-point'));
+  const canRun = Boolean(calculationXyz && status?.available && preflight.canRun && !running && !queueRunning && (selectedEngine !== 'pyscf' || calculationMode === 'single-point'));
 
   async function loadLocalEngines() {
     const api = window.chemVaultDesktop;
@@ -742,6 +772,94 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     setWorkflowMessage('Gaussian follow-up is selected. Review the preflight panel and Gaussian input preview, then run the high-precision calculation.');
   }
 
+  function addCurrentSetupToQueue() {
+    const item = queueItemFromCurrentSetup();
+    setQueueItems((items) => [...items, item].slice(-12));
+    setWorkflowMessage(`${item.label} added to the local calculation queue.`);
+  }
+
+  function addScreenAndGaussianToQueue() {
+    const screenItem = queueItemFromCurrentSetup({
+      engine: 'xtb',
+      calculationMode: 'single-point',
+      label: 'xTB screening'
+    });
+    const gaussianItem = queueItemFromCurrentSetup({
+      engine: 'gaussian',
+      calculationMode: 'single-point',
+      gaussianTask: 'single-point',
+      label: 'Gaussian refinement'
+    });
+    setQueueItems((items) => [...items, screenItem, gaussianItem].slice(-12));
+    setWorkflowMessage('xTB screening and Gaussian refinement were added to the queue.');
+  }
+
+  function queueItemFromCurrentSetup(overrides: Partial<QuantumQueueItem> = {}): QuantumQueueItem {
+    const engine = overrides.engine || selectedEngine;
+    const commercialEngine = isCommercialEngine(engine);
+    const mode = overrides.calculationMode || calculationMode;
+    const task = engine === 'gaussian' ? overrides.gaussianTask || gaussianTask : undefined;
+    const method = overrides.method || (commercialEngine ? externalConfig.method : engine === 'pyscf' ? pyscfMethod : 'gfn2');
+    const basisSet = overrides.basisSet ?? (commercialEngine ? externalConfig.basisSet : engine === 'pyscf' ? pyscfBasisSet : undefined);
+    const routeOptions = overrides.routeOptions ?? (commercialEngine ? externalConfig.routeOptions : undefined);
+    const label = overrides.label || `${engineLabel(engine)} ${engine === 'gaussian' ? gaussianTaskLabel(task || 'single-point') : mode === 'geometry-optimization' ? 'optimization' : 'single point'}`;
+
+    return {
+      id: `queue_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+      createdAt: new Date().toISOString(),
+      label,
+      engine,
+      engineLabel: engineLabel(engine),
+      calculationMode: mode,
+      gaussianTask: task,
+      charge: overrides.charge ?? charge,
+      unpairedElectrons: overrides.unpairedElectrons ?? unpairedElectrons,
+      method,
+      basisSet,
+      routeOptions,
+      status: 'queued',
+      message: 'Waiting'
+    };
+  }
+
+  async function runQueuedCalculations() {
+    const pending = queueItems.filter((item) => item.status === 'queued' || item.status === 'failed');
+    if (!pending.length || queueRunning) return;
+
+    setQueueRunning(true);
+    setWorkflowMessage(`Running ${pending.length} queued calculation${pending.length === 1 ? '' : 's'} in sequence.`);
+    for (const item of pending) {
+      setQueueItems((items) => items.map((entry) => entry.id === item.id ? { ...entry, status: 'running', message: 'Running now' } : entry));
+      const nextResult = await executeCalculation({
+        basisSet: item.basisSet,
+        calculationMode: item.calculationMode,
+        charge: item.charge,
+        engine: item.engine,
+        gaussianTask: item.gaussianTask,
+        method: item.method,
+        routeOptions: item.routeOptions,
+        startMessage: `Queue item: ${item.label}`,
+        unpairedElectrons: item.unpairedElectrons
+      });
+      setQueueItems((items) => items.map((entry) => entry.id === item.id
+        ? {
+            ...entry,
+            status: nextResult?.ok ? 'completed' : 'failed',
+            message: nextResult?.ok
+              ? `${nextResult.engineLabel} completed in ${(nextResult.elapsedMs / 1000).toFixed(1)} s`
+              : nextResult?.error || 'Calculation did not complete.'
+          }
+        : entry));
+    }
+    setQueueRunning(false);
+    setWorkflowMessage('Queued calculations finished. Review the comparison table and local project record.');
+  }
+
+  function clearQueue() {
+    setQueueItems([]);
+    setWorkflowMessage('Calculation queue cleared.');
+  }
+
   function prepareCurrentStructure() {
     const prepared = prepareQuantumStructure(xyz);
     setPreparedStructure(prepared);
@@ -764,22 +882,73 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     downloadText(`${exportBaseName}_${exportTimestamp()}_prepared.xyz`, preparedStructure.xyz, 'chemical/x-xyz');
   }
 
-  function applyGaussianRouteFix(routeOption: string, label: string) {
+  function exportCurrentGaussianInputPreview() {
+    if (!gaussianInputPreview) return;
+    downloadText(`${exportBaseName}_${exportTimestamp()}_current.gjf`, gaussianInputPreview, 'chemical/x-gaussian-input');
+  }
+
+  function exportActiveProject() {
+    if (!activeProject) return;
+    downloadText(
+      `${safeFileBaseName(activeProject.moleculeName)}_${exportTimestamp()}_chemvault_project.json`,
+      exportQuantumProjectBundle(activeProject),
+      'application/json'
+    );
+  }
+
+  function exportProjectIndex() {
+    downloadText(
+      `chemvault_quantum_projects_${exportTimestamp()}.json`,
+      JSON.stringify({
+        schema: 'chemvault.quantum.project.index.v1',
+        exportedAt: new Date().toISOString(),
+        projects: projectRecords
+      }, null, 2),
+      'application/json'
+    );
+  }
+
+  async function importProjectFile(file: File | null) {
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const nextProjects = importQuantumProjectBundle(text);
+      setProjectRecords(nextProjects);
+      setProjectMessage(`${file.name} imported into the local ChemVault project workspace.`);
+    } catch (importError) {
+      setProjectMessage(importError instanceof Error ? importError.message : 'Project import failed.');
+    }
+  }
+
+  function applyGaussianRouteFix(routeOption: string, label: string, rerun = false) {
     if (selectedEngine !== 'gaussian') return;
+    const nextRouteOptions = appendRouteOption(externalConfig.routeOptions || '', routeOption);
     setExternalConfig((config) => ({
       ...config,
       engine: 'gaussian',
-      routeOptions: appendRouteOption(config.routeOptions || '', routeOption)
+      routeOptions: nextRouteOptions
     }));
     setAdvancedSettingsOpen(true);
-    setWorkflowMessage(`${label} applied to Gaussian route options. Review the input preview, then rerun the calculation.`);
+    setWorkflowMessage(`${label} applied to Gaussian route options.${rerun ? ' ChemVault will rerun with the repaired route.' : ' Review the input preview, then rerun the calculation.'}`);
+    if (rerun) {
+      void executeCalculation({
+        engine: 'gaussian',
+        routeOptions: nextRouteOptions,
+        startMessage: `${label} applied. Rerunning Gaussian with the repaired route.`
+      });
+    }
   }
 
   async function executeCalculation(options: {
+    basisSet?: string;
     calculationMode?: QuantumCalculationMode;
+    charge?: number;
     engine?: QuantumEngineKind;
     gaussianTask?: GaussianTaskTemplateId;
+    method?: string;
+    routeOptions?: string;
     startMessage?: string;
+    unpairedElectrons?: number;
   } = {}) {
     const api = window.chemVaultDesktop;
     const activeXyz = preparedStructure?.ok && preparedStructure.xyz ? preparedStructure.xyz : xyz;
@@ -789,15 +958,20 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     const runMode = options.calculationMode || calculationMode;
     const runGaussianTask = runEngine === 'gaussian' ? options.gaussianTask || gaussianTask : undefined;
     const commercialEngine = isCommercialEngine(runEngine);
+    const runCharge = options.charge ?? charge;
+    const runUnpairedElectrons = options.unpairedElectrons ?? unpairedElectrons;
+    const runMethod = options.method || (commercialEngine ? externalConfig.method : runEngine === 'pyscf' ? pyscfMethod : 'gfn2');
+    const runBasisSet = options.basisSet ?? (commercialEngine ? externalConfig.basisSet : runEngine === 'pyscf' ? pyscfBasisSet : undefined);
+    const runRouteOptions = options.routeOptions ?? (commercialEngine ? externalConfig.routeOptions : undefined);
     const validation = validateQuantumPreflight({
-      basisSet: commercialEngine ? externalConfig.basisSet : runEngine === 'pyscf' ? pyscfBasisSet : undefined,
+      basisSet: runBasisSet,
       calculationMode: runMode,
-      charge,
+      charge: runCharge,
       engine: runEngine,
       gaussianTask: runGaussianTask,
-      method: commercialEngine ? externalConfig.method : runEngine === 'pyscf' ? pyscfMethod : 'gfn2',
-      routeOptions: commercialEngine ? externalConfig.routeOptions : undefined,
-      unpairedElectrons,
+      method: runMethod,
+      routeOptions: runRouteOptions,
+      unpairedElectrons: runUnpairedElectrons,
       xyz: activeXyz
     });
 
@@ -832,11 +1006,11 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         calculationId,
         xyz: activeXyz,
         engine: runEngine,
-        charge,
-        unpairedElectrons,
-        method: commercialEngine ? externalConfig.method : runEngine === 'pyscf' ? pyscfMethod : 'gfn2',
-        basisSet: commercialEngine ? externalConfig.basisSet : runEngine === 'pyscf' ? pyscfBasisSet : undefined,
-        routeOptions: commercialEngine ? externalConfig.routeOptions : undefined,
+        charge: runCharge,
+        unpairedElectrons: runUnpairedElectrons,
+        method: runMethod,
+        basisSet: runBasisSet,
+        routeOptions: runRouteOptions,
         calculationMode: runMode,
         gaussianTask: runGaussianTask,
         timeoutMs: runEngine === 'gaussian'
@@ -849,14 +1023,25 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       });
       setResult(nextResult);
       const diagnosis = diagnoseQuantumCalculation(nextResult, validation);
-      setHistoryEntries(saveQuantumHistoryEntry(createQuantumHistoryEntry({
-        charge,
+      const historyEntry = createQuantumHistoryEntry({
+        charge: runCharge,
         diagnosis,
         metadata,
         preflight: validation,
         result: nextResult,
-        unpairedElectrons
-      })));
+        unpairedElectrons: runUnpairedElectrons
+      });
+      setHistoryEntries(saveQuantumHistoryEntry(historyEntry));
+      setProjectRecords(saveQuantumProjectFromCalculation({
+        charge: runCharge,
+        diagnosis,
+        metadata,
+        preflight: validation,
+        result: nextResult,
+        unpairedElectrons: runUnpairedElectrons
+      }));
+      setProjectMessage(`${historyEntry.moleculeName} was saved to the local ChemVault project workspace.`);
+      publishQuantumVisualOverlay(nextResult);
       if (!nextResult.ok) {
         setError(nextResult.error || 'Quantum calculation did not complete.');
       }
@@ -908,6 +1093,10 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   const exportBaseName = useMemo(
     () => quantumExportBaseName(metadata, result?.engine || selectedEngine),
     [metadata, result?.engine, selectedEngine]
+  );
+  const activeProject = useMemo(
+    () => projectRecords.find((project) => projectMatchesMetadata(project, metadata)) || projectRecords[0] || null,
+    [metadata, projectRecords]
   );
   const selectedEngineOption = engineOptions.find((option) => option.value === selectedEngine) || engineOptions[0];
   const selectedGaussianTaskTemplate = gaussianTaskTemplates.find((template) => template.id === gaussianTask) || gaussianTaskTemplates[0];
@@ -1214,6 +1403,26 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         />
       </div>
 
+      <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+        <QuantumQueuePanel
+          canQueue={Boolean(calculationXyz && preflight.canRun)}
+          items={queueItems}
+          running={queueRunning}
+          onAddCurrent={addCurrentSetupToQueue}
+          onAddWorkflow={addScreenAndGaussianToQueue}
+          onClear={clearQueue}
+          onRun={runQueuedCalculations}
+        />
+        <ProjectWorkspacePanel
+          activeProject={activeProject}
+          message={projectMessage}
+          projectCount={projectRecords.length}
+          onExportActive={exportActiveProject}
+          onExportIndex={exportProjectIndex}
+          onImport={importProjectFile}
+        />
+      </div>
+
       {!xyz ? (
         <p className="mt-3 rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
           Load a 3D SDF, MOL, XYZ, or PDB structure before running the desktop quantum engine.
@@ -1371,6 +1580,15 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
               {gaussianInputPreview ? (
                 <details className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
                   <summary className="cursor-pointer text-xs font-semibold text-slate-700">Gaussian input preview</summary>
+                  <div className="mt-2 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={exportCurrentGaussianInputPreview}
+                      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 hover:bg-slate-50"
+                    >
+                      Export current GJF
+                    </button>
+                  </div>
                   <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-white p-3 text-xs leading-5 text-slate-700">{gaussianInputPreview}</pre>
                 </details>
               ) : null}
@@ -1454,6 +1672,8 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         }}
         onOpenChange={setHistoryOpen}
       />
+
+      <ResultComparisonPanel entries={historyEntries} currentResult={result} />
 
       <QuantumEngineSetupDialog
         mode={setupMode}
@@ -2004,12 +2224,194 @@ function WorkflowBridgePanel({
   );
 }
 
+function QuantumQueuePanel({
+  canQueue,
+  items,
+  onAddCurrent,
+  onAddWorkflow,
+  onClear,
+  onRun,
+  running
+}: {
+  canQueue: boolean;
+  items: QuantumQueueItem[];
+  onAddCurrent: () => void;
+  onAddWorkflow: () => void;
+  onClear: () => void;
+  onRun: () => void;
+  running: boolean;
+}) {
+  const queuedCount = items.filter((item) => item.status === 'queued' || item.status === 'failed').length;
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Calculation queue</p>
+          <h4 className="mt-1 text-sm font-bold text-slate-950">Run a small workflow without babysitting it</h4>
+        </div>
+        <span className="rounded-full bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
+          {items.length ? `${items.length} item${items.length === 1 ? '' : 's'}` : 'Empty'}
+        </span>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onAddCurrent}
+          disabled={!canQueue || running}
+          className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          Add current setup
+        </button>
+        <button
+          type="button"
+          onClick={onAddWorkflow}
+          disabled={!canQueue || running}
+          className="rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Add screen + Gaussian
+        </button>
+        <button
+          type="button"
+          onClick={onRun}
+          disabled={!queuedCount || running}
+          className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {running ? 'Running queue' : 'Run queue'}
+        </button>
+        <button
+          type="button"
+          onClick={onClear}
+          disabled={!items.length || running}
+          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Clear
+        </button>
+      </div>
+      <div className="mt-3 grid gap-2">
+        {items.length ? items.slice(-5).map((item) => (
+          <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs font-bold text-slate-950">{item.label}</p>
+              <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                item.status === 'completed'
+                  ? 'bg-emerald-50 text-emerald-700'
+                  : item.status === 'failed'
+                    ? 'bg-rose-50 text-rose-700'
+                    : item.status === 'running'
+                      ? 'bg-sky-50 text-sky-700'
+                      : 'bg-white text-slate-600'
+              }`}>
+                {item.status}
+              </span>
+            </div>
+            <p className="mt-1 text-[11px] leading-4 text-slate-500">
+              {item.engineLabel} / {item.method}{item.basisSet ? ` / ${item.basisSet}` : ''} / charge {item.charge} / spin {item.unpairedElectrons}
+            </p>
+            {item.message ? <p className="mt-1 text-[11px] leading-4 text-slate-600">{item.message}</p> : null}
+          </div>
+        )) : (
+          <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+            Add the current setup when you want to run multiple calculations in sequence.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function ProjectWorkspacePanel({
+  activeProject,
+  message,
+  onExportActive,
+  onExportIndex,
+  onImport,
+  projectCount
+}: {
+  activeProject: QuantumProjectRecord | null;
+  message: string;
+  onExportActive: () => void;
+  onExportIndex: () => void;
+  onImport: (file: File | null) => void;
+  projectCount: number;
+}) {
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Project workspace</p>
+          <h4 className="mt-1 text-sm font-bold text-slate-950">Calculation records stay with the molecule</h4>
+        </div>
+        <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+          {projectCount} project{projectCount === 1 ? '' : 's'}
+        </span>
+      </div>
+      {activeProject ? (
+        <div className="mt-3 rounded-2xl border border-emerald-200 bg-white px-4 py-3">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-bold text-slate-950">{activeProject.moleculeName}</p>
+              <p className="mt-1 text-xs leading-5 text-slate-500">
+                {activeProject.latestEngineLabel} / {activeProject.calculationCount} calculation{activeProject.calculationCount === 1 ? '' : 's'} / {formatHistoryDate(activeProject.updatedAt)}
+              </p>
+            </div>
+            <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+              activeProject.latestStatus === 'completed' ? 'bg-emerald-50 text-emerald-700' : activeProject.latestStatus === 'failed' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
+            }`}>
+              {activeProject.latestStatus}
+            </span>
+          </div>
+          <div className="mt-3 grid gap-2 sm:grid-cols-2">
+            <MetricCompact label="Latest energy" value={activeProject.latestEnergyHartree === null ? 'N/A' : `${formatNumber(activeProject.latestEnergyHartree)} Eh`} />
+            <MetricCompact label="Latest dipole" value={activeProject.latestDipoleDebye === null ? 'N/A' : `${formatNumber(activeProject.latestDipoleDebye)} D`} />
+          </div>
+        </div>
+      ) : (
+        <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2 text-xs leading-5 text-slate-500">
+          Completed calculations will automatically create a local ChemVault project record.
+        </p>
+      )}
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onExportActive}
+          disabled={!activeProject}
+          className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          Export project
+        </button>
+        <button
+          type="button"
+          onClick={onExportIndex}
+          disabled={!projectCount}
+          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Export index
+        </button>
+        <label className="cursor-pointer rounded-xl border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-50">
+          Import project
+          <input
+            type="file"
+            accept="application/json,.json"
+            className="sr-only"
+            onChange={(event) => {
+              void onImport(event.target.files?.[0] || null);
+              event.target.value = '';
+            }}
+          />
+        </label>
+      </div>
+      {message ? <p className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-600">{message}</p> : null}
+    </section>
+  );
+}
+
 function ResultDiagnosisPanel({
   diagnosis,
   onApplyRouteFix
 }: {
   diagnosis: QuantumResultDiagnosis;
-  onApplyRouteFix?: (routeOption: string, label: string) => void;
+  onApplyRouteFix?: (routeOption: string, label: string, rerun?: boolean) => void;
 }) {
   const tone = diagnosis.severity === 'success'
     ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
@@ -2050,15 +2452,24 @@ function ResultDiagnosisPanel({
           <p className="text-xs font-bold">Route repair options</p>
           <div className="mt-2 flex flex-wrap gap-2">
             {diagnosis.routeFixes.map((fix) => (
-              <button
-                key={`${fix.label}-${fix.routeOption}`}
-                type="button"
-                onClick={() => onApplyRouteFix(fix.routeOption, fix.label)}
-                title={fix.detail}
-                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
-              >
-                {fix.label}
-              </button>
+              <span key={`${fix.label}-${fix.routeOption}`} className="inline-flex overflow-hidden rounded-xl border border-slate-300 bg-white">
+                <button
+                  type="button"
+                  onClick={() => onApplyRouteFix(fix.routeOption, fix.label)}
+                  title={fix.detail}
+                  className="px-3 py-2 text-xs font-semibold text-slate-800 hover:bg-slate-50"
+                >
+                  {fix.label}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onApplyRouteFix(fix.routeOption, fix.label, true)}
+                  title={`${fix.detail} Then rerun Gaussian.`}
+                  className="border-l border-slate-300 px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-50"
+                >
+                  Apply & rerun
+                </button>
+              </span>
             ))}
           </div>
         </div>
@@ -2250,6 +2661,76 @@ function QuantumHistoryPanel({
           </p>
         )}
       </div>
+    </details>
+  );
+}
+
+function ResultComparisonPanel({
+  currentResult,
+  entries
+}: {
+  currentResult: QuantumCalculationResult | null;
+  entries: QuantumHistoryEntry[];
+}) {
+  const rows = [
+    ...(currentResult ? [{
+      id: 'current',
+      label: 'Current result',
+      engineLabel: currentResult.engineLabel,
+      mode: currentResult.gaussianTaskLabel || currentResult.calculationMode,
+      energyHartree: currentResult.energyHartree,
+      dipoleDebye: currentResult.dipoleDebye?.total ?? null,
+      qualityScore: undefined as number | undefined,
+      status: currentResult.ok ? 'completed' : 'failed',
+      createdAt: new Date().toISOString()
+    }] : []),
+    ...entries.slice(0, 5).map((entry) => ({
+      id: entry.id,
+      label: entry.moleculeName,
+      engineLabel: entry.engineLabel,
+      mode: entry.mode,
+      energyHartree: entry.energyHartree,
+      dipoleDebye: entry.dipoleDebye,
+      qualityScore: entry.qualityScore,
+      status: entry.status,
+      createdAt: entry.createdAt
+    }))
+  ];
+
+  return (
+    <details className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+      <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+        Result comparison {rows.length ? `(${rows.length})` : ''}
+      </summary>
+      {rows.length ? (
+        <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-200 bg-white">
+          <div className="grid min-w-[760px] grid-cols-[minmax(140px,1.3fr)_minmax(90px,0.7fr)_minmax(94px,0.7fr)_minmax(112px,0.8fr)_minmax(98px,0.7fr)_minmax(80px,0.5fr)] bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
+            <span>Run</span>
+            <span>Engine</span>
+            <span>Mode</span>
+            <span>Energy</span>
+            <span>Dipole</span>
+            <span>Quality</span>
+          </div>
+          {rows.map((row) => (
+            <div key={row.id} className="grid min-w-[760px] grid-cols-[minmax(140px,1.3fr)_minmax(90px,0.7fr)_minmax(94px,0.7fr)_minmax(112px,0.8fr)_minmax(98px,0.7fr)_minmax(80px,0.5fr)] border-t border-slate-100 px-3 py-2 text-xs text-slate-700">
+              <span className="min-w-0">
+                <span className="block truncate font-semibold text-slate-950">{row.label}</span>
+                <span className="mt-0.5 block text-[10px] text-slate-500">{formatHistoryDate(row.createdAt)} / {row.status}</span>
+              </span>
+              <span>{row.engineLabel}</span>
+              <span className="truncate">{row.mode}</span>
+              <span>{row.energyHartree === null ? 'N/A' : `${formatNumber(row.energyHartree)} Eh`}</span>
+              <span>{row.dipoleDebye === null ? 'N/A' : `${formatNumber(row.dipoleDebye)} D`}</span>
+              <span>{typeof row.qualityScore === 'number' ? `${row.qualityScore}/100` : row.id === 'current' ? 'Live' : 'N/A'}</span>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2 text-xs leading-5 text-slate-500">
+          Run a calculation to compare results across engines, routes, and structures.
+        </p>
+      )}
     </details>
   );
 }
@@ -2727,11 +3208,40 @@ function gaussianRouteKeywords(task: GaussianTaskTemplateId, calculationMode: Qu
   return calculationMode === 'geometry-optimization' ? 'Opt' : 'SP';
 }
 
+function gaussianTaskLabel(task: GaussianTaskTemplateId) {
+  return gaussianTaskTemplates.find((template) => template.id === task)?.label || task;
+}
+
 function gaussianTaskTimeout(task: GaussianTaskTemplateId) {
   if (task === 'single-point') return 180000;
   if (task === 'td-dft' || task === 'nmr' || task === 'frequency' || task === 'solvent-model' || task === 'stability' || task === 'frontier-orbitals' || task === 'nbo') return 600000;
   if (task === 'irc' || task === 'transition-state') return 1200000;
   return 900000;
+}
+
+function projectMatchesMetadata(project: QuantumProjectRecord, metadata?: Metadata) {
+  if (!metadata) return false;
+  const candidates = [
+    metadata.pdbId ? `PDB ${metadata.pdbId}` : '',
+    metadata.cid ? `CID ${metadata.cid}` : '',
+    metadata.fileName || '',
+    metadata.smiles || '',
+    metadata.name || ''
+  ].filter(Boolean);
+  return candidates.some((candidate) => project.identifier === candidate || project.smiles === candidate || project.moleculeName === candidate);
+}
+
+function publishQuantumVisualOverlay(result: QuantumCalculationResult) {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new CustomEvent('chemvault:quantum-result-overlay', {
+    detail: {
+      charges: result.charges,
+      createdAt: new Date().toISOString(),
+      dipoleDebye: result.dipoleDebye,
+      engineLabel: result.engineLabel,
+      method: result.method
+    }
+  }));
 }
 
 function appendRouteOption(current: string, addition: string) {

@@ -6,7 +6,7 @@ type Representation = 'ball-and-stick' | 'stick' | 'sphere' | 'line' | 'surface'
 type StructureFormat = 'sdf' | 'mol' | 'molfile' | 'xyz' | 'pdb' | 'cif';
 type LabelOptions = { position: { x: number; y: number; z: number }; backgroundColor: string; fontColor: string; fontSize: number; inFront: boolean; alignment: string };
 type SurfaceType = { VDW: number };
-type ThreeDMolAtom = { elem: string; x: number; y: number; z: number };
+type ThreeDMolAtom = { elem: string; index?: number; serial?: number; x: number; y: number; z: number };
 type ThreeDMolModel = { selectedAtoms: (query: unknown) => ThreeDMolAtom[] };
 type ThreeDMolViewer = {
   config?: { backgroundAlpha?: number; backgroundColor?: string | number };
@@ -24,6 +24,13 @@ type ThreeDMolViewer = {
   resize?: () => void;
 };
 type ThreeDMolApi = { createViewer: (element: HTMLElement, options: { backgroundAlpha?: number; backgroundColor?: string | number; defaultcolors: unknown }) => ThreeDMolViewer; rasmolElementColors: unknown; SurfaceType: SurfaceType };
+type QuantumVisualOverlay = {
+  charges?: Array<{ charge: number; element: string; index: number }>;
+  createdAt?: string;
+  dipoleDebye?: { total: number; x: number; y: number; z: number } | null;
+  engineLabel?: string;
+  method?: string;
+};
 
 const THREE_DMOL_SOURCES = ['/vendor/3Dmol-min.js', 'https://unpkg.com/3dmol@2.5.5/build/3Dmol-min.js'];
 
@@ -135,6 +142,7 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
   const [background, setBackground] = useState('white');
   const [showHydrogens, setShowHydrogens] = useState(true);
   const [showAtomLabels, setShowAtomLabels] = useState(false);
+  const [quantumOverlay, setQuantumOverlay] = useState<QuantumVisualOverlay | null>(null);
 
   useEffect(() => {
     onReadyRef.current = onReady;
@@ -148,7 +156,7 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
         const threeDMol = (window as { $3Dmol?: ThreeDMolApi }).$3Dmol;
         if (!threeDMol) return;
         viewer.current = threeDMol.createViewer(container.current, {
-          backgroundAlpha: 1,
+          backgroundAlpha: 0,
           backgroundColor: 'white',
           defaultcolors: threeDMol.rasmolElementColors
         });
@@ -203,6 +211,27 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
         });
       }
 
+      if (quantumOverlay?.charges?.length && model.current?.selectedAtoms) {
+        const strongestCharges = [...quantumOverlay.charges]
+          .sort((first, second) => Math.abs(second.charge) - Math.abs(first.charge))
+          .slice(0, 6);
+        const chargeByIndex = new Map(strongestCharges.map((charge) => [charge.index, charge]));
+        const atoms = model.current.selectedAtoms({});
+        atoms.forEach((atom, atomOffset) => {
+          const atomIndex = atom.serial || atom.index || atomOffset + 1;
+          const charge = chargeByIndex.get(atomIndex);
+          if (!charge || !viewer.current) return;
+          viewer.current.addLabel(`${charge.element}${charge.index} ${formatCharge(charge.charge)}`, {
+            position: { x: atom.x, y: atom.y, z: atom.z },
+            backgroundColor: charge.charge >= 0 ? 'rgba(254,226,226,0.88)' : 'rgba(219,234,254,0.88)',
+            fontColor: charge.charge >= 0 ? '#991b1b' : '#1d4ed8',
+            fontSize: 11,
+            inFront: true,
+            alignment: 'center'
+          });
+        });
+      }
+
       if (representation === 'cartoon') {
         viewer.current.setStyle({}, { cartoon: { color: 'spectrum' } });
       }
@@ -227,7 +256,7 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
       setError('Cannot render this structure with current style.');
       // defensive: keep interface stable even if 3dmol API differs by version
     }
-  }, [background, representation, showHydrogens, showAtomLabels]);
+  }, [background, quantumOverlay, representation, showHydrogens, showAtomLabels]);
 
   const loadModel = useCallback(
     async (modelData: string | null, format: StructureFormat = 'sdf') => {
@@ -235,11 +264,13 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
       if (!modelData) {
         viewer.current.clear();
         setError(null);
+        setQuantumOverlay(null);
         return;
       }
 
       try {
         viewer.current.clear();
+        setQuantumOverlay(null);
         const normalized = normalizeFormat(format);
         model.current = viewer.current.addModel(modelData, normalized);
         applyStyle();
@@ -260,6 +291,12 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
       },
       exportPng: () => {
         if (!viewer.current) return null;
+        if (container.current) {
+          const canvas = container.current.querySelector('canvas');
+          if (canvas) {
+            canvas.style.backgroundColor = background === 'transparent' ? 'transparent' : background === 'black' ? 'black' : 'white';
+          }
+        }
         setViewerBackground(viewer.current, background);
         viewer.current.render();
         return viewer.current.pngURI();
@@ -299,7 +336,16 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
   useEffect(() => {
     if (!ready) return;
     applyStyle();
-  }, [ready, representation, background, showHydrogens, showAtomLabels, applyStyle]);
+  }, [ready, representation, background, showHydrogens, showAtomLabels, quantumOverlay, applyStyle]);
+
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<QuantumVisualOverlay>).detail;
+      setQuantumOverlay(detail);
+    };
+    window.addEventListener('chemvault:quantum-result-overlay', handler);
+    return () => window.removeEventListener('chemvault:quantum-result-overlay', handler);
+  }, []);
 
   useEffect(() => {
     if (!ready || !container.current || typeof ResizeObserver === 'undefined') return;
@@ -341,6 +387,33 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
         {error ? (
           <div className="absolute inset-x-2 top-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-xs text-amber-800">
             {error}
+          </div>
+        ) : null}
+        {quantumOverlay ? (
+          <div className="absolute right-3 top-3 max-w-[260px] rounded-xl border border-slate-200 bg-white/90 p-3 text-xs shadow-lg backdrop-blur">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="font-bold text-slate-950">Quantum overlay</p>
+                <p className="mt-1 truncate text-[11px] text-slate-500">{quantumOverlay.engineLabel || 'Engine'} / {quantumOverlay.method || 'method'}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setQuantumOverlay(null)}
+                className="rounded-md border border-slate-200 px-2 py-1 text-[10px] font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Clear
+              </button>
+            </div>
+            {quantumOverlay.dipoleDebye ? (
+              <p className="mt-2 rounded-lg bg-slate-50 px-2 py-1 text-[11px] text-slate-700">
+                Dipole {quantumOverlay.dipoleDebye.total.toFixed(4)} D ({formatCharge(quantumOverlay.dipoleDebye.x)}, {formatCharge(quantumOverlay.dipoleDebye.y)}, {formatCharge(quantumOverlay.dipoleDebye.z)})
+              </p>
+            ) : null}
+            {quantumOverlay.charges?.length ? (
+              <p className="mt-2 text-[11px] leading-4 text-slate-500">
+                Strongest parsed atom charges are labeled directly on the structure.
+              </p>
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -401,4 +474,9 @@ function getStyleForRepresentation(representation: Representation) {
     sphere: { scale: 1.0 },
     stick: { radius: 0.2 }
   };
+}
+
+function formatCharge(value: number) {
+  if (!Number.isFinite(value)) return 'N/A';
+  return `${value >= 0 ? '+' : ''}${value.toFixed(4)}`;
 }

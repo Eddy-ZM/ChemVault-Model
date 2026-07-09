@@ -54,6 +54,15 @@ const greekLetterReplacements: Array<[RegExp, string]> = [
   [/\u03bc/giu, 'micro']
 ];
 
+const SEARCH_CACHE_LIMIT = 80;
+const CID_CACHE_LIMIT = 200;
+const PROPERTIES_CACHE_LIMIT = 200;
+const MAX_LOOKUP_CONCURRENCY = 6;
+
+const searchCache = new Map<string, MoleculeSearchResult[]>();
+const cidCache = new Map<string, string | null>();
+const propertiesCache = new Map<string, Record<string, number | string | null>>();
+
 export type PubChemStructureResult = {
   data: string;
   source: '3d' | '2d';
@@ -78,8 +87,13 @@ async function fetchText(url: string): Promise<string> {
 }
 
 async function getCidFromName(name: string): Promise<string | null> {
+  const cacheKey = `name:${normalizeSearchQuery(name).toLowerCase()}`;
+  if (cidCache.has(cacheKey)) return cidCache.get(cacheKey) ?? null;
+
   const res = await fetchJson<{ IdentifierList?: { CID?: number[] } }>(`${PUBCHEM}/compound/name/${encodeURIComponent(name)}/cids/JSON`);
-  return res.IdentifierList?.CID?.[0]?.toString() ?? null;
+  const cid = res.IdentifierList?.CID?.[0]?.toString() ?? null;
+  remember(cidCache, cacheKey, cid, CID_CACHE_LIMIT);
+  return cid;
 }
 
 async function getAutocompleteTerms(query: string, limit: number): Promise<string[]> {
@@ -91,10 +105,15 @@ async function getAutocompleteTerms(query: string, limit: number): Promise<strin
 
 async function getCidFromSmiles(smiles: string): Promise<string | null> {
   const normalized = normalizeSmiles(smiles);
+  const cacheKey = `smiles:${normalized}`;
+  if (cidCache.has(cacheKey)) return cidCache.get(cacheKey) ?? null;
+
   const res = await fetchJson<{ IdentifierList?: { CID?: number[] } }>(
     `${PUBCHEM}/compound/smiles/${encodeURIComponent(normalized)}/cids/JSON`
   );
-  return res.IdentifierList?.CID?.[0]?.toString() ?? null;
+  const cid = res.IdentifierList?.CID?.[0]?.toString() ?? null;
+  remember(cidCache, cacheKey, cid, CID_CACHE_LIMIT);
+  return cid;
 }
 
 export async function getCidBySmiles(smiles: string): Promise<string | null> {
@@ -110,11 +129,47 @@ async function resolveCid(query: string): Promise<string | null> {
 type PubChemNamespace = 'cid' | 'smiles' | 'name' | 'inchikey';
 
 async function fetchProperties(identifier: string, namespace: PubChemNamespace = 'cid'): Promise<Record<string, number | string | null>> {
+  const cacheKey = `${namespace}:${identifier}`;
+  if (propertiesCache.has(cacheKey)) return propertiesCache.get(cacheKey) ?? {};
+
   const properties = supportedPropertyKeys.join(',');
   const path = `${PUBCHEM}/compound/${namespace}/${encodeURIComponent(identifier)}/property/${properties}/JSON`;
 
   const data = await fetchJson<{ PropertyTable?: { Properties?: Array<Record<string, number | string | null>> } }>(path);
-  return data.PropertyTable?.Properties?.[0] ?? {};
+  const props = data.PropertyTable?.Properties?.[0] ?? {};
+  remember(propertiesCache, cacheKey, props, PROPERTIES_CACHE_LIMIT);
+  return props;
+}
+
+async function fetchPropertiesBatch(cids: string[]): Promise<Map<string, Record<string, number | string | null>>> {
+  const uniqueCids = [...new Set(cids.filter(Boolean))];
+  const results = new Map<string, Record<string, number | string | null>>();
+  const missing: string[] = [];
+
+  uniqueCids.forEach((cid) => {
+    const cached = propertiesCache.get(`cid:${cid}`);
+    if (cached) {
+      results.set(cid, cached);
+    } else {
+      missing.push(cid);
+    }
+  });
+
+  if (missing.length === 0) return results;
+
+  const properties = supportedPropertyKeys.join(',');
+  const cidPath = missing.map((cid) => encodeURIComponent(cid)).join(',');
+  const path = `${PUBCHEM}/compound/cid/${cidPath}/property/${properties}/JSON`;
+  const data = await fetchJson<{ PropertyTable?: { Properties?: Array<Record<string, number | string | null>> } }>(path);
+
+  for (const [index, props] of (data.PropertyTable?.Properties ?? []).entries()) {
+    const cid = typeof props.CID === 'number' || typeof props.CID === 'string' ? String(props.CID) : missing[index] ?? '';
+    if (!cid) continue;
+    remember(propertiesCache, `cid:${cid}`, props, PROPERTIES_CACHE_LIMIT);
+    results.set(cid, props);
+  }
+
+  return results;
 }
 
 function getSmiles(props: Record<string, unknown>) {
@@ -187,14 +242,36 @@ export async function searchCompoundsByNameOrIdentifier(query: string, limit = 8
   const normalized = normalizeSearchQuery(query);
   if (!normalized) return [];
   const boundedLimit = Math.max(1, Math.min(limit, 12));
-  const seeds = await buildCandidateSeeds(normalized, boundedLimit);
-  const results: MoleculeSearchResult[] = [];
-  const seen = new Set<string>();
+  const cacheKey = `${normalized.toLowerCase()}::${boundedLimit}`;
+  const cached = searchCache.get(cacheKey);
+  if (cached) return cached;
 
-  for (const seed of seeds) {
-    const result = await getCompoundByNameOrIdentifier(seed.value).catch(() => null);
+  const directResult = await getDirectSearchResult(normalized).catch(() => null);
+  if (directResult && isDirectSearchResult(normalized, directResult)) {
+    const directResults = [directResult];
+    remember(searchCache, cacheKey, directResults, SEARCH_CACHE_LIMIT);
+    return directResults;
+  }
+
+  const seeds = await buildCandidateSeeds(normalized, boundedLimit);
+  const resolved = await mapConcurrent(seeds, MAX_LOOKUP_CONCURRENCY, (seed) => resolveSeedToCid(seed, normalized));
+  const cidSeeds = resolved.filter((item): item is CandidateSeed & { cid: string } => Boolean(item?.cid));
+  const propsByCid = await fetchPropertiesBatch(cidSeeds.map((seed) => seed.cid));
+
+  const results = directResult ? [directResult] : [];
+  const seen = new Set<string>();
+  if (directResult) {
+    seen.add(searchResultKey(directResult, normalized));
+  }
+
+  for (const seed of cidSeeds) {
+    const result = toSearchResult(seed.value, propsByCid.get(seed.cid) ?? {}, seed.cid, {
+      matchType: seed.matchType,
+      matchScore: seed.score,
+      matchedName: seed.matchedName
+    });
     if (!result) continue;
-    const key = result.cid ? `cid:${result.cid}` : result.inchikey ? `inchikey:${result.inchikey}` : result.canonicalSmiles ? `smiles:${result.canonicalSmiles}` : `name:${normalizeSearchQuery(result.name || seed.value)}`;
+    const key = searchResultKey(result, seed.value);
     if (seen.has(key)) continue;
     seen.add(key);
     results.push({
@@ -207,7 +284,9 @@ export async function searchCompoundsByNameOrIdentifier(query: string, limit = 8
     if (results.length >= boundedLimit) break;
   }
 
-  return results.sort((a, b) => (b.matchScore ?? 0) - (a.matchScore ?? 0));
+  const sorted = results.sort((a, b) => (b.matchScore ?? 0) - (a.matchScore ?? 0));
+  remember(searchCache, cacheKey, sorted, SEARCH_CACHE_LIMIT);
+  return sorted;
 }
 
 export function normalizeSearchQuery(value: string): string {
@@ -224,6 +303,20 @@ export function normalizeSearchQuery(value: string): string {
     .trim();
 }
 
+async function getDirectSearchResult(query: string): Promise<MoleculeSearchResult | null> {
+  const isCid = /^\d+$/.test(query);
+  const isInchiKey = /^[A-Z]{14}-[A-Z]{10}-[A-Z]$/i.test(query);
+  if (isCid || isInchiKey || looksLikeSmiles(query)) {
+    return getCompoundByNameOrIdentifier(query);
+  }
+
+  const cid = await getCidFromName(query).catch(() => null);
+  if (!cid) return null;
+
+  const props = await fetchProperties(cid, 'cid');
+  return toSearchResult(query, props, cid, { matchType: 'exact-name', matchScore: 0.96, matchedName: query });
+}
+
 async function buildCandidateSeeds(query: string, limit: number): Promise<CandidateSeed[]> {
   const seeds: CandidateSeed[] = [];
   const variants = searchVariants(query);
@@ -237,8 +330,10 @@ async function buildCandidateSeeds(query: string, limit: number): Promise<Candid
     });
   }
 
-  for (const variant of variants.slice(0, 3)) {
-    const terms = await getAutocompleteTerms(variant, limit).catch(() => []);
+  const autocompleteGroups = await Promise.all(
+    variants.slice(0, 3).map((variant) => getAutocompleteTerms(variant, limit).catch(() => []))
+  );
+  for (const terms of autocompleteGroups) {
     terms.forEach((term, index) => {
       seeds.push({
         value: term,
@@ -315,4 +410,70 @@ export async function fetchStructureBySmiles(smiles: string, with3d = true): Pro
     throw new Error('SMILES could not be resolved by PubChem.');
   }
   return fetchStructure(cid, with3d);
+}
+
+async function resolveSeedToCid(seed: CandidateSeed, originalQuery: string): Promise<(CandidateSeed & { cid: string | null }) | null> {
+  const value = seed.value.trim();
+  if (!value) return null;
+  if (/^\d+$/.test(value)) return { ...seed, cid: value };
+
+  const nameCid = await getCidFromName(value).catch(() => null);
+  if (nameCid) return { ...seed, cid: nameCid };
+
+  if (seed.value === originalQuery || looksLikeSmiles(value)) {
+    const smilesCid = await getCidFromSmiles(value).catch(() => null);
+    if (smilesCid) return { ...seed, cid: smilesCid, matchType: 'smiles' };
+  }
+
+  return { ...seed, cid: null };
+}
+
+async function mapConcurrent<T, R>(items: T[], concurrency: number, mapper: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex;
+      nextIndex += 1;
+      results[currentIndex] = await mapper(items[currentIndex]);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  return results;
+}
+
+function searchResultKey(result: MoleculeSearchResult, fallback: string) {
+  if (result.cid) return `cid:${result.cid}`;
+  if (result.inchikey) return `inchikey:${result.inchikey}`;
+  if (result.canonicalSmiles) return `smiles:${result.canonicalSmiles}`;
+  return `name:${normalizeSearchQuery(result.name || fallback).toLowerCase()}`;
+}
+
+function isDirectSearchResult(query: string, result: MoleculeSearchResult) {
+  if (/^\d+$/.test(query)) return true;
+  if (/^[A-Z]{14}-[A-Z]{10}-[A-Z]$/i.test(query)) return true;
+  if (looksLikeSmiles(query) && result.matchType === 'smiles') return true;
+
+  const normalizedQuery = normalizeSearchQuery(query).toLowerCase();
+  const normalizedName = normalizeSearchQuery(result.name || '').toLowerCase();
+  const normalizedMatched = normalizeSearchQuery(result.matchedName || '').toLowerCase();
+  return Boolean(result.smiles && (normalizedQuery === normalizedName || normalizedQuery === normalizedMatched || (result.matchScore ?? 0) >= 0.95));
+}
+
+function looksLikeSmiles(value: string) {
+  return /[=#@()[\]\\/+]/u.test(value) || /[A-Z][a-z]?\d|\d[A-Z][a-z]?/u.test(value);
+}
+
+function remember<K, V>(cache: Map<K, V>, key: K, value: V, limit: number) {
+  if (cache.has(key)) {
+    cache.delete(key);
+  }
+  cache.set(key, value);
+  if (cache.size <= limit) return;
+  const oldest = cache.keys().next().value as K | undefined;
+  if (oldest !== undefined) {
+    cache.delete(oldest);
+  }
 }

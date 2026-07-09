@@ -20,12 +20,13 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type'
 };
 
-export function jsonResponse(payload: unknown, status = 200) {
+export function jsonResponse(payload: unknown, status = 200, headers: HeadersInit = {}) {
   return new Response(JSON.stringify(payload), {
     status,
     headers: {
       'Content-Type': 'application/json; charset=utf-8',
-      ...corsHeaders
+      ...corsHeaders,
+      ...headers
     }
   });
 }

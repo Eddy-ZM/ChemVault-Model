@@ -25,6 +25,7 @@ type MoleculeSource = 'search' | 'smiles' | 'draw' | 'upload' | 'pdb';
 type Toast = { id: number; text: string; level: 'error' | 'success' | 'info' };
 type SearchCandidate = MoleculeApiPayload;
 type SearchCandidateState = { query: string; candidates: SearchCandidate[] };
+type SearchCacheEntry = { candidates: SearchCandidate[]; needsSelection: boolean };
 
 type CurrentMolecule = {
   name?: string;
@@ -61,6 +62,9 @@ export function MoleculeStudio() {
   const undoStack = useRef<string[]>([INITIAL_SMILES]);
   const redoStack = useRef<string[]>([]);
   const initialPropertiesLoaded = useRef(false);
+  const propertyCache = useRef(new Map<string, MoleculeProperties>());
+  const searchResultCache = useRef(new Map<string, SearchCacheEntry>());
+  const structureCache = useRef(new Map<string, string>());
 
   const [activeMode, setActiveMode] = useState<MoleculeMode>('search');
   const [smiles, setSmiles] = useState(INITIAL_SMILES);
@@ -140,9 +144,16 @@ export function MoleculeStudio() {
 
   const loadProperties = useCallback(
     async (value: string): Promise<MoleculeProperties | null> => {
-      if (!value.trim()) {
+      const normalized = normalizeSmiles(value);
+      if (!normalized.trim()) {
         setProperties(emptyProperties());
         return null;
+      }
+
+      const cached = propertyCache.current.get(normalized);
+      if (cached) {
+        setProperties(cached);
+        return cached;
       }
 
       setLoadingProperties(true);
@@ -150,7 +161,7 @@ export function MoleculeStudio() {
         const response = await fetch('/api/chem/properties', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ smiles: value })
+          body: JSON.stringify({ smiles: normalized })
         });
         const payload = (await response.json()) as Partial<MoleculeProperties> & { error?: string };
         if (!response.ok) {
@@ -172,6 +183,7 @@ export function MoleculeStudio() {
         };
 
         setProperties(nextProperties);
+        propertyCache.current.set(normalized, nextProperties);
         return nextProperties;
       } catch (error) {
         setProperties(emptyProperties());
@@ -229,18 +241,21 @@ export function MoleculeStudio() {
       pushSmilesHistory(nextSmiles);
 
       try {
-        const response = await fetch('/api/chem/generate-3d', {
+        const generationPromise = fetch('/api/chem/generate-3d', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ smiles: nextSmiles })
+        }).then(async (response) => {
+          const payload = (await response.json()) as MoleculeGenerationResponse & { error?: string; cid?: string | null };
+          if (!response.ok || !payload.success) {
+            throw new Error(payload.error || '3D generation failed');
+          }
+          return payload;
         });
-        const payload = (await response.json()) as MoleculeGenerationResponse & { error?: string; cid?: string | null };
-        if (!response.ok || !payload.success) {
-          throw new Error(payload.error || '3D generation failed');
-        }
+        const propertiesPromise = loadProperties(nextSmiles);
+        const [payload, nextProperties] = await Promise.all([generationPromise, propertiesPromise]);
 
         syncViewer(payload.data, 'sdf');
-        const nextProperties = await loadProperties(nextSmiles);
         setCurrentMolecule((prev) => ({
           ...prev,
           ...metadata,
@@ -267,6 +282,19 @@ export function MoleculeStudio() {
     [clearModeError, loadProperties, pushSmilesHistory, setModeError, syncViewer, toast]
   );
 
+  const fetchStructureForCid = useCallback(async (cid: string) => {
+    const cached = structureCache.current.get(cid);
+    if (cached) return cached;
+
+    const structureResp = await fetch(`/api/chem/pubchem/structure?cid=${encodeURIComponent(cid)}&format=sdf3d`);
+    const structurePayload = (await structureResp.json()) as { error?: string; data?: string };
+    if (!structureResp.ok || !structurePayload.data) {
+      throw new Error(structurePayload.error || 'PubChem structure fetch failed');
+    }
+    structureCache.current.set(cid, structurePayload.data);
+    return structurePayload.data;
+  }, []);
+
   const loadSearchResult = useCallback(
     async (result: SearchCandidate, fallbackName: string) => {
       const nextSmiles = result.smiles || result.canonicalSmiles || '';
@@ -289,21 +317,16 @@ export function MoleculeStudio() {
         structureFormat: 'sdf'
       });
 
-      const nextProperties = await loadProperties(nextSmiles);
-      setCurrentMolecule((prev) => ({
-        ...prev,
-        formula: prev.formula ?? nextProperties?.formula ?? null,
-        molecularWeight: prev.molecularWeight ?? nextProperties?.molecularWeight ?? null
-      }));
-
       if (result.cid) {
-        const structureResp = await fetch(`/api/chem/pubchem/structure?cid=${encodeURIComponent(result.cid)}&format=sdf3d`);
-        const structurePayload = (await structureResp.json()) as { error?: string; data?: string };
-        if (!structureResp.ok || !structurePayload.data) {
-          throw new Error(structurePayload.error || 'PubChem structure fetch failed');
-        }
-        syncViewer(structurePayload.data, 'sdf');
-        setCurrentMolecule((prev) => ({ ...prev, structureData: structurePayload.data ?? null, structureFormat: 'sdf' }));
+        const [nextProperties, structureData] = await Promise.all([loadProperties(nextSmiles), fetchStructureForCid(result.cid)]);
+        syncViewer(structureData, 'sdf');
+        setCurrentMolecule((prev) => ({
+          ...prev,
+          formula: prev.formula ?? nextProperties?.formula ?? null,
+          molecularWeight: prev.molecularWeight ?? nextProperties?.molecularWeight ?? null,
+          structureData,
+          structureFormat: 'sdf'
+        }));
       } else {
         await generate3DFromSmiles(nextSmiles, 'search', { name: result.name || result.matchedName || fallbackName, cid: result.cid ?? null }, 'search');
       }
@@ -311,7 +334,7 @@ export function MoleculeStudio() {
       setPdbMeta(undefined);
       toast('PubChem result loaded.', 'success');
     },
-    [generate3DFromSmiles, loadProperties, pushSmilesHistory, syncViewer, toast]
+    [fetchStructureForCid, generate3DFromSmiles, loadProperties, pushSmilesHistory, syncViewer, toast]
   );
 
   const loadByQuery = useCallback(
@@ -326,24 +349,35 @@ export function MoleculeStudio() {
       clearModeError('search');
       setLoadingSearch(true);
       try {
-        const response = await fetch(`/api/chem/pubchem/search?query=${encodeURIComponent(trimmed)}&limit=8`);
-        const payload = (await response.json()) as SearchCandidate & {
-          error?: string;
-          result?: SearchCandidate;
-          results?: SearchCandidate[];
-          needsSelection?: boolean;
-        };
-        if (!response.ok) {
-          throw new Error(payload.error || 'Search failed');
+        const cacheKey = searchCacheKey(trimmed);
+        let cached = searchResultCache.current.get(cacheKey);
+        if (!cached) {
+          const response = await fetch(`/api/chem/pubchem/search?query=${encodeURIComponent(trimmed)}&limit=8`);
+          const payload = (await response.json()) as SearchCandidate & {
+            error?: string;
+            result?: SearchCandidate;
+            results?: SearchCandidate[];
+            needsSelection?: boolean;
+          };
+          if (!response.ok) {
+            throw new Error(payload.error || 'Search failed');
+          }
+
+          const candidates = (payload.results?.length ? payload.results : payload.result ? [payload.result] : [payload]).filter(
+            (candidate) => candidate && (candidate.smiles || candidate.canonicalSmiles || candidate.cid)
+          );
+          cached = {
+            candidates,
+            needsSelection: Boolean(payload.needsSelection)
+          };
+          searchResultCache.current.set(cacheKey, cached);
         }
 
-        const candidates = (payload.results?.length ? payload.results : payload.result ? [payload.result] : [payload]).filter(
-          (candidate) => candidate && (candidate.smiles || candidate.canonicalSmiles || candidate.cid)
-        );
+        const { candidates, needsSelection } = cached;
         if (candidates.length === 0) {
           throw new Error('PubChem did not return a usable molecule for this query.');
         }
-        if (payload.needsSelection || candidates.length > 1) {
+        if (needsSelection || candidates.length > 1) {
           setSearchCandidateState({ query: trimmed, candidates });
           toast(`${candidates.length} possible PubChem matches found. Choose one to load.`, 'info');
           return;
@@ -916,6 +950,10 @@ function firstExportValue(...values: Array<string | null | undefined>) {
 
 function stripFileExtension(value?: string | null) {
   return value?.replace(/\.[a-zA-Z0-9]{1,8}$/u, '') || '';
+}
+
+function searchCacheKey(value: string) {
+  return value.normalize('NFKC').trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 function matchTypeLabel(type: SearchCandidate['matchType']) {

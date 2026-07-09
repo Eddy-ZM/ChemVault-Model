@@ -5,6 +5,10 @@ export function onRequestOptions() {
   return optionsResponse();
 }
 
+const structureCacheHeaders = {
+  'Cache-Control': 'public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800'
+};
+
 export async function onRequestGet({ request }: CloudflarePagesContext) {
   const url = new URL(request.url);
   const cid = url.searchParams.get('cid')?.trim() || '';
@@ -17,14 +21,18 @@ export async function onRequestGet({ request }: CloudflarePagesContext) {
   try {
     const include3d = format.toLowerCase() === 'sdf3d';
     const result = await fetchStructure(cid, include3d);
-    return jsonResponse({
-      success: true,
-      cid,
-      format: 'sdf',
-      data: result.data,
-      optimized: false,
-      method: result.source === '3d' ? 'PubChem SDF 3D' : 'PubChem SDF 2D'
-    });
+    return jsonResponse(
+      {
+        success: true,
+        cid,
+        format: 'sdf',
+        data: result.data,
+        optimized: false,
+        method: result.source === '3d' ? 'PubChem SDF 3D' : 'PubChem SDF 2D'
+      },
+      200,
+      structureCacheHeaders
+    );
   } catch (error) {
     return jsonResponse({ error: error instanceof Error ? error.message : 'PubChem structure fetch failed' }, 502);
   }

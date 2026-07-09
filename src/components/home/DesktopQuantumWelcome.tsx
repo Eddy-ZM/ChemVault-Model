@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { QuantumEngineSetupDialog, type QuantumSetupDialogMode } from '@/components/desktop/QuantumEngineSetupDialog';
+import { saveQuantumEnginePreference } from '@/lib/chem/quantumPreference';
 import type { LocalEngineStatus, QuantumEngineKind } from '@/lib/chem/quantumTypes';
 
 export function DesktopQuantumWelcome() {
@@ -26,9 +27,10 @@ export function DesktopQuantumWelcome() {
     try {
       const statuses = await api.getLocalOpenSourceEngines();
       setEngines(statuses);
-      const ready = statuses.find((engine) => engine.available);
+      const ready = statuses.find(isStudioReadyEngine);
       if (ready) {
         setSelectedEngineLabel((current) => current || ready.engineLabel);
+        saveQuantumEnginePreference(ready.engine, ready.engineLabel, { source: 'welcome' });
       }
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'Could not inspect local quantum engines.');
@@ -48,10 +50,12 @@ export function DesktopQuantumWelcome() {
       ]);
       if (gaussian?.executablePath) {
         setSelectedEngineLabel('Gaussian');
+        saveQuantumEnginePreference('gaussian', 'Gaussian', { source: 'welcome' });
         return;
       }
       if (orca?.executablePath) {
         setSelectedEngineLabel('ORCA');
+        saveQuantumEnginePreference('orca', 'ORCA', { source: 'welcome' });
       }
     } catch {
       // The welcome panel should stay usable even if persisted engine config cannot be read.
@@ -76,6 +80,7 @@ export function DesktopQuantumWelcome() {
   }
 
   function handleEngineSelected(_engine: QuantumEngineKind, label: string) {
+    saveQuantumEnginePreference(_engine, label, { notifyInStudio: true, source: 'welcome' });
     setSelectedEngineLabel(label);
     setMessage('');
     setDismissed(false);
@@ -216,4 +221,8 @@ export function DesktopQuantumWelcome() {
       />
     </div>
   );
+}
+
+function isStudioReadyEngine(engine: LocalEngineStatus): engine is LocalEngineStatus & { engine: QuantumEngineKind } {
+  return engine.available && (engine.engine === 'xtb' || engine.engine === 'pyscf');
 }

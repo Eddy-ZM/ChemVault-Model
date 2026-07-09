@@ -18,6 +18,12 @@ import type {
 } from '@/lib/chem/quantumTypes';
 import { downloadBinary, downloadText, safeFileBaseName } from '@/lib/chem/fileExport';
 import {
+  consumeQuantumEnginePreferenceNotice,
+  loadQuantumEnginePreference,
+  saveQuantumEnginePreference,
+  type QuantumEnginePreference
+} from '@/lib/chem/quantumPreference';
+import {
   CHEMVAULT_COPYRIGHT_NOTICE,
   createQuantumExcelWorkbook,
   createQuantumPdfDocument,
@@ -207,6 +213,19 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   const [result, setResult] = useState<QuantumCalculationResult | null>(null);
   const [error, setError] = useState('');
   const [calculationProgress, setCalculationProgress] = useState<QuantumCalculationProgress | null>(null);
+  const [enginePreferenceNotice, setEnginePreferenceNotice] = useState<QuantumEnginePreference | null>(null);
+
+  useEffect(() => {
+    const preference = loadQuantumEnginePreference();
+    const notice = consumeQuantumEnginePreferenceNotice();
+    const applied = notice || preference;
+    if (!applied) return;
+
+    setSelectedEngine(applied.engine);
+    if (notice) {
+      setEnginePreferenceNotice(notice);
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -366,6 +385,11 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     }
   }
 
+  function selectEngine(engine: QuantumEngineKind, label = engineLabel(engine)) {
+    setSelectedEngine(engine);
+    saveQuantumEnginePreference(engine, label, { source: 'studio' });
+  }
+
   async function chooseExternalExecutable() {
     const api = window.chemVaultDesktop;
     if (!isCommercialEngine(selectedEngine) || !api?.selectQuantumEngineExecutable) return;
@@ -397,7 +421,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   }
 
   function handleSetupEngineSelected(engine: QuantumEngineKind, label: string) {
-    setSelectedEngine(engine);
+    selectEngine(engine, label);
     setConfigRevision((value) => value + 1);
     const message = `${label} selected. Engine status will refresh before the next calculation.`;
     if (isCommercialEngine(engine)) {
@@ -564,7 +588,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
               <button
                 key={option.value}
                 type="button"
-                onClick={() => setSelectedEngine(option.value)}
+                onClick={() => selectEngine(option.value, option.label)}
                 className={`rounded-xl border px-3 py-3 text-left transition ${
                   selectedEngine === option.value
                     ? 'border-sky-400 bg-white text-sky-950 shadow-sm'
@@ -615,6 +639,37 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
           setConfigRevision((value) => value + 1);
         }}
       />
+
+      {enginePreferenceNotice ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/30 px-4 py-6">
+          <div className="w-full max-w-lg rounded-3xl border border-emerald-200 bg-white p-5 shadow-2xl">
+            <p className="text-xs font-bold uppercase tracking-[0.16em] text-emerald-700">Engine preference applied</p>
+            <h4 className="mt-2 text-xl font-bold text-slate-950">{enginePreferenceNotice.label} is ready in Molecule Studio</h4>
+            <p className="mt-2 text-sm leading-6 text-slate-600">
+              The engine you configured from the welcome screen has been saved and selected here. You can run Professional Quantum Calculation with this engine without configuring it again.
+            </p>
+            <div className="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setEnginePreferenceNotice(null);
+                  setSetupMode('configure');
+                }}
+                className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Change engine
+              </button>
+              <button
+                type="button"
+                onClick={() => setEnginePreferenceNotice(null)}
+                className="rounded-xl bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800"
+              >
+                Continue
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
 
       {selectedEngine === 'pyscf' ? (
         <div className="mt-4 rounded-3xl border border-slate-200 bg-slate-50 p-4">

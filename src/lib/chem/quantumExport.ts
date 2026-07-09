@@ -1,4 +1,5 @@
 import type { QuantumCalculationResult } from '@/lib/chem/quantumTypes';
+import type { QuantumResultDiagnosis, QuantumWorkflowIssue } from '@/lib/chem/quantumWorkflow';
 
 export type QuantumExportMetadata = {
   name?: string;
@@ -11,8 +12,10 @@ export type QuantumExportMetadata = {
 
 export type QuantumExportDocumentContext = {
   charge: number;
+  diagnosis?: QuantumResultDiagnosis | null;
   includeLog?: boolean;
   metadata?: QuantumExportMetadata;
+  preflightIssues?: QuantumWorkflowIssue[];
   unpairedElectrons: number;
 };
 
@@ -44,6 +47,8 @@ export function createQuantumExcelWorkbook(result: QuantumCalculationResult, con
   const summaryRows = quantumSummaryRows(result, context, generatedAt);
   const warnings = result.warnings.length ? result.warnings : ['No warnings returned.'];
   const chargeRows = result.charges.map((atom) => [String(atom.index), atom.element, `${formatSigned(atom.charge)} e`]);
+  const reviewRows = reviewRowsForExport(context);
+  const preflightRows = preflightRowsForExport(context);
 
   const workbook = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
@@ -60,6 +65,12 @@ export function createQuantumExcelWorkbook(result: QuantumCalculationResult, con
     [],
     ['Warnings'],
     ...warnings.map((warning) => [warning]),
+    [],
+    ['ChemVault Review'],
+    ...reviewRows,
+    [],
+    ['Preflight Checks'],
+    ...preflightRows,
     [],
     ['Partial Charges'],
     ['Atom', 'Element', result.chargeModel],
@@ -115,6 +126,10 @@ export function createQuantumWordDocument(result: QuantumCalculationResult, cont
     ]),
     docParagraph('Warnings', true),
     ...warnings.map((warning) => docParagraph(warning)),
+    docParagraph('ChemVault Review', true),
+    docTable(reviewRowsForExport(context)),
+    docParagraph('Preflight Checks', true),
+    docTable(preflightRowsForExport(context)),
     ...(includeLog
       ? [
           docParagraph('Engine Log', true),
@@ -158,6 +173,7 @@ export function createQuantumPdfDocument(result: QuantumCalculationResult, conte
   if (result.dipoleDebye) drawPdfDipoleCard(layout, result);
   drawPdfChargeTable(layout, result);
   if (result.warnings.length > 0) drawPdfWarnings(layout, result.warnings);
+  drawPdfReview(layout, context);
   if (includeLog) drawPdfEngineLog(layout, result);
   const pageContents = finishPdfLayout(layout);
 
@@ -348,6 +364,49 @@ function drawPdfWarnings(layout: PdfLayout, warnings: string[]) {
   layout.y -= 6;
 }
 
+function drawPdfReview(layout: PdfLayout, context: QuantumExportDocumentContext) {
+  const diagnosis = context.diagnosis;
+  const preflightIssues = context.preflightIssues || [];
+  if (!diagnosis && preflightIssues.length === 0) return;
+
+  drawPdfSectionTitle(layout, 'ChemVault review');
+  if (diagnosis) {
+    const lines = [
+      `${diagnosis.title}: ${diagnosis.summary}`,
+      ...diagnosis.suggestedActions.map((action) => `Action: ${action}`)
+    ];
+    lines.forEach((line) => {
+      const wrapped = wrapPdfText(line, PDF_CONTENT_WIDTH - 32, 9.5);
+      const height = 18 + wrapped.length * 12;
+      ensurePdfSpace(layout, height + 8);
+      const bottom = layout.y - height;
+      const tone = diagnosis.severity === 'success'
+        ? { fill: '#f0fdf4', stroke: '#bbf7d0', color: '#047857' }
+        : diagnosis.severity === 'error'
+          ? { fill: '#fff1f2', stroke: '#fecdd3', color: '#be123c' }
+          : { fill: '#fff7ed', stroke: '#fed7aa', color: '#9a3412' };
+      drawPdfRect(layout, PDF_MARGIN, bottom, PDF_CONTENT_WIDTH, height, { fill: tone.fill, stroke: tone.stroke });
+      wrapped.forEach((wrappedLine, index) => {
+        drawPdfText(layout, wrappedLine, PDF_MARGIN + 16, layout.y - 17 - index * 12, { color: tone.color, size: 9.5 });
+      });
+      layout.y = bottom - 8;
+    });
+  }
+
+  preflightIssues.slice(0, 8).forEach((issue) => {
+    const text = `${issue.severity.toUpperCase()}: ${issue.title}. ${issue.detail}${issue.action ? ` Action: ${issue.action}` : ''}`;
+    const lines = wrapPdfText(text, PDF_CONTENT_WIDTH - 32, 8.8);
+    const height = 18 + lines.length * 11;
+    ensurePdfSpace(layout, height + 6);
+    const bottom = layout.y - height;
+    drawPdfRect(layout, PDF_MARGIN, bottom, PDF_CONTENT_WIDTH, height, { fill: '#f8fafc', stroke: '#e2e8f0' });
+    lines.forEach((line, index) => {
+      drawPdfText(layout, line, PDF_MARGIN + 16, layout.y - 16 - index * 11, { color: '#334155', size: 8.8 });
+    });
+    layout.y = bottom - 6;
+  });
+}
+
 function drawPdfEngineLog(layout: PdfLayout, result: QuantumCalculationResult) {
   drawPdfSectionTitle(layout, 'Calculation log');
   const logLines = boundedPdfLogLines(logText(result))
@@ -532,6 +591,28 @@ function computedPropertyRows(result: QuantumCalculationResult) {
     ['Charge model', result.chargeModel],
     ['Elapsed time', `${(result.elapsedMs / 1000).toFixed(1)} s`]
   ];
+}
+
+function reviewRowsForExport(context: QuantumExportDocumentContext) {
+  const diagnosis = context.diagnosis;
+  if (!diagnosis) return [['Status', 'No ChemVault diagnosis was generated.']];
+  return [
+    ['Status', diagnosis.title],
+    ['Severity', diagnosis.severity],
+    ['Summary', diagnosis.summary],
+    ['Recommended actions', diagnosis.suggestedActions.length ? diagnosis.suggestedActions.join(' | ') : 'No additional action suggested.']
+  ];
+}
+
+function preflightRowsForExport(context: QuantumExportDocumentContext) {
+  const issues = context.preflightIssues || [];
+  if (!issues.length) return [['Status', 'No preflight issues found.']];
+  return issues.map((issue) => [
+    issue.severity,
+    issue.title,
+    issue.detail,
+    issue.action || ''
+  ]);
 }
 
 function moleculeLabel(metadata?: QuantumExportMetadata) {

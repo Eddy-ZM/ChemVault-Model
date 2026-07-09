@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AuthUser, useAuth, userApiUrl } from '@/components/auth/AuthProvider';
 import { LoadingState } from '@/components/ui/LoadingState';
 import { UserPortalSection, buildRegisterUrl, buildUserPortalUrl } from '@/lib/auth/chemvaultUserLinks';
+import { loadQuantumHistory, type QuantumHistoryEntry } from '@/lib/chem/quantumWorkflow';
 
 export type AccountPage = 'profile' | 'molecules' | 'settings';
 
@@ -67,6 +68,7 @@ export function UserAccountPage({ page }: { page: AccountPage }) {
   const [entitlementsError, setEntitlementsError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
+  const [localQuantumHistory, setLocalQuantumHistory] = useState<QuantumHistoryEntry[]>([]);
 
   const fetchEntitlements = useCallback(async () => {
     if (!user) {
@@ -108,6 +110,10 @@ export function UserAccountPage({ page }: { page: AccountPage }) {
     setLastSyncedAt((current) => current ?? new Date());
     void fetchEntitlements();
   }, [fetchEntitlements, ready, user]);
+
+  useEffect(() => {
+    setLocalQuantumHistory(loadQuantumHistory());
+  }, [page]);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -212,7 +218,12 @@ export function UserAccountPage({ page }: { page: AccountPage }) {
             />
           ) : null}
           {page === 'molecules' ? (
-            <MoleculesContent entitlements={entitlements} moleculesUrl={moleculesUrl} permissions={permissions} />
+            <MoleculesContent
+              entitlements={entitlements}
+              localQuantumHistory={localQuantumHistory}
+              moleculesUrl={moleculesUrl}
+              permissions={permissions}
+            />
           ) : null}
           {page === 'settings' ? (
             <SettingsContent
@@ -332,37 +343,82 @@ function ProfileContent({
   );
 }
 
-function MoleculesContent({ entitlements, moleculesUrl, permissions }: { entitlements: MoleculeEntitlements | null; moleculesUrl: string; permissions: string[] }) {
+function MoleculesContent({
+  entitlements,
+  localQuantumHistory,
+  moleculesUrl,
+  permissions
+}: {
+  entitlements: MoleculeEntitlements | null;
+  localQuantumHistory: QuantumHistoryEntry[];
+  moleculesUrl: string;
+  permissions: string[];
+}) {
   const quota = entitlements?.quota;
   const cloudSyncEnabled = Boolean(entitlements?.featureFlags?.cloudLibrarySyncEnabled);
   const savedProjectsEnabled = permissions.includes('molecule.saved_projects');
   const uploadEnabled = permissions.includes('molecule.upload');
 
   return (
-    <section className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
-      <Panel title="Library Sync" subtitle="Molecule library availability follows ChemVault User entitlements.">
-        <div className="grid gap-3 sm:grid-cols-2">
-          <Metric label="Cloud library" value={cloudSyncEnabled ? 'Enabled' : savedProjectsEnabled ? 'Account controlled' : 'Local workspace'} />
-          <Metric label="Saved projects" value={formatQuota(quota?.savedProjectsRemaining)} />
-          <Metric label="Searches" value={formatQuota(quota?.searchesRemaining)} />
-          <Metric label="Exports" value={formatQuota(quota?.exportsRemaining)} />
-        </div>
-        <p className="mt-4 text-sm leading-6 text-slate-600">
-          Molecule Studio uses the synced account to decide which library features are available. Local browser work remains available even when cloud
-          library access is not enabled.
-        </p>
-        <a href={moleculesUrl} className="mt-5 inline-flex rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-sky-300 hover:text-sky-700">
-          Open molecule library in User System
-        </a>
-      </Panel>
+    <section className="grid gap-4">
+      <div className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
+        <Panel title="Library Sync" subtitle="Molecule library availability follows ChemVault User entitlements.">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Metric label="Cloud library" value={cloudSyncEnabled ? 'Enabled' : savedProjectsEnabled ? 'Account controlled' : 'Local workspace'} />
+            <Metric label="Saved projects" value={formatQuota(quota?.savedProjectsRemaining)} />
+            <Metric label="Searches" value={formatQuota(quota?.searchesRemaining)} />
+            <Metric label="Exports" value={formatQuota(quota?.exportsRemaining)} />
+          </div>
+          <p className="mt-4 text-sm leading-6 text-slate-600">
+            Molecule Studio uses the synced account to decide which library features are available. Local browser work remains available even when cloud
+            library access is not enabled.
+          </p>
+          <a href={moleculesUrl} className="mt-5 inline-flex rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-sky-300 hover:text-sky-700">
+            Open molecule library in User System
+          </a>
+        </Panel>
 
-      <Panel title="Workspace Actions" subtitle="Continue molecule work from the web app.">
-        <div className="grid gap-3 md:grid-cols-2">
-          <ActionLink href="/molecule" title="Search molecules" description="Search by compound name or PubChem CID, then inspect 3D structure and properties." />
-          <ActionLink href="/molecule" title="Draw structure" description="Use the 2D sketcher and generate molecule data from a drawn structure." />
-          <ActionLink href="/molecule" title={uploadEnabled ? 'Upload structures' : 'Upload structures locked'} description={uploadEnabled ? 'Import MOL, SDF, XYZ, PDB or SMILES files.' : 'Upload access depends on molecule.upload permission.'} />
-          <ActionLink href="/molecule" title="Export current work" description="Export supported formats and images from the active molecule workspace." />
-        </div>
+        <Panel title="Workspace Actions" subtitle="Continue molecule work from the web app.">
+          <div className="grid gap-3 md:grid-cols-2">
+            <ActionLink href="/molecule" title="Search molecules" description="Search by compound name or PubChem CID, then inspect 3D structure and properties." />
+            <ActionLink href="/molecule" title="Draw structure" description="Use the 2D sketcher and generate molecule data from a drawn structure." />
+            <ActionLink href="/molecule" title={uploadEnabled ? 'Upload structures' : 'Upload structures locked'} description={uploadEnabled ? 'Import MOL, SDF, XYZ, PDB or SMILES files.' : 'Upload access depends on molecule.upload permission.'} />
+            <ActionLink href="/molecule" title="Export current work" description="Export supported formats and images from the active molecule workspace." />
+          </div>
+        </Panel>
+      </div>
+
+      <Panel title="Local Quantum Calculation Records" subtitle="Saved automatically after desktop quantum calculations on this computer.">
+        {localQuantumHistory.length ? (
+          <div className="grid gap-3">
+            {localQuantumHistory.slice(0, 8).map((entry) => (
+              <article key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <h3 className="truncate text-sm font-bold text-slate-950">{entry.moleculeName}</h3>
+                    <p className="mt-1 text-xs leading-5 text-slate-500">
+                      {entry.engineLabel} / {entry.mode} / {formatDateTime(new Date(entry.createdAt))}
+                    </p>
+                    <p className="mt-1 text-sm leading-6 text-slate-600">{entry.diagnosisTitle}</p>
+                  </div>
+                  <StatusBadge tone={entry.status === 'completed' ? 'success' : entry.status === 'failed' ? 'warning' : 'neutral'}>
+                    {entry.status}
+                  </StatusBadge>
+                </div>
+                <div className="mt-3 grid gap-2 sm:grid-cols-4">
+                  <Metric label="Atoms" value={String(entry.atomCount)} />
+                  <Metric label="Energy" value={entry.energyHartree === null ? 'N/A' : `${entry.energyHartree.toFixed(4)} Eh`} />
+                  <Metric label="Dipole" value={entry.dipoleDebye === null ? 'N/A' : `${entry.dipoleDebye.toFixed(4)} D`} />
+                  <Metric label="Charge / spin" value={`${entry.charge} / ${entry.unpairedElectrons}`} />
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="rounded-2xl border border-dashed border-slate-300 bg-slate-50 px-4 py-3 text-sm leading-6 text-slate-600">
+            No local quantum calculation records yet. Run a desktop calculation in Molecule Studio to save a local record here.
+          </p>
+        )}
       </Panel>
     </section>
   );

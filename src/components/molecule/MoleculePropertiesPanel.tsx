@@ -34,6 +34,17 @@ import {
   createQuantumWordDocument,
   type ZipEntry
 } from '@/lib/chem/quantumExport';
+import {
+  createQuantumHistoryEntry,
+  diagnoseQuantumCalculation,
+  loadQuantumHistory,
+  saveQuantumHistoryEntry,
+  validateQuantumPreflight,
+  type QuantumHistoryEntry,
+  type QuantumPreflightResult,
+  type QuantumResultDiagnosis,
+  type QuantumWorkflowIssue
+} from '@/lib/chem/quantumWorkflow';
 import { MoleculeProperties } from '@/lib/chem/types';
 import { formatValue } from '@/lib/chem/moleculeUtils';
 
@@ -62,8 +73,10 @@ type Props = {
 
 type QuantumExportContext = {
   charge: number;
+  diagnosis?: QuantumResultDiagnosis | null;
   includeLog?: boolean;
   metadata?: Metadata;
+  preflightIssues?: QuantumWorkflowIssue[];
   unpairedElectrons: number;
 };
 
@@ -280,6 +293,9 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   const [gaussianFchk, setGaussianFchk] = useState<QuantumCalculationFileAttachment | null>(null);
   const [gaussianCube, setGaussianCube] = useState<QuantumCalculationFileAttachment | null>(null);
   const [cubeKind, setCubeKind] = useState('density=scf');
+  const [historyEntries, setHistoryEntries] = useState<QuantumHistoryEntry[]>([]);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [workflowMessage, setWorkflowMessage] = useState('');
 
   useEffect(() => {
     const preference = loadQuantumEnginePreference();
@@ -291,6 +307,10 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     if (notice) {
       setEnginePreferenceNotice(notice);
     }
+  }, []);
+
+  useEffect(() => {
+    setHistoryEntries(loadQuantumHistory());
   }, []);
 
   useEffect(() => {
@@ -384,6 +404,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     setGaussianFchk(null);
     setGaussianCube(null);
     setGaussianBridgeMessage('');
+    setWorkflowMessage('');
   }, [
     xyz,
     selectedEngine,
@@ -398,7 +419,37 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     pyscfBasisSet
   ]);
 
-  const canRun = Boolean(xyz && status?.available && !running && (selectedEngine !== 'pyscf' || calculationMode === 'single-point'));
+  const preflight = useMemo(
+    () => validateQuantumPreflight({
+      basisSet: isCommercialEngine(selectedEngine) ? externalConfig.basisSet : selectedEngine === 'pyscf' ? pyscfBasisSet : undefined,
+      calculationMode,
+      charge,
+      engine: selectedEngine,
+      gaussianTask: selectedEngine === 'gaussian' ? gaussianTask : undefined,
+      method: isCommercialEngine(selectedEngine) ? externalConfig.method : selectedEngine === 'pyscf' ? pyscfMethod : 'gfn2',
+      routeOptions: isCommercialEngine(selectedEngine) ? externalConfig.routeOptions : undefined,
+      unpairedElectrons,
+      xyz
+    }),
+    [
+      calculationMode,
+      charge,
+      externalConfig.basisSet,
+      externalConfig.method,
+      externalConfig.routeOptions,
+      gaussianTask,
+      pyscfBasisSet,
+      pyscfMethod,
+      selectedEngine,
+      unpairedElectrons,
+      xyz
+    ]
+  );
+  const resultDiagnosis = useMemo(
+    () => (result ? diagnoseQuantumCalculation(result, preflight) : null),
+    [preflight, result]
+  );
+  const canRun = Boolean(xyz && status?.available && preflight.canRun && !running && (selectedEngine !== 'pyscf' || calculationMode === 'single-point'));
 
   async function loadLocalEngines() {
     const api = window.chemVaultDesktop;
@@ -614,40 +665,109 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   }
 
   async function runCalculation() {
+    await executeCalculation();
+  }
+
+  async function runQuickScreenThenGaussian() {
+    const screenResult = await executeCalculation({
+      calculationMode: 'single-point',
+      engine: 'xtb',
+      startMessage: 'Running a quick xTB screen before Gaussian refinement.'
+    });
+    if (screenResult?.ok) {
+      selectEngine('gaussian', 'Gaussian');
+      setCalculationMode('single-point');
+      setGaussianTask('single-point');
+      setWorkflowMessage('Quick xTB screen completed. Gaussian is now selected for high-precision follow-up with the same structure, charge, and spin settings.');
+    }
+  }
+
+  function sendCurrentSetupToGaussian() {
+    selectEngine('gaussian', 'Gaussian');
+    setCalculationMode('single-point');
+    setGaussianTask('single-point');
+    setAdvancedSettingsOpen(true);
+    setWorkflowMessage('Gaussian follow-up is selected. Review the preflight panel and Gaussian input preview, then run the high-precision calculation.');
+  }
+
+  async function executeCalculation(options: {
+    calculationMode?: QuantumCalculationMode;
+    engine?: QuantumEngineKind;
+    gaussianTask?: GaussianTaskTemplateId;
+    startMessage?: string;
+  } = {}) {
     const api = window.chemVaultDesktop;
-    if (!api?.runQuantumCalculation || !xyz) return;
+    if (!api?.runQuantumCalculation || !xyz) return null;
+
+    const runEngine = options.engine || selectedEngine;
+    const runMode = options.calculationMode || calculationMode;
+    const runGaussianTask = runEngine === 'gaussian' ? options.gaussianTask || gaussianTask : undefined;
+    const commercialEngine = isCommercialEngine(runEngine);
+    const validation = validateQuantumPreflight({
+      basisSet: commercialEngine ? externalConfig.basisSet : runEngine === 'pyscf' ? pyscfBasisSet : undefined,
+      calculationMode: runMode,
+      charge,
+      engine: runEngine,
+      gaussianTask: runGaussianTask,
+      method: commercialEngine ? externalConfig.method : runEngine === 'pyscf' ? pyscfMethod : 'gfn2',
+      routeOptions: commercialEngine ? externalConfig.routeOptions : undefined,
+      unpairedElectrons,
+      xyz
+    });
+
+    if (!validation.canRun) {
+      const blocking = validation.issues.find((issue) => issue.severity === 'error');
+      setError(blocking ? `${blocking.title}: ${blocking.detail}` : 'Preflight checks did not pass.');
+      return null;
+    }
+
+    const runStatus = runEngine === selectedEngine
+      ? status
+      : await api.getQuantumEngineStatus?.(runEngine).catch(() => null);
+    if (!runStatus?.available) {
+      setError(runStatus?.message || `${engineLabel(runEngine)} is not ready. Configure the engine before running this calculation.`);
+      return null;
+    }
 
     setRunning(true);
     setError('');
     setResult(null);
     setCalculationProgress({
-      engine: selectedEngine,
-      engineLabel: engineLabel(selectedEngine),
+      engine: runEngine,
+      engineLabel: engineLabel(runEngine),
       phase: 'preparing',
       percent: 2,
-      message: `Preparing ${engineLabel(selectedEngine)} calculation.`
+      message: options.startMessage || `Preparing ${engineLabel(runEngine)} calculation.`
     });
     try {
-      const commercialEngine = isCommercialEngine(selectedEngine);
       const nextResult = await api.runQuantumCalculation({
         xyz,
-        engine: selectedEngine,
+        engine: runEngine,
         charge,
         unpairedElectrons,
-        method: commercialEngine ? externalConfig.method : selectedEngine === 'pyscf' ? pyscfMethod : 'gfn2',
-        basisSet: commercialEngine ? externalConfig.basisSet : selectedEngine === 'pyscf' ? pyscfBasisSet : undefined,
+        method: commercialEngine ? externalConfig.method : runEngine === 'pyscf' ? pyscfMethod : 'gfn2',
+        basisSet: commercialEngine ? externalConfig.basisSet : runEngine === 'pyscf' ? pyscfBasisSet : undefined,
         routeOptions: commercialEngine ? externalConfig.routeOptions : undefined,
-        calculationMode,
-        gaussianTask: selectedEngine === 'gaussian' ? gaussianTask : undefined,
-        timeoutMs: selectedEngine === 'gaussian'
-          ? gaussianTaskTimeout(gaussianTask)
-          : selectedEngine === 'pyscf'
+        calculationMode: runMode,
+        gaussianTask: runGaussianTask,
+        timeoutMs: runEngine === 'gaussian'
+          ? gaussianTaskTimeout(runGaussianTask || 'single-point')
+          : runEngine === 'pyscf'
             ? 600000
-            : calculationMode === 'geometry-optimization'
+            : runMode === 'geometry-optimization'
               ? 600000
               : 180000
       });
       setResult(nextResult);
+      const diagnosis = diagnoseQuantumCalculation(nextResult, validation);
+      setHistoryEntries(saveQuantumHistoryEntry(createQuantumHistoryEntry({
+        charge,
+        diagnosis,
+        metadata,
+        preflight: validation,
+        result: nextResult,
+        unpairedElectrons
+      })));
       if (!nextResult.ok) {
         setError(nextResult.error || 'Quantum calculation did not complete.');
       }
@@ -660,15 +780,17 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         elapsedMs: nextResult.elapsedMs,
         outputTail: nextResult.outputTail
       });
+      return nextResult;
     } catch (runError) {
       setError(runError instanceof Error ? runError.message : 'Quantum calculation failed.');
       setCalculationProgress({
-        engine: selectedEngine,
-        engineLabel: engineLabel(selectedEngine),
+        engine: runEngine,
+        engineLabel: engineLabel(runEngine),
         phase: 'error',
         percent: 100,
         message: runError instanceof Error ? runError.message : 'Quantum calculation failed.'
       });
+      return null;
     } finally {
       window.setTimeout(() => {
         setRunning(false);
@@ -705,8 +827,10 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       `${exportBaseName}_${exportTimestamp()}_report.html`,
       buildQuantumReportHtml(result, {
         charge,
+        diagnosis: resultDiagnosis,
         includeLog: exportIncludeLog,
         metadata,
+        preflightIssues: preflight.issues,
         unpairedElectrons
       }),
       'text/html'
@@ -719,7 +843,9 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       `${exportBaseName}_${exportTimestamp()}_log.txt`,
       buildQuantumLogText(result, {
         charge,
+        diagnosis: resultDiagnosis,
         metadata,
+        preflightIssues: preflight.issues,
         unpairedElectrons
       }),
       'text/plain'
@@ -730,7 +856,14 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     if (!result) return;
     downloadBinary(
       `${exportBaseName}_${exportTimestamp()}_data.xlsx`,
-      createQuantumExcelWorkbook(result, { charge, includeLog: exportIncludeLog, metadata, unpairedElectrons }),
+      createQuantumExcelWorkbook(result, {
+        charge,
+        diagnosis: resultDiagnosis,
+        includeLog: exportIncludeLog,
+        metadata,
+        preflightIssues: preflight.issues,
+        unpairedElectrons
+      }),
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     );
   }
@@ -739,7 +872,14 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     if (!result) return;
     downloadBinary(
       `${exportBaseName}_${exportTimestamp()}_report.docx`,
-      createQuantumWordDocument(result, { charge, includeLog: exportIncludeLog, metadata, unpairedElectrons }),
+      createQuantumWordDocument(result, {
+        charge,
+        diagnosis: resultDiagnosis,
+        includeLog: exportIncludeLog,
+        metadata,
+        preflightIssues: preflight.issues,
+        unpairedElectrons
+      }),
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     );
   }
@@ -748,7 +888,14 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     if (!result) return;
     downloadBinary(
       `${exportBaseName}_${exportTimestamp()}_report.pdf`,
-      createQuantumPdfDocument(result, { charge, includeLog: exportIncludeLog, metadata, unpairedElectrons }),
+      createQuantumPdfDocument(result, {
+        charge,
+        diagnosis: resultDiagnosis,
+        includeLog: exportIncludeLog,
+        metadata,
+        preflightIssues: preflight.issues,
+        unpairedElectrons
+      }),
       'application/pdf'
     );
   }
@@ -871,6 +1018,11 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
             <ReadinessItem label="Structure" ready={Boolean(xyz)} value={xyz ? 'Loaded' : 'Load a 3D structure'} />
             <ReadinessItem label="Engine" ready={engineReady} value={statusLoading ? 'Checking' : engineReady ? 'Ready' : 'Needs setup'} />
             <ReadinessItem
+              label="Input check"
+              ready={preflight.canRun}
+              value={preflight.issueCount.errors > 0 ? `${preflight.issueCount.errors} blocking` : preflight.issueCount.warnings > 0 ? `${preflight.issueCount.warnings} warnings` : 'Passed'}
+            />
+            <ReadinessItem
               label="Mode"
               ready={selectedEngine !== 'pyscf' || calculationMode === 'single-point'}
               value={selectedEngine === 'gaussian' ? selectedGaussianTaskTemplate.label : calculationMode === 'geometry-optimization' ? 'Geometry optimization' : 'Single point'}
@@ -932,6 +1084,20 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         >
           {running ? 'Calculating' : 'Run Calculation'}
         </button>
+      </div>
+
+      <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+        <PreflightPanel preflight={preflight} />
+        <WorkflowBridgePanel
+          canRunQuickScreen={Boolean(xyz && !running)}
+          currentEngine={selectedEngine}
+          historyCount={historyEntries.length}
+          latestResult={result}
+          message={workflowMessage}
+          onOpenHistory={() => setHistoryOpen(true)}
+          onRunQuickScreen={runQuickScreenThenGaussian}
+          onSendToGaussian={sendCurrentSetupToGaussian}
+        />
       </div>
 
       {!xyz ? (
@@ -1156,6 +1322,25 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         ) : null}
       </div>
 
+      <QuantumHistoryPanel
+        entries={historyEntries}
+        open={historyOpen}
+        onApply={(entry) => {
+          selectEngine(entry.engine, entry.engineLabel);
+          setCharge(entry.charge);
+          setUnpairedElectrons(entry.unpairedElectrons);
+          if (entry.mode.toLowerCase().includes('optimization')) {
+            setCalculationMode('geometry-optimization');
+            if (entry.engine === 'gaussian') setGaussianTask('geometry-optimization');
+          } else {
+            setCalculationMode('single-point');
+            if (entry.engine === 'gaussian') setGaussianTask('single-point');
+          }
+          setWorkflowMessage(`Loaded ${entry.engineLabel} settings from local history. Structure is not replaced; current 3D model stays active.`);
+        }}
+        onOpenChange={setHistoryOpen}
+      />
+
       <QuantumEngineSetupDialog
         mode={setupMode}
         onClose={() => setSetupMode(null)}
@@ -1372,6 +1557,8 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
             <Metric label="Elapsed time" value={`${(result.elapsedMs / 1000).toFixed(1)} s`} />
           </div>
 
+          {resultDiagnosis ? <ResultDiagnosisPanel diagnosis={resultDiagnosis} /> : null}
+
           {result.dipoleDebye ? (
             <VectorCard
               title="Dipole vector"
@@ -1488,6 +1675,222 @@ function AutoScrollLog({ className, value }: { className: string; value: string 
     <pre ref={logRef} className={className}>
       {value}
     </pre>
+  );
+}
+
+function PreflightPanel({ preflight }: { preflight: QuantumPreflightResult }) {
+  const topIssues = preflight.issues.slice(0, 4);
+  const tone = preflight.issueCount.errors > 0
+    ? 'border-rose-200 bg-rose-50 text-rose-800'
+    : preflight.issueCount.warnings > 0
+      ? 'border-amber-200 bg-amber-50 text-amber-800'
+      : 'border-emerald-200 bg-emerald-50 text-emerald-800';
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">ChemVault preflight</p>
+          <h4 className="mt-1 text-sm font-bold text-slate-950">Structure, charge, and spin checks</h4>
+        </div>
+        <span className={`rounded-full border px-3 py-1 text-xs font-semibold ${tone}`}>
+          {preflight.canRun ? 'Runnable' : 'Blocked'}
+        </span>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        <MetricCompact label="Atoms" value={String(preflight.atomCount)} />
+        <MetricCompact label="Electrons" value={preflight.totalElectrons === null ? 'N/A' : String(preflight.totalElectrons)} />
+        <MetricCompact label="Multiplicity" value={String(preflight.multiplicity)} />
+      </div>
+      <div className="mt-3 space-y-2">
+        {topIssues.length ? (
+          topIssues.map((issue) => <IssueRow key={`${issue.severity}-${issue.title}-${issue.detail}`} issue={issue} />)
+        ) : (
+          <p className="rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs leading-5 text-emerald-800">
+            No blocking structure, charge, or spin issues found.
+          </p>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function WorkflowBridgePanel({
+  canRunQuickScreen,
+  currentEngine,
+  historyCount,
+  latestResult,
+  message,
+  onOpenHistory,
+  onRunQuickScreen,
+  onSendToGaussian
+}: {
+  canRunQuickScreen: boolean;
+  currentEngine: QuantumEngineKind;
+  historyCount: number;
+  latestResult: QuantumCalculationResult | null;
+  message: string;
+  onOpenHistory: () => void;
+  onRunQuickScreen: () => void;
+  onSendToGaussian: () => void;
+}) {
+  const canSendResult = Boolean(latestResult && latestResult.engine !== 'gaussian');
+
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">ChemVault workflow</p>
+      <h4 className="mt-1 text-sm font-bold text-slate-950">Screen here, refine with Gaussian when needed</h4>
+      <p className="mt-2 text-xs leading-5 text-slate-600">
+        Use ChemVault to validate geometry, run a quick screen, keep records, then hand off clean Gaussian files for high-precision work.
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={onRunQuickScreen}
+          disabled={!canRunQuickScreen}
+          className="rounded-xl bg-sky-700 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          Quick xTB screen {'->'} Gaussian
+        </button>
+        <button
+          type="button"
+          onClick={onSendToGaussian}
+          disabled={currentEngine === 'gaussian' && !canSendResult}
+          className="rounded-xl border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          Send setup to Gaussian
+        </button>
+        <button
+          type="button"
+          onClick={onOpenHistory}
+          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+        >
+          History ({historyCount})
+        </button>
+      </div>
+      {message ? <p className="mt-3 rounded-xl border border-sky-200 bg-white px-3 py-2 text-xs leading-5 text-sky-800">{message}</p> : null}
+    </section>
+  );
+}
+
+function ResultDiagnosisPanel({ diagnosis }: { diagnosis: QuantumResultDiagnosis }) {
+  const tone = diagnosis.severity === 'success'
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
+    : diagnosis.severity === 'error'
+      ? 'border-rose-200 bg-rose-50 text-rose-800'
+      : 'border-amber-200 bg-amber-50 text-amber-800';
+
+  return (
+    <section className={`rounded-2xl border px-4 py-3 ${tone}`}>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] opacity-80">ChemVault review</p>
+          <h4 className="mt-1 text-sm font-bold">{diagnosis.title}</h4>
+          <p className="mt-1 text-xs leading-5">{diagnosis.summary}</p>
+        </div>
+      </div>
+      {diagnosis.suggestedActions.length > 0 ? (
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          {diagnosis.suggestedActions.slice(0, 4).map((action) => (
+            <p key={action} className="rounded-xl bg-white/70 px-3 py-2 text-xs leading-5">{action}</p>
+          ))}
+        </div>
+      ) : null}
+      {diagnosis.highlights.length > 0 ? (
+        <details className="mt-3 rounded-xl bg-white/70 px-3 py-2">
+          <summary className="cursor-pointer text-xs font-semibold">Parsed log highlights</summary>
+          <div className="mt-2 space-y-1">
+            {diagnosis.highlights.map((line) => (
+              <p key={line} className="font-mono text-[11px] leading-5">{line}</p>
+            ))}
+          </div>
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
+function QuantumHistoryPanel({
+  entries,
+  onApply,
+  onOpenChange,
+  open
+}: {
+  entries: QuantumHistoryEntry[];
+  onApply: (entry: QuantumHistoryEntry) => void;
+  onOpenChange: (open: boolean) => void;
+  open: boolean;
+}) {
+  return (
+    <details
+      className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3"
+      open={open}
+      onToggle={(event) => onOpenChange(event.currentTarget.open)}
+    >
+      <summary className="cursor-pointer text-sm font-semibold text-slate-800">
+        Local calculation history {entries.length ? `(${entries.length})` : ''}
+      </summary>
+      <div className="mt-3 grid gap-2">
+        {entries.length ? entries.slice(0, 6).map((entry) => (
+          <div key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm font-bold text-slate-950">{entry.moleculeName}</p>
+                <p className="mt-1 text-xs leading-5 text-slate-500">
+                  {entry.engineLabel} / {entry.mode} / {formatHistoryDate(entry.createdAt)}
+                </p>
+                <p className="mt-1 text-xs leading-5 text-slate-600">
+                  {entry.diagnosisTitle}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => onApply(entry)}
+                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Use settings
+              </button>
+            </div>
+            <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-600">
+              <span className="rounded-full bg-white px-2 py-1">{entry.status}</span>
+              <span className="rounded-full bg-white px-2 py-1">{entry.method}</span>
+              <span className="rounded-full bg-white px-2 py-1">{entry.atomCount} atoms</span>
+              <span className="rounded-full bg-white px-2 py-1">
+                Energy {entry.energyHartree === null ? 'N/A' : `${formatNumber(entry.energyHartree)} Eh`}
+              </span>
+            </div>
+          </div>
+        )) : (
+          <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
+            No local calculations have been saved yet. Completed runs will appear here and in My Molecules.
+          </p>
+        )}
+      </div>
+    </details>
+  );
+}
+
+function MetricCompact({ label, value }: { label: string; value: string }) {
+  return (
+    <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+      <span className="block text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400">{label}</span>
+      <span className="mt-1 block text-sm font-bold text-slate-950">{value}</span>
+    </p>
+  );
+}
+
+function IssueRow({ issue }: { issue: QuantumWorkflowIssue }) {
+  const tone = issue.severity === 'error'
+    ? 'border-rose-200 bg-rose-50 text-rose-800'
+    : issue.severity === 'warning'
+      ? 'border-amber-200 bg-amber-50 text-amber-800'
+      : 'border-sky-200 bg-sky-50 text-sky-800';
+  return (
+    <div className={`rounded-xl border px-3 py-2 text-xs leading-5 ${tone}`}>
+      <p className="font-bold">{issue.title}</p>
+      <p>{issue.detail}</p>
+      {issue.action ? <p className="mt-1 font-semibold">{issue.action}</p> : null}
+    </div>
   );
 }
 
@@ -1959,6 +2362,11 @@ function exportTimestamp() {
   return new Date().toISOString().replace(/[:.]/g, '-');
 }
 
+function formatHistoryDate(value: string) {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleString();
+}
+
 function buildQuantumReportHtml(result: QuantumCalculationResult, context: QuantumExportContext) {
   const generatedAt = new Date().toLocaleString();
   const includeLog = Boolean(context.includeLog);
@@ -1966,6 +2374,32 @@ function buildQuantumReportHtml(result: QuantumCalculationResult, context: Quant
   const warnings = result.warnings.length
     ? result.warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join('')
     : '<li>No warnings returned.</li>';
+  const diagnosisHtml = context.diagnosis ? `
+    <section class="panel">
+      <h2>ChemVault review</h2>
+      <div class="review ${context.diagnosis.severity}">
+        <strong>${escapeHtml(context.diagnosis.title)}</strong>
+        <p>${escapeHtml(context.diagnosis.summary)}</p>
+        ${context.diagnosis.suggestedActions.length ? `<ul>${context.diagnosis.suggestedActions.map((action) => `<li>${escapeHtml(action)}</li>`).join('')}</ul>` : ''}
+      </div>
+    </section>
+  ` : '';
+  const preflightHtml = context.preflightIssues?.length ? `
+    <section class="panel">
+      <h2>Preflight checks</h2>
+      <table>
+        <thead><tr><th>Severity</th><th>Check</th><th>Detail</th><th>Action</th></tr></thead>
+        <tbody>${context.preflightIssues.map((issue) => `
+          <tr>
+            <td>${escapeHtml(issue.severity)}</td>
+            <td>${escapeHtml(issue.title)}</td>
+            <td>${escapeHtml(issue.detail)}</td>
+            <td>${escapeHtml(issue.action || '')}</td>
+          </tr>
+        `).join('')}</tbody>
+      </table>
+    </section>
+  ` : '';
   const chargeRows = result.charges.length
     ? result.charges
         .map((atom) => `
@@ -2007,6 +2441,10 @@ function buildQuantumReportHtml(result: QuantumCalculationResult, context: Quant
     pre { max-height: none; overflow: visible; white-space: pre-wrap; word-break: break-word; border-radius: 14px; background: #020617; color: #e2e8f0; padding: 16px; font-size: 12px; line-height: 1.55; }
     .positive { color: #be123c; }
     .negative { color: #075985; }
+    .review { border-radius: 14px; padding: 14px; border: 1px solid #e2e8f0; background: #f8fafc; }
+    .review.success { border-color: #bbf7d0; background: #f0fdf4; color: #047857; }
+    .review.warning { border-color: #fed7aa; background: #fff7ed; color: #9a3412; }
+    .review.error { border-color: #fecdd3; background: #fff1f2; color: #be123c; }
     .watermark { margin-top: 36px; border-top: 1px solid #cbd5e1; padding-top: 16px; text-align: center; color: #64748b; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
     @media print { body { background: #fff; } main { padding: 24px; } .panel, .metric { break-inside: avoid; } }
   </style>
@@ -2054,6 +2492,9 @@ function buildQuantumReportHtml(result: QuantumCalculationResult, context: Quant
       <ul>${warnings}</ul>
     </section>
 
+    ${diagnosisHtml}
+    ${preflightHtml}
+
     ${includeLog ? `<section class="panel">
       <h2>Engine log</h2>
       <pre>${escapeHtml(log)}</pre>
@@ -2068,6 +2509,23 @@ function buildQuantumReportHtml(result: QuantumCalculationResult, context: Quant
 function buildQuantumLogText(result: QuantumCalculationResult, context: QuantumExportContext) {
   const generatedAt = new Date().toISOString();
   const log = result.outputLog || result.outputTail || 'No engine log was returned.';
+  const diagnosisLines = context.diagnosis
+    ? [
+        'ChemVault review',
+        `Status: ${context.diagnosis.title}`,
+        `Severity: ${context.diagnosis.severity}`,
+        `Summary: ${context.diagnosis.summary}`,
+        ...context.diagnosis.suggestedActions.map((action) => `Action: ${action}`),
+        ''
+      ]
+    : [];
+  const preflightLines = context.preflightIssues?.length
+    ? [
+        'Preflight checks',
+        ...context.preflightIssues.map((issue) => `${issue.severity.toUpperCase()}: ${issue.title} - ${issue.detail}${issue.action ? ` Action: ${issue.action}` : ''}`),
+        ''
+      ]
+    : [];
   return [
     'ChemVault Model Quantum Calculation Log',
     `Generated: ${generatedAt}`,
@@ -2093,6 +2551,8 @@ function buildQuantumLogText(result: QuantumCalculationResult, context: QuantumE
     `Dipole magnitude: ${result.dipoleDebye ? `${formatNumber(result.dipoleDebye.total)} D` : 'N/A'}`,
     `Partial charges: ${result.charges.length}`,
     '',
+    ...diagnosisLines,
+    ...preflightLines,
     'Engine log',
     log,
     '',

@@ -121,12 +121,11 @@ export function createQuantumWordDocument(result: QuantumCalculationResult, cont
           ...logText(result).split(/\r?\n/u).map((line) => docParagraph(line || ' '))
         ]
       : []),
-    docParagraph(CHEMVAULT_COPYRIGHT_NOTICE, true),
-    '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/></w:sectPr>'
+    '<w:sectPr><w:footerReference w:type="default" r:id="rIdFooter1"/><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:footer="720"/></w:sectPr>'
   ].join('');
 
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <w:body>${body}</w:body>
 </w:document>`;
 
@@ -137,6 +136,8 @@ export function createQuantumWordDocument(result: QuantumCalculationResult, cont
     { path: 'docProps/app.xml', content: appProperties('Microsoft Word') },
     { path: 'docProps/custom.xml', content: customProperties() },
     { path: 'word/document.xml', content: documentXml },
+    { path: 'word/_rels/document.xml.rels', content: documentRelationships() },
+    { path: 'word/footer1.xml', content: wordFooter() },
     { path: 'word/settings.xml', content: wordSettings() },
     { path: 'word/styles.xml', content: wordStyles() }
   ]);
@@ -214,7 +215,8 @@ function createPdfLayout(): PdfLayout {
 
 function finishPdfLayout(layout: PdfLayout) {
   if (layout.commands.length > 0) layout.pages.push(layout.commands.join('\n'));
-  return layout.pages;
+  const totalPages = layout.pages.length;
+  return layout.pages.map((content, index) => [content, pdfFooterCommands(index + 1, totalPages)].join('\n'));
 }
 
 function startPdfPage(layout: PdfLayout) {
@@ -222,7 +224,6 @@ function startPdfPage(layout: PdfLayout) {
   layout.pageNumber += 1;
   layout.commands = [];
   layout.y = PDF_PAGE_HEIGHT - 48;
-  drawPdfFooter(layout);
 }
 
 function ensurePdfSpace(layout: PdfLayout, height: number) {
@@ -401,10 +402,17 @@ function drawPdfPill(layout: PdfLayout, label: string, x: number, y: number, fil
   drawPdfText(layout, label, x + 11, y - 11, { color, font: 'F2', size: 8.5 });
 }
 
-function drawPdfFooter(layout: PdfLayout) {
-  drawPdfLine(layout, PDF_MARGIN, 42, PDF_PAGE_WIDTH - PDF_MARGIN, 42, '#cbd5e1');
-  drawPdfText(layout, CHEMVAULT_COPYRIGHT_NOTICE, PDF_MARGIN, 26, { color: '#64748b', size: 7.5 });
-  drawPdfText(layout, `Page ${layout.pageNumber}`, PDF_PAGE_WIDTH - PDF_MARGIN - 42, 26, { color: '#64748b', size: 7.5 });
+function pdfFooterCommands(pageNumber: number, totalPages: number) {
+  const footerLayout: PdfLayout = {
+    commands: [],
+    pages: [],
+    pageNumber,
+    y: 0
+  };
+  drawPdfLine(footerLayout, PDF_MARGIN, 42, PDF_PAGE_WIDTH - PDF_MARGIN, 42, '#cbd5e1');
+  drawPdfText(footerLayout, CHEMVAULT_COPYRIGHT_NOTICE, PDF_MARGIN, 26, { color: '#64748b', size: 7.5 });
+  drawPdfText(footerLayout, `Page ${pageNumber} of ${totalPages}`, PDF_PAGE_WIDTH - PDF_MARGIN - 62, 26, { color: '#64748b', size: 7.5 });
+  return footerLayout.commands.join('\n');
 }
 
 function drawPdfRect(layout: PdfLayout, x: number, y: number, width: number, height: number, options: { fill?: string; lineWidth?: number; stroke?: string } = {}) {
@@ -603,6 +611,7 @@ function docxContentTypes() {
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>
   <Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>
   <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
   <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
@@ -622,6 +631,13 @@ function packageRelationships(kind: 'xlsx' | 'docx') {
   <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/>
   <Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/extended-properties" Target="docProps/app.xml"/>
   <Relationship Id="rId4" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/custom-properties" Target="docProps/custom.xml"/>
+</Relationships>`;
+}
+
+function documentRelationships() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdFooter1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footer" Target="footer1.xml"/>
 </Relationships>`;
 }
 
@@ -669,6 +685,7 @@ function customProperties() {
 function wordSettings() {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:settings xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:updateFields w:val="true"/>
 </w:settings>`;
 }
 
@@ -676,7 +693,37 @@ function wordStyles() {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/><w:rPr><w:sz w:val="22"/></w:rPr></w:style>
+  <w:style w:type="paragraph" w:styleId="Footer"><w:name w:val="footer"/><w:basedOn w:val="Normal"/><w:rPr><w:color w:val="64748B"/><w:sz w:val="16"/></w:rPr></w:style>
 </w:styles>`;
+}
+
+function wordFooter() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:p>
+    <w:pPr>
+      <w:pStyle w:val="Footer"/>
+      <w:tabs><w:tab w:val="right" w:pos="9360"/></w:tabs>
+      <w:pBdr><w:top w:val="single" w:sz="4" w:space="8" w:color="CBD5E1"/></w:pBdr>
+    </w:pPr>
+    <w:r><w:rPr><w:color w:val="64748B"/><w:sz w:val="16"/></w:rPr><w:t>${escapeXml(CHEMVAULT_COPYRIGHT_NOTICE)}</w:t></w:r>
+    <w:r><w:tab/></w:r>
+    <w:r><w:rPr><w:color w:val="64748B"/><w:sz w:val="16"/></w:rPr><w:t>Page </w:t></w:r>
+    ${wordField('PAGE', '1')}
+    <w:r><w:rPr><w:color w:val="64748B"/><w:sz w:val="16"/></w:rPr><w:t> of </w:t></w:r>
+    ${wordField('NUMPAGES', '1')}
+  </w:p>
+</w:ftr>`;
+}
+
+function wordField(instruction: string, fallback: string) {
+  return [
+    '<w:r><w:rPr><w:color w:val="64748B"/><w:sz w:val="16"/></w:rPr><w:fldChar w:fldCharType="begin"/></w:r>',
+    `<w:r><w:rPr><w:color w:val="64748B"/><w:sz w:val="16"/></w:rPr><w:instrText xml:space="preserve"> ${escapeXml(instruction)} </w:instrText></w:r>`,
+    '<w:r><w:rPr><w:color w:val="64748B"/><w:sz w:val="16"/></w:rPr><w:fldChar w:fldCharType="separate"/></w:r>',
+    `<w:r><w:rPr><w:color w:val="64748B"/><w:sz w:val="16"/></w:rPr><w:t>${escapeXml(fallback)}</w:t></w:r>`,
+    '<w:r><w:rPr><w:color w:val="64748B"/><w:sz w:val="16"/></w:rPr><w:fldChar w:fldCharType="end"/></w:r>'
+  ].join('');
 }
 
 function createZip(entries: ZipEntry[]) {

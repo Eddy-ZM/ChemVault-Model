@@ -25,6 +25,12 @@ const CHEMVAULT_KEYWORDS = 'ChemVault, quantum calculation, molecule, molecular 
 export const CHEMVAULT_COPYRIGHT_NOTICE = 'Copyright (c) ChemVault. All rights reserved.';
 const XLSX_MAX_CELL_TEXT_LENGTH = 32767;
 const XLSX_MAX_LOG_ROWS = 50000;
+const PDF_PAGE_WIDTH = 612;
+const PDF_PAGE_HEIGHT = 792;
+const PDF_MARGIN = 42;
+const PDF_BOTTOM_MARGIN = 58;
+const PDF_CONTENT_WIDTH = PDF_PAGE_WIDTH - PDF_MARGIN * 2;
+const PDF_MAX_LOG_LINES = 1600;
 
 type ZipEntry = {
   path: string;
@@ -126,67 +132,359 @@ export function createQuantumWordDocument(result: QuantumCalculationResult, cont
 
 export function createQuantumPdfDocument(result: QuantumCalculationResult, context: QuantumExportDocumentContext) {
   const generatedAt = new Date();
-  const lines = [
-    CHEMVAULT_TITLE,
-    `Generated: ${generatedAt.toLocaleString()}`,
-    `Molecule: ${moleculeLabel(context.metadata)}`,
-    `Engine: ${result.engineLabel}`,
-    `Method: ${result.method}`,
-    `Calculation mode: ${result.calculationMode}`,
-    `Total charge: ${context.charge}`,
-    `Unpaired electrons: ${context.unpairedElectrons}`,
-    `Status: ${result.ok ? 'Completed' : result.error || 'Not completed'}`,
-    '',
-    'Computed properties',
-    ...computedPropertyRows(result).map((row) => `${row[0]}: ${row[1]}`),
-    '',
-    'Partial charges',
-    ...(result.charges.length
-      ? result.charges.map((atom) => `${atom.index}  ${atom.element}  ${formatSigned(atom.charge)} e`)
-      : ['No partial charges returned.']),
-    '',
-    'Warnings',
-    ...(result.warnings.length ? result.warnings : ['No warnings returned.']),
-    '',
-    'Engine log',
-    ...logText(result).split(/\r?\n/u),
-    '',
-    CHEMVAULT_COPYRIGHT_NOTICE
-  ].flatMap((line) => wrapPdfLine(line));
+  const layout = createPdfLayout();
+  drawPdfHero(layout, result, context, generatedAt);
+  drawPdfMetricGrid(layout, [
+    ['Total energy', result.energyHartree === null ? 'N/A' : `${formatNumber(result.energyHartree)} Eh`],
+    ['Dipole magnitude', result.dipoleDebye ? `${formatNumber(result.dipoleDebye.total)} D` : 'N/A'],
+    ['Partial charges', String(result.charges.length)],
+    ['Run mode', result.calculationMode === 'geometry-optimization' ? 'Optimized' : 'Single point'],
+    ['Elapsed time', `${(result.elapsedMs / 1000).toFixed(1)} s`]
+  ]);
+  if (result.dipoleDebye) drawPdfDipoleCard(layout, result);
+  drawPdfChargeTable(layout, result);
+  if (result.warnings.length > 0) drawPdfWarnings(layout, result.warnings);
+  drawPdfEngineLog(layout, result);
+  const pageContents = finishPdfLayout(layout);
 
-  const pageLineCount = 52;
-  const pages = [];
-  for (let index = 0; index < lines.length; index += pageLineCount) {
-    pages.push(lines.slice(index, index + pageLineCount));
-  }
-
-  const objects: string[] = [];
-  objects.push('<< /Type /Catalog /Pages 2 0 R >>');
-  objects.push('');
-  objects.push('<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>');
+  const objects: string[] = [
+    '<< /Type /Catalog /Pages 2 0 R >>',
+    '',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>',
+    '<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>'
+  ];
 
   const pageRefs: string[] = [];
-  pages.forEach((pageLines, pageIndex) => {
-    const pageObjectId = 4 + pageIndex * 2;
+  pageContents.forEach((content) => {
+    const pageObjectId = objects.length + 1;
     const contentObjectId = pageObjectId + 1;
     pageRefs.push(`${pageObjectId} 0 R`);
-    objects[pageObjectId - 1] = `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 3 0 R >> >> /Contents ${contentObjectId} 0 R >>`;
-    const content = [
-      'BT',
-      '/F1 10 Tf',
-      '12 TL',
-      '50 770 Td',
-      ...pageLines.map((line) => `(${escapePdf(line)}) Tj T*`),
-      'ET'
-    ].join('\n');
-    objects[contentObjectId - 1] = `<< /Length ${byteLength(content)} >>\nstream\n${content}\nendstream`;
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_PAGE_WIDTH} ${PDF_PAGE_HEIGHT}] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents ${contentObjectId} 0 R >>`);
+    objects.push(`<< /Length ${byteLength(content)} >>\nstream\n${content}\nendstream`);
   });
 
-  objects[1] = `<< /Type /Pages /Kids [${pageRefs.join(' ')}] /Count ${pages.length} >>`;
+  objects[1] = `<< /Type /Pages /Kids [${pageRefs.join(' ')}] /Count ${pageContents.length} >>`;
   const infoObjectId = objects.length + 1;
   objects.push(`<< /Title (${escapePdf(CHEMVAULT_TITLE)}) /Author (${escapePdf(CHEMVAULT_AUTHOR)}) /Subject (${escapePdf(CHEMVAULT_SUBJECT)}) /Keywords (${escapePdf(CHEMVAULT_KEYWORDS)}) /Creator (${escapePdf(CHEMVAULT_CREATOR)}) /Producer (${escapePdf(CHEMVAULT_CREATOR)}) /CreationDate (${pdfDate(generatedAt)}) /ModDate (${pdfDate(generatedAt)}) /Copyright (${escapePdf(CHEMVAULT_COPYRIGHT_NOTICE)}) >>`);
 
   return buildPdf(objects, infoObjectId);
+}
+
+type PdfFont = 'F1' | 'F2' | 'F3';
+
+type PdfLayout = {
+  commands: string[];
+  pages: string[];
+  pageNumber: number;
+  y: number;
+};
+
+type PdfTextOptions = {
+  color?: string;
+  font?: PdfFont;
+  lineHeight?: number;
+  maxLines?: number;
+  size?: number;
+};
+
+function createPdfLayout(): PdfLayout {
+  const layout: PdfLayout = {
+    commands: [],
+    pages: [],
+    pageNumber: 0,
+    y: 0
+  };
+  startPdfPage(layout);
+  return layout;
+}
+
+function finishPdfLayout(layout: PdfLayout) {
+  if (layout.commands.length > 0) layout.pages.push(layout.commands.join('\n'));
+  return layout.pages;
+}
+
+function startPdfPage(layout: PdfLayout) {
+  if (layout.commands.length > 0) layout.pages.push(layout.commands.join('\n'));
+  layout.pageNumber += 1;
+  layout.commands = [];
+  layout.y = PDF_PAGE_HEIGHT - 48;
+  drawPdfFooter(layout);
+}
+
+function ensurePdfSpace(layout: PdfLayout, height: number) {
+  if (layout.y - height < PDF_BOTTOM_MARGIN) startPdfPage(layout);
+}
+
+function drawPdfHero(layout: PdfLayout, result: QuantumCalculationResult, context: QuantumExportDocumentContext, generatedAt: Date) {
+  const panelHeight = 126;
+  ensurePdfSpace(layout, panelHeight + 16);
+  const bottom = layout.y - panelHeight;
+  drawPdfRect(layout, PDF_MARGIN, bottom, PDF_CONTENT_WIDTH, panelHeight, {
+    fill: '#f0f9ff',
+    stroke: '#bae6fd'
+  });
+  drawPdfText(layout, CHEMVAULT_TITLE, PDF_MARGIN + 18, layout.y - 30, { color: '#0f172a', font: 'F2', size: 21 });
+  drawPdfText(layout, `Generated ${generatedAt.toLocaleString()}`, PDF_MARGIN + 18, layout.y - 52, { color: '#64748b', size: 9.5 });
+  drawPdfWrappedText(layout, `Molecule: ${moleculeLabel(context.metadata)}`, PDF_MARGIN + 18, layout.y - 72, 330, { color: '#334155', size: 10.5 });
+  drawPdfPill(layout, result.ok ? 'Completed' : 'Needs review', PDF_PAGE_WIDTH - PDF_MARGIN - 100, layout.y - 40, result.ok ? '#ecfdf5' : '#fff7ed', result.ok ? '#047857' : '#9a3412');
+
+  const summaryBottom = bottom + 18;
+  drawPdfMiniMetric(layout, PDF_MARGIN + 18, summaryBottom, 112, 'Engine', result.engineLabel);
+  drawPdfMiniMetric(layout, PDF_MARGIN + 140, summaryBottom, 126, 'Method', result.method);
+  drawPdfMiniMetric(layout, PDF_MARGIN + 276, summaryBottom, 104, 'Charge', String(context.charge));
+  drawPdfMiniMetric(layout, PDF_MARGIN + 390, summaryBottom, 102, 'Unpaired', String(context.unpairedElectrons));
+  layout.y = bottom - 16;
+
+  const status = result.ok ? 'Ready for export' : result.error || 'Calculation did not complete normally.';
+  const statusHeight = Math.max(42, 22 + wrapPdfText(status, PDF_CONTENT_WIDTH - 36, 9.5).length * 12);
+  ensurePdfSpace(layout, statusHeight + 12);
+  const statusBottom = layout.y - statusHeight;
+  drawPdfRect(layout, PDF_MARGIN, statusBottom, PDF_CONTENT_WIDTH, statusHeight, {
+    fill: result.ok ? '#f0fdf4' : '#fff7ed',
+    stroke: result.ok ? '#bbf7d0' : '#fed7aa'
+  });
+  drawPdfText(layout, 'Status', PDF_MARGIN + 18, layout.y - 17, { color: result.ok ? '#047857' : '#9a3412', font: 'F2', size: 9 });
+  drawPdfWrappedText(layout, status, PDF_MARGIN + 18, layout.y - 32, PDF_CONTENT_WIDTH - 36, { color: '#334155', size: 9.5, lineHeight: 12 });
+  layout.y = statusBottom - 16;
+}
+
+function drawPdfMetricGrid(layout: PdfLayout, metrics: Array<[string, string]>) {
+  drawPdfSectionTitle(layout, 'Computed properties');
+  const columns = 3;
+  const gap = 10;
+  const cardWidth = (PDF_CONTENT_WIDTH - gap * (columns - 1)) / columns;
+  const cardHeight = 66;
+  metrics.forEach(([label, value], index) => {
+    if (index % columns === 0) ensurePdfSpace(layout, cardHeight + 12);
+    const column = index % columns;
+    const rowTop = layout.y;
+    const x = PDF_MARGIN + column * (cardWidth + gap);
+    const bottom = rowTop - cardHeight;
+    drawPdfRect(layout, x, bottom, cardWidth, cardHeight, { fill: '#f8fafc', stroke: '#e2e8f0' });
+    drawPdfText(layout, label, x + 12, rowTop - 18, { color: '#64748b', font: 'F2', size: 8 });
+    drawPdfWrappedText(layout, value, x + 12, rowTop - 40, cardWidth - 24, { color: '#020617', font: 'F2', size: 13.5, lineHeight: 14, maxLines: 2 });
+    if (column === columns - 1 || index === metrics.length - 1) layout.y = bottom - 10;
+  });
+  layout.y -= 4;
+}
+
+function drawPdfDipoleCard(layout: PdfLayout, result: QuantumCalculationResult) {
+  if (!result.dipoleDebye) return;
+  const height = 118;
+  ensurePdfSpace(layout, height + 14);
+  const bottom = layout.y - height;
+  drawPdfRect(layout, PDF_MARGIN, bottom, PDF_CONTENT_WIDTH, height, { fill: '#f8fafc', stroke: '#e2e8f0' });
+  drawPdfText(layout, 'Dipole vector', PDF_MARGIN + 16, layout.y - 22, { color: '#020617', font: 'F2', size: 13 });
+  drawPdfText(layout, `Debye components returned by ${result.engineLabel}.`, PDF_MARGIN + 16, layout.y - 39, { color: '#64748b', size: 9 });
+
+  const axisWidth = (PDF_CONTENT_WIDTH - 52) / 3;
+  const axisBottom = bottom + 18;
+  ([
+    ['X', result.dipoleDebye.x],
+    ['Y', result.dipoleDebye.y],
+    ['Z', result.dipoleDebye.z]
+  ] as Array<[string, number]>).forEach(([axis, value], index) => {
+    const x = PDF_MARGIN + 16 + index * (axisWidth + 10);
+    drawPdfRect(layout, x, axisBottom, axisWidth, 42, { fill: '#ffffff' });
+    drawPdfText(layout, axis, x + 10, axisBottom + 26, { color: '#94a3b8', font: 'F2', size: 8 });
+    drawPdfText(layout, `${formatSigned(value)} D`, x + 10, axisBottom + 11, { color: '#0f172a', font: 'F3', size: 10.5 });
+  });
+  layout.y = bottom - 16;
+}
+
+function drawPdfChargeTable(layout: PdfLayout, result: QuantumCalculationResult) {
+  drawPdfSectionTitle(layout, 'Partial charges');
+  const header = ['Atom', 'Elem', result.chargeModel];
+  const rows = result.charges.length
+    ? result.charges.map((atom) => [String(atom.index), atom.element, `${formatSigned(atom.charge)} e`, atom.charge >= 0 ? '#be123c' : '#075985'])
+    : [['N/A', 'N/A', 'No partial charges returned.', '#334155']];
+  const widths = [72, 74, PDF_CONTENT_WIDTH - 146];
+  let headerDrawn = false;
+
+  rows.forEach((row) => {
+    if (!headerDrawn || layout.y - 29 < PDF_BOTTOM_MARGIN) {
+      ensurePdfSpace(layout, 60);
+      drawPdfTableHeader(layout, header, widths);
+      headerDrawn = true;
+    }
+    const bottom = layout.y - 28;
+    drawPdfRect(layout, PDF_MARGIN, bottom, PDF_CONTENT_WIDTH, 28, { fill: '#ffffff', stroke: '#e2e8f0' });
+    drawPdfText(layout, row[0], PDF_MARGIN + 12, layout.y - 18, { color: '#334155', font: 'F3', size: 9 });
+    drawPdfText(layout, row[1], PDF_MARGIN + widths[0] + 12, layout.y - 18, { color: '#020617', font: 'F2', size: 10 });
+    drawPdfText(layout, row[2], PDF_MARGIN + widths[0] + widths[1] + 12, layout.y - 18, { color: row[3], font: 'F3', size: 9 });
+    layout.y = bottom;
+  });
+  layout.y -= 16;
+}
+
+function drawPdfWarnings(layout: PdfLayout, warnings: string[]) {
+  drawPdfSectionTitle(layout, 'Warnings');
+  warnings.forEach((warning) => {
+    const lines = wrapPdfText(warning, PDF_CONTENT_WIDTH - 32, 9.5);
+    const height = 22 + lines.length * 12;
+    ensurePdfSpace(layout, height + 10);
+    const bottom = layout.y - height;
+    drawPdfRect(layout, PDF_MARGIN, bottom, PDF_CONTENT_WIDTH, height, { fill: '#fffbeb', stroke: '#fde68a' });
+    lines.forEach((line, index) => {
+      drawPdfText(layout, line, PDF_MARGIN + 16, layout.y - 18 - index * 12, { color: '#92400e', size: 9.5 });
+    });
+    layout.y = bottom - 8;
+  });
+  layout.y -= 6;
+}
+
+function drawPdfEngineLog(layout: PdfLayout, result: QuantumCalculationResult) {
+  drawPdfSectionTitle(layout, 'Calculation log');
+  const logLines = boundedPdfLogLines(logText(result))
+    .flatMap((line) => wrapPdfPreText(line || ' ', PDF_CONTENT_WIDTH - 32, 7.5));
+  let index = 0;
+
+  while (index < logLines.length) {
+    if (layout.y - 80 < PDF_BOTTOM_MARGIN) startPdfPage(layout);
+    const availableHeight = Math.max(60, layout.y - PDF_BOTTOM_MARGIN - 12);
+    const availableLines = Math.max(1, Math.min(logLines.length - index, Math.floor((availableHeight - 24) / 9.5)));
+    const blockHeight = availableLines * 9.5 + 24;
+    const bottom = layout.y - blockHeight;
+    drawPdfRect(layout, PDF_MARGIN, bottom, PDF_CONTENT_WIDTH, blockHeight, { fill: '#020617', stroke: '#020617' });
+    for (let lineIndex = 0; lineIndex < availableLines; lineIndex += 1) {
+      drawPdfText(layout, logLines[index + lineIndex], PDF_MARGIN + 16, layout.y - 18 - lineIndex * 9.5, {
+        color: '#e2e8f0',
+        font: 'F3',
+        size: 7.5
+      });
+    }
+    index += availableLines;
+    layout.y = bottom - 12;
+  }
+}
+
+function drawPdfSectionTitle(layout: PdfLayout, title: string) {
+  ensurePdfSpace(layout, 28);
+  drawPdfText(layout, title, PDF_MARGIN, layout.y - 4, { color: '#020617', font: 'F2', size: 14 });
+  layout.y -= 24;
+}
+
+function drawPdfTableHeader(layout: PdfLayout, cells: string[], widths: number[]) {
+  const height = 28;
+  const bottom = layout.y - height;
+  drawPdfRect(layout, PDF_MARGIN, bottom, PDF_CONTENT_WIDTH, height, { fill: '#f1f5f9', stroke: '#e2e8f0' });
+  let x = PDF_MARGIN + 12;
+  cells.forEach((cell, index) => {
+    drawPdfWrappedText(layout, cell, x, layout.y - 18, widths[index] - 18, { color: '#64748b', font: 'F2', size: 8, lineHeight: 8, maxLines: 1 });
+    x += widths[index];
+  });
+  layout.y = bottom;
+}
+
+function drawPdfMiniMetric(layout: PdfLayout, x: number, bottom: number, width: number, label: string, value: string) {
+  drawPdfRect(layout, x, bottom, width, 43, { fill: '#ffffff', stroke: '#dbeafe' });
+  drawPdfText(layout, label, x + 9, bottom + 27, { color: '#64748b', font: 'F2', size: 7.5 });
+  drawPdfWrappedText(layout, value, x + 9, bottom + 13, width - 18, { color: '#020617', font: 'F2', size: 9, lineHeight: 9, maxLines: 1 });
+}
+
+function drawPdfPill(layout: PdfLayout, label: string, x: number, y: number, fill: string, color: string) {
+  drawPdfRect(layout, x, y - 20, 88, 24, { fill, stroke: fill });
+  drawPdfText(layout, label, x + 11, y - 11, { color, font: 'F2', size: 8.5 });
+}
+
+function drawPdfFooter(layout: PdfLayout) {
+  drawPdfLine(layout, PDF_MARGIN, 42, PDF_PAGE_WIDTH - PDF_MARGIN, 42, '#cbd5e1');
+  drawPdfText(layout, CHEMVAULT_COPYRIGHT_NOTICE, PDF_MARGIN, 26, { color: '#64748b', size: 7.5 });
+  drawPdfText(layout, `Page ${layout.pageNumber}`, PDF_PAGE_WIDTH - PDF_MARGIN - 42, 26, { color: '#64748b', size: 7.5 });
+}
+
+function drawPdfRect(layout: PdfLayout, x: number, y: number, width: number, height: number, options: { fill?: string; lineWidth?: number; stroke?: string } = {}) {
+  const fill = options.fill ? `${pdfColor(options.fill)} rg` : '';
+  const stroke = options.stroke ? `${pdfColor(options.stroke)} RG` : '';
+  const lineWidth = `${options.lineWidth ?? 1} w`;
+  const operation = options.fill && options.stroke ? 'B' : options.fill ? 'f' : 'S';
+  layout.commands.push(['q', fill, stroke, lineWidth, `${pdfNumber(x)} ${pdfNumber(y)} ${pdfNumber(width)} ${pdfNumber(height)} re ${operation}`, 'Q'].filter(Boolean).join('\n'));
+}
+
+function drawPdfLine(layout: PdfLayout, x1: number, y1: number, x2: number, y2: number, color: string) {
+  layout.commands.push(`q\n${pdfColor(color)} RG\n0.75 w\n${pdfNumber(x1)} ${pdfNumber(y1)} m\n${pdfNumber(x2)} ${pdfNumber(y2)} l\nS\nQ`);
+}
+
+function drawPdfText(layout: PdfLayout, value: string, x: number, y: number, options: PdfTextOptions = {}) {
+  const font = options.font || 'F1';
+  const size = options.size || 10;
+  const color = options.color || '#0f172a';
+  layout.commands.push(`q\n${pdfColor(color)} rg\nBT\n/${font} ${pdfNumber(size)} Tf\n1 0 0 1 ${pdfNumber(x)} ${pdfNumber(y)} Tm\n(${escapePdf(value)}) Tj\nET\nQ`);
+}
+
+function drawPdfWrappedText(layout: PdfLayout, value: string, x: number, y: number, width: number, options: PdfTextOptions = {}) {
+  const size = options.size || 10;
+  const lineHeight = options.lineHeight || size + 3;
+  const lines = wrapPdfText(value, width, size, options.font).slice(0, options.maxLines || Number.POSITIVE_INFINITY);
+  lines.forEach((line, index) => {
+    drawPdfText(layout, line, x, y - index * lineHeight, options);
+  });
+  return lines.length * lineHeight;
+}
+
+function wrapPdfText(value: string, width: number, size: number, font: PdfFont = 'F1') {
+  const text = sanitizePdfText(value).replace(/\s+/gu, ' ').trim();
+  if (!text) return [''];
+  const lines: string[] = [];
+  let line = '';
+  text.split(' ').forEach((word) => {
+    const candidate = line ? `${line} ${word}` : word;
+    if (approxPdfTextWidth(candidate, size, font) <= width) {
+      line = candidate;
+      return;
+    }
+    if (line) lines.push(line);
+    if (approxPdfTextWidth(word, size, font) <= width) {
+      line = word;
+      return;
+    }
+    const maxChars = Math.max(8, Math.floor(width / (size * (font === 'F3' ? 0.6 : 0.52))));
+    for (let index = 0; index < word.length; index += maxChars) {
+      const chunk = word.slice(index, index + maxChars);
+      if (index + maxChars < word.length) lines.push(chunk);
+      else line = chunk;
+    }
+  });
+  if (line) lines.push(line);
+  return lines;
+}
+
+function wrapPdfPreText(value: string, width: number, size: number) {
+  const text = sanitizePdfText(value).replace(/\t/gu, '    ');
+  const maxChars = Math.max(8, Math.floor(width / (size * 0.6)));
+  if (!text) return [' '];
+  const lines: string[] = [];
+  for (let index = 0; index < text.length; index += maxChars) {
+    lines.push(text.slice(index, index + maxChars));
+  }
+  return lines;
+}
+
+function approxPdfTextWidth(value: string, size: number, font: PdfFont) {
+  const factor = font === 'F3' ? 0.6 : font === 'F2' ? 0.55 : 0.52;
+  return sanitizePdfText(value).length * size * factor;
+}
+
+function pdfColor(hex: string) {
+  const normalized = hex.replace('#', '');
+  const red = Number.parseInt(normalized.slice(0, 2), 16) / 255;
+  const green = Number.parseInt(normalized.slice(2, 4), 16) / 255;
+  const blue = Number.parseInt(normalized.slice(4, 6), 16) / 255;
+  return `${pdfNumber(red)} ${pdfNumber(green)} ${pdfNumber(blue)}`;
+}
+
+function pdfNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toFixed(3).replace(/0+$/u, '').replace(/\.$/u, '');
+}
+
+function boundedPdfLogLines(value: string) {
+  const lines = value.split(/\r?\n/u);
+  if (lines.length <= PDF_MAX_LOG_LINES) return lines;
+  return [
+    ...lines.slice(0, PDF_MAX_LOG_LINES),
+    'Log truncated in PDF export. Use Export Log for the complete engine output.'
+  ];
 }
 
 function quantumSummaryRows(result: QuantumCalculationResult, context: QuantumExportDocumentContext, generatedAt: Date) {
@@ -473,17 +771,6 @@ function buildPdf(objects: string[], infoObjectId: number) {
   });
   parts.push(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info ${infoObjectId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
   return TEXT_ENCODER.encode(parts.join(''));
-}
-
-function wrapPdfLine(value: string) {
-  const text = sanitizePdfText(value);
-  const max = 92;
-  if (text.length <= max) return [text];
-  const lines = [];
-  for (let index = 0; index < text.length; index += max) {
-    lines.push(text.slice(index, index + max));
-  }
-  return lines;
 }
 
 function pdfDate(value: Date) {

@@ -1347,7 +1347,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1.2fr)_auto]">
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
         <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
           <span className="block text-xs font-medium text-slate-500">Total charge</span>
           <input
@@ -1389,14 +1389,6 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
             <option value="geometry-optimization">Geometry optimization</option>
           </select>
         </label>
-        <button
-          type="button"
-          onClick={runCalculation}
-          disabled={!canRun}
-          className="self-end rounded-2xl bg-slate-950 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-        >
-          {running ? 'Calculating' : 'Run Calculation'}
-        </button>
       </div>
 
       <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
@@ -1407,38 +1399,35 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
           onPrepare={prepareCurrentStructure}
           onResetPrepared={resetPreparedStructure}
         />
-        <WorkflowBridgePanel
+        <OperationPlanPanel
+          activeProject={activeProject}
+          canQueue={Boolean(calculationXyz && preflight.canRun)}
+          canRun={canRun}
           canRunQuickScreen={quickScreenReady}
           currentEngine={selectedEngine}
+          engineReady={engineReady}
           historyCount={historyEntries.length}
+          items={queueItems}
           latestResult={result}
           message={workflowMessage}
+          projectCount={projectRecords.length}
+          projectMessage={projectMessage}
+          queueRunning={queueRunning}
           quickScreenIssue={quickScreenIssue}
-          onConfigureExistingEngine={() => setSetupMode('configure')}
-          onOpenHistory={() => setHistoryOpen(true)}
-          onRefreshLocalEngines={loadLocalEngines}
-          onRunQuickScreen={runQuickScreenThenGaussian}
-          onSendToGaussian={sendCurrentSetupToGaussian}
-        />
-      </div>
-
-      <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-        <QuantumQueuePanel
-          canQueue={Boolean(calculationXyz && preflight.canRun)}
-          items={queueItems}
-          running={queueRunning}
+          running={running}
           onAddCurrent={addCurrentSetupToQueue}
           onAddWorkflow={addScreenAndGaussianToQueue}
-          onClear={clearQueue}
-          onRun={runQueuedCalculations}
-        />
-        <ProjectWorkspacePanel
-          activeProject={activeProject}
-          message={projectMessage}
-          projectCount={projectRecords.length}
-          onExportActive={exportActiveProject}
-          onExportIndex={exportProjectIndex}
-          onImport={importProjectFile}
+          onClearQueue={clearQueue}
+          onConfigureExistingEngine={() => setSetupMode('configure')}
+          onExportActiveProject={exportActiveProject}
+          onExportProjectIndex={exportProjectIndex}
+          onImportProject={importProjectFile}
+          onOpenHistory={() => setHistoryOpen(true)}
+          onRefreshLocalEngines={loadLocalEngines}
+          onRunCalculation={runCalculation}
+          onRunQueue={runQueuedCalculations}
+          onRunQuickScreen={runQuickScreenThenGaussian}
+          onSendToGaussian={sendCurrentSetupToGaussian}
         />
       </div>
 
@@ -2185,281 +2174,317 @@ function PreflightPanel({
   );
 }
 
-function WorkflowBridgePanel({
+function OperationPlanPanel({
+  activeProject,
+  canQueue,
+  canRun,
   canRunQuickScreen,
   currentEngine,
+  engineReady,
   historyCount,
+  items,
   latestResult,
   message,
-  quickScreenIssue,
-  onConfigureExistingEngine,
-  onOpenHistory,
-  onRefreshLocalEngines,
-  onRunQuickScreen,
-  onSendToGaussian
-}: {
-  canRunQuickScreen: boolean;
-  currentEngine: QuantumEngineKind;
-  historyCount: number;
-  latestResult: QuantumCalculationResult | null;
-  message: string;
-  quickScreenIssue: string;
-  onConfigureExistingEngine: () => void;
-  onOpenHistory: () => void;
-  onRefreshLocalEngines: () => void;
-  onRunQuickScreen: () => void;
-  onSendToGaussian: () => void;
-}) {
-  const canSendResult = Boolean(latestResult && latestResult.engine !== 'gaussian');
-
-  return (
-    <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">ChemVault workflow</p>
-      <h4 className="mt-1 text-sm font-bold text-slate-950">Screen here, refine with Gaussian when needed</h4>
-      <p className="mt-2 text-xs leading-5 text-slate-600">
-        Use ChemVault to validate geometry, run a quick screen, keep records, then hand off clean Gaussian files for high-precision work.
-      </p>
-      {quickScreenIssue ? (
-        <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-800">Quick screening unavailable</p>
-              <p className="mt-1 text-xs leading-5 text-amber-900">{quickScreenIssue}</p>
-            </div>
-            <div className="flex shrink-0 flex-wrap gap-2">
-              <button
-                type="button"
-                onClick={onConfigureExistingEngine}
-                className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
-              >
-                Configure xTB
-              </button>
-              <button
-                type="button"
-                onClick={onRefreshLocalEngines}
-                className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
-              >
-                Refresh status
-              </button>
-              <button
-                type="button"
-                onClick={onSendToGaussian}
-                className="rounded-xl border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-50"
-              >
-                Use Gaussian setup
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={onRunQuickScreen}
-          disabled={!canRunQuickScreen}
-          title={canRunQuickScreen ? 'Run xTB screening before Gaussian refinement.' : quickScreenIssue || 'Quick screening is not ready.'}
-          className="rounded-xl bg-sky-700 px-3 py-2 text-xs font-semibold text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-        >
-          Quick xTB screen {'->'} Gaussian
-        </button>
-        <button
-          type="button"
-          onClick={onSendToGaussian}
-          className="rounded-xl border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {currentEngine === 'gaussian' && !canSendResult ? 'Open Gaussian setup' : 'Send setup to Gaussian'}
-        </button>
-        <button
-          type="button"
-          onClick={onOpenHistory}
-          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-        >
-          History ({historyCount})
-        </button>
-      </div>
-      {message ? <p className="mt-3 rounded-xl border border-sky-200 bg-white px-3 py-2 text-xs leading-5 text-sky-800">{message}</p> : null}
-    </section>
-  );
-}
-
-function QuantumQueuePanel({
-  canQueue,
-  items,
   onAddCurrent,
   onAddWorkflow,
-  onClear,
-  onRun,
+  onClearQueue,
+  onConfigureExistingEngine,
+  onExportActiveProject,
+  onExportProjectIndex,
+  onImportProject,
+  onOpenHistory,
+  onRefreshLocalEngines,
+  onRunCalculation,
+  onRunQueue,
+  onRunQuickScreen,
+  onSendToGaussian,
+  projectCount,
+  projectMessage,
+  queueRunning,
+  quickScreenIssue,
   running
 }: {
+  activeProject: QuantumProjectRecord | null;
   canQueue: boolean;
+  canRun: boolean;
+  canRunQuickScreen: boolean;
+  currentEngine: QuantumEngineKind;
+  engineReady: boolean;
+  historyCount: number;
   items: QuantumQueueItem[];
+  latestResult: QuantumCalculationResult | null;
+  message: string;
   onAddCurrent: () => void;
   onAddWorkflow: () => void;
-  onClear: () => void;
-  onRun: () => void;
+  onClearQueue: () => void;
+  onConfigureExistingEngine: () => void;
+  onExportActiveProject: () => void;
+  onExportProjectIndex: () => void;
+  onImportProject: (file: File | null) => void | Promise<void>;
+  onOpenHistory: () => void;
+  onRefreshLocalEngines: () => void;
+  onRunCalculation: () => void;
+  onRunQueue: () => void;
+  onRunQuickScreen: () => void;
+  onSendToGaussian: () => void;
+  projectCount: number;
+  projectMessage: string;
+  queueRunning: boolean;
+  quickScreenIssue: string;
   running: boolean;
 }) {
+  const canSendResult = Boolean(latestResult && latestResult.engine !== 'gaussian');
   const queuedCount = items.filter((item) => item.status === 'queued' || item.status === 'failed').length;
+  const latestQueueItems = items.slice(-3).reverse();
+  const activeEngineLabel = engineLabel(currentEngine);
+  const queueStatus = queueRunning
+    ? 'Running'
+    : items.length
+      ? `${queuedCount}/${items.length} pending`
+      : 'Optional';
+  const recordStatus = activeProject
+    ? `${activeProject.calculationCount} calculation${activeProject.calculationCount === 1 ? '' : 's'}`
+    : `${projectCount} saved`;
 
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Calculation queue</p>
-          <h4 className="mt-1 text-sm font-bold text-slate-950">Run a small workflow without babysitting it</h4>
-        </div>
-        <span className="rounded-full bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">
-          {items.length ? `${items.length} item${items.length === 1 ? '' : 's'}` : 'Empty'}
-        </span>
-      </div>
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={onAddCurrent}
-          disabled={!canQueue || running}
-          className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-        >
-          Add current setup
-        </button>
-        <button
-          type="button"
-          onClick={onAddWorkflow}
-          disabled={!canQueue || running}
-          className="rounded-xl border border-sky-300 bg-sky-50 px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Add screen + Gaussian
-        </button>
-        <button
-          type="button"
-          onClick={onRun}
-          disabled={!queuedCount || running}
-          className="rounded-xl border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {running ? 'Running queue' : 'Run queue'}
-        </button>
-        <button
-          type="button"
-          onClick={onClear}
-          disabled={!items.length || running}
-          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Clear
-        </button>
-      </div>
-      <div className="mt-3 grid gap-2">
-        {items.length ? items.slice(-5).map((item) => (
-          <div key={item.id} className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <p className="text-xs font-bold text-slate-950">{item.label}</p>
-              <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
-                item.status === 'completed'
-                  ? 'bg-emerald-50 text-emerald-700'
-                  : item.status === 'failed'
-                    ? 'bg-rose-50 text-rose-700'
-                    : item.status === 'running'
-                      ? 'bg-sky-50 text-sky-700'
-                      : 'bg-white text-slate-600'
-              }`}>
-                {item.status}
-              </span>
-            </div>
-            <p className="mt-1 text-[11px] leading-4 text-slate-500">
-              {item.engineLabel} / {item.method}{item.basisSet ? ` / ${item.basisSet}` : ''} / charge {item.charge} / spin {item.unpairedElectrons}
-            </p>
-            {item.message ? <p className="mt-1 text-[11px] leading-4 text-slate-600">{item.message}</p> : null}
-          </div>
-        )) : (
-          <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
-            Add the current setup when you want to run multiple calculations in sequence.
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Operation plan</p>
+          <h4 className="mt-1 text-sm font-bold text-slate-950">Run, screen, or hand off from one place</h4>
+          <p className="mt-1 text-xs leading-5 text-slate-600">
+            Use this panel for the next calculation. Queue and project tools stay folded until you need them.
           </p>
-        )}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <span className="rounded-full bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">{activeEngineLabel}</span>
+          <span className="rounded-full bg-slate-50 px-3 py-1 text-xs font-semibold text-slate-600">Queue: {queueStatus}</span>
+        </div>
       </div>
-    </section>
-  );
-}
 
-function ProjectWorkspacePanel({
-  activeProject,
-  message,
-  onExportActive,
-  onExportIndex,
-  onImport,
-  projectCount
-}: {
-  activeProject: QuantumProjectRecord | null;
-  message: string;
-  onExportActive: () => void;
-  onExportIndex: () => void;
-  onImport: (file: File | null) => void;
-  projectCount: number;
-}) {
-  return (
-    <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Project workspace</p>
-          <h4 className="mt-1 text-sm font-bold text-slate-950">Calculation records stay with the molecule</h4>
-        </div>
-        <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
-          {projectCount} project{projectCount === 1 ? '' : 's'}
-        </span>
-      </div>
-      {activeProject ? (
-        <div className="mt-3 rounded-2xl border border-emerald-200 bg-white px-4 py-3">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <p className="truncate text-sm font-bold text-slate-950">{activeProject.moleculeName}</p>
-              <p className="mt-1 text-xs leading-5 text-slate-500">
-                {activeProject.latestEngineLabel} / {activeProject.calculationCount} calculation{activeProject.calculationCount === 1 ? '' : 's'} / {formatHistoryDate(activeProject.updatedAt)}
-              </p>
+      <div className="mt-4 grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(260px,0.72fr)]">
+        <div className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Primary action</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onRunCalculation}
+              disabled={!canRun}
+              title={canRun ? 'Run the selected engine with the current structure and settings.' : 'Complete readiness checks before running this calculation.'}
+              className="rounded-xl bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              {running ? 'Calculating' : 'Run Calculation'}
+            </button>
+            <button
+              type="button"
+              onClick={onRunQuickScreen}
+              disabled={!canRunQuickScreen}
+              title={canRunQuickScreen ? 'Run xTB screening before Gaussian refinement.' : quickScreenIssue || 'Quick screening is not ready.'}
+              className="rounded-xl bg-sky-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-sky-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              Quick xTB screen {'->'} Gaussian
+            </button>
+            <button
+              type="button"
+              onClick={onSendToGaussian}
+              className="rounded-xl border border-sky-300 bg-white px-4 py-2.5 text-sm font-semibold text-sky-800 hover:bg-sky-50"
+            >
+              {currentEngine === 'gaussian' && !canSendResult ? 'Open Gaussian setup' : 'Send setup to Gaussian'}
+            </button>
+          </div>
+
+          {quickScreenIssue ? (
+            <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-xs font-bold uppercase tracking-[0.12em] text-amber-800">Quick screening unavailable</p>
+                  <p className="mt-1 text-xs leading-5 text-amber-900">{quickScreenIssue}</p>
+                </div>
+                <div className="flex shrink-0 flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={onConfigureExistingEngine}
+                    className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                  >
+                    Configure xTB
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onRefreshLocalEngines}
+                    className="rounded-xl border border-amber-300 bg-white px-3 py-2 text-xs font-semibold text-amber-900 hover:bg-amber-100"
+                  >
+                    Refresh
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onSendToGaussian}
+                    className="rounded-xl border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-50"
+                  >
+                    Use Gaussian
+                  </button>
+                </div>
+              </div>
             </div>
-            <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
-              activeProject.latestStatus === 'completed' ? 'bg-emerald-50 text-emerald-700' : activeProject.latestStatus === 'failed' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
-            }`}>
-              {activeProject.latestStatus}
-            </span>
+          ) : null}
+
+          {message ? <p className="mt-3 rounded-xl border border-sky-200 bg-white px-3 py-2 text-xs leading-5 text-sky-800">{message}</p> : null}
+        </div>
+
+        <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Current state</p>
+          <div className="mt-3 grid gap-2">
+            <ReadinessItem label="Engine" ready={engineReady} value={activeEngineLabel} />
+            <ReadinessItem label="Queue" ready={!queueRunning} value={queueStatus} />
+            <ReadinessItem label="Records" ready={projectCount > 0} value={recordStatus} />
           </div>
-          <div className="mt-3 grid gap-2 sm:grid-cols-2">
-            <MetricCompact label="Latest energy" value={activeProject.latestEnergyHartree === null ? 'N/A' : `${formatNumber(activeProject.latestEnergyHartree)} Eh`} />
-            <MetricCompact label="Latest dipole" value={activeProject.latestDipoleDebye === null ? 'N/A' : `${formatNumber(activeProject.latestDipoleDebye)} D`} />
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onOpenHistory}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              History ({historyCount})
+            </button>
           </div>
         </div>
-      ) : (
-        <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2 text-xs leading-5 text-slate-500">
-          Completed calculations will automatically create a local ChemVault project record.
-        </p>
-      )}
-      <div className="mt-3 flex flex-wrap gap-2">
-        <button
-          type="button"
-          onClick={onExportActive}
-          disabled={!activeProject}
-          className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
-        >
-          Export project
-        </button>
-        <button
-          type="button"
-          onClick={onExportIndex}
-          disabled={!projectCount}
-          className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          Export index
-        </button>
-        <label className="cursor-pointer rounded-xl border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-50">
-          Import project
-          <input
-            type="file"
-            accept="application/json,.json"
-            className="sr-only"
-            onChange={(event) => {
-              void onImport(event.target.files?.[0] || null);
-              event.target.value = '';
-            }}
-          />
-        </label>
       </div>
-      {message ? <p className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-600">{message}</p> : null}
+
+      <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <details className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <summary className="cursor-pointer text-sm font-bold text-slate-950">
+            Optional queue
+            <span className="ml-2 rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-slate-500">{items.length ? `${items.length} item${items.length === 1 ? '' : 's'}` : 'Empty'}</span>
+          </summary>
+          <p className="mt-2 text-xs leading-5 text-slate-600">
+            Use the queue only when you want ChemVault to run several calculations in sequence.
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onAddCurrent}
+              disabled={!canQueue || queueRunning}
+              className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              Add current setup
+            </button>
+            <button
+              type="button"
+              onClick={onAddWorkflow}
+              disabled={!canQueue || queueRunning}
+              className="rounded-xl border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Add screen + Gaussian
+            </button>
+            <button
+              type="button"
+              onClick={onRunQueue}
+              disabled={!queuedCount || queueRunning}
+              className="rounded-xl border border-emerald-300 bg-white px-3 py-2 text-xs font-semibold text-emerald-800 hover:bg-emerald-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {queueRunning ? 'Running queue' : 'Run queue'}
+            </button>
+            <button
+              type="button"
+              onClick={onClearQueue}
+              disabled={!items.length || queueRunning}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Clear
+            </button>
+          </div>
+          <div className="mt-3 grid gap-2">
+            {latestQueueItems.length ? latestQueueItems.map((item) => (
+              <div key={item.id} className="rounded-xl border border-slate-200 bg-white px-3 py-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs font-bold text-slate-950">{item.label}</p>
+                  <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                    item.status === 'completed'
+                      ? 'bg-emerald-50 text-emerald-700'
+                      : item.status === 'failed'
+                        ? 'bg-rose-50 text-rose-700'
+                        : item.status === 'running'
+                          ? 'bg-sky-50 text-sky-700'
+                          : 'bg-slate-50 text-slate-600'
+                  }`}>
+                    {item.status}
+                  </span>
+                </div>
+                <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                  {item.engineLabel} / {item.method}{item.basisSet ? ` / ${item.basisSet}` : ''} / charge {item.charge} / spin {item.unpairedElectrons}
+                </p>
+                {item.message ? <p className="mt-1 text-[11px] leading-4 text-slate-600">{item.message}</p> : null}
+              </div>
+            )) : (
+              <p className="rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2 text-xs leading-5 text-slate-500">
+                Queue is empty. Most users can run the current calculation directly.
+              </p>
+            )}
+          </div>
+        </details>
+
+        <details className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
+          <summary className="cursor-pointer text-sm font-bold text-slate-950">
+            Records and export
+            <span className="ml-2 rounded-full bg-white px-2 py-1 text-[11px] font-semibold text-slate-500">{projectCount} project{projectCount === 1 ? '' : 's'}</span>
+          </summary>
+          {activeProject ? (
+            <div className="mt-3 rounded-xl border border-emerald-200 bg-white px-3 py-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-950">{activeProject.moleculeName}</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-500">
+                    {activeProject.latestEngineLabel} / {activeProject.calculationCount} calculation{activeProject.calculationCount === 1 ? '' : 's'} / {formatHistoryDate(activeProject.updatedAt)}
+                  </p>
+                </div>
+                <span className={`rounded-full px-2 py-1 text-[11px] font-semibold ${
+                  activeProject.latestStatus === 'completed' ? 'bg-emerald-50 text-emerald-700' : activeProject.latestStatus === 'failed' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
+                }`}>
+                  {activeProject.latestStatus}
+                </span>
+              </div>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                <MetricCompact label="Latest energy" value={activeProject.latestEnergyHartree === null ? 'N/A' : `${formatNumber(activeProject.latestEnergyHartree)} Eh`} />
+                <MetricCompact label="Latest dipole" value={activeProject.latestDipoleDebye === null ? 'N/A' : `${formatNumber(activeProject.latestDipoleDebye)} D`} />
+              </div>
+            </div>
+          ) : (
+            <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2 text-xs leading-5 text-slate-500">
+              Completed calculations automatically create local project records.
+            </p>
+          )}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={onExportActiveProject}
+              disabled={!activeProject}
+              className="rounded-xl bg-slate-950 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              Export project
+            </button>
+            <button
+              type="button"
+              onClick={onExportProjectIndex}
+              disabled={!projectCount}
+              className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              Export index
+            </button>
+            <label className="cursor-pointer rounded-xl border border-sky-300 bg-white px-3 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-50">
+              Import project
+              <input
+                type="file"
+                accept="application/json,.json"
+                className="sr-only"
+                onChange={(event) => {
+                  void onImportProject(event.target.files?.[0] || null);
+                  event.target.value = '';
+                }}
+              />
+            </label>
+          </div>
+          {projectMessage ? <p className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs leading-5 text-slate-600">{projectMessage}</p> : null}
+        </details>
+      </div>
     </section>
   );
 }

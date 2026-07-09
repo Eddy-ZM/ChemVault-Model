@@ -415,11 +415,27 @@ async function proxyChemApi(request, response, requestUrl) {
   const headers = sanitizeProxyHeaders(request.headers);
   headers['x-chemvault-client'] = 'desktop-windows';
 
-  const upstream = await fetch(targetUrl, {
-    method: request.method,
-    headers,
-    body: body.length > 0 && request.method !== 'GET' && request.method !== 'HEAD' ? body : undefined
-  });
+  let upstream;
+  try {
+    upstream = await fetch(targetUrl, {
+      method: request.method,
+      headers,
+      body: body.length > 0 && request.method !== 'GET' && request.method !== 'HEAD' ? body : undefined
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'fetch failed';
+    response.writeHead(502, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Cache-Control': 'no-store'
+    });
+    response.end(
+      JSON.stringify({
+        error: `Cannot reach the ChemVault chemistry service. ${message}`,
+        code: 'CHEM_API_PROXY_FAILED'
+      })
+    );
+    return;
+  }
 
   const responseHeaders = {};
   upstream.headers.forEach((value, key) => {

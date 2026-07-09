@@ -57,7 +57,8 @@ const greekLetterReplacements: Array<[RegExp, string]> = [
 const SEARCH_CACHE_LIMIT = 80;
 const CID_CACHE_LIMIT = 200;
 const PROPERTIES_CACHE_LIMIT = 200;
-const MAX_LOOKUP_CONCURRENCY = 6;
+const MAX_LOOKUP_CONCURRENCY = 4;
+const PUBCHEM_RETRY_DELAYS_MS = [250, 750];
 
 const searchCache = new Map<string, MoleculeSearchResult[]>();
 const cidCache = new Map<string, string | null>();
@@ -69,7 +70,7 @@ export type PubChemStructureResult = {
 };
 
 async function fetchJson<T>(url: string): Promise<T> {
-  const response = await fetchWithTimeout(url);
+  const response = await fetchPubChem(url);
   if (!response.ok) {
     const message = await response.text();
     throw new Error(`${response.status} ${response.statusText}: ${message.slice(0, 200)}`);
@@ -78,12 +79,32 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 async function fetchText(url: string): Promise<string> {
-  const response = await fetchWithTimeout(url);
+  const response = await fetchPubChem(url);
   if (!response.ok) {
     const message = await response.text();
     throw new Error(`${response.status} ${response.statusText}: ${message.slice(0, 200)}`);
   }
   return response.text();
+}
+
+async function fetchPubChem(url: string): Promise<Response> {
+  let lastError: unknown = null;
+
+  for (let attempt = 0; attempt <= PUBCHEM_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await fetchWithTimeout(url);
+    } catch (error) {
+      lastError = error;
+      if (attempt >= PUBCHEM_RETRY_DELAYS_MS.length) break;
+      await delay(PUBCHEM_RETRY_DELAYS_MS[attempt]);
+    }
+  }
+
+  throw lastError instanceof Error ? lastError : new Error('PubChem request failed');
+}
+
+function delay(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 async function getCidFromName(name: string): Promise<string | null> {

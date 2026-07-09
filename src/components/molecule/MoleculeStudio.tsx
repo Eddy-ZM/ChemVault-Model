@@ -163,9 +163,9 @@ export function MoleculeStudio() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ smiles: normalized })
         });
-        const payload = (await response.json()) as Partial<MoleculeProperties> & { error?: string };
+        const payload = await readApiResponse<Partial<MoleculeProperties> & { error?: string }>(response, 'Property calculation failed');
         if (!response.ok) {
-          throw new Error(payload.error || 'Property calculation failed');
+          throw new Error(apiErrorMessage(payload.error, 'Property calculation failed'));
         }
 
         const nextProperties: MoleculeProperties = {
@@ -246,9 +246,9 @@ export function MoleculeStudio() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ smiles: nextSmiles })
         }).then(async (response) => {
-          const payload = (await response.json()) as MoleculeGenerationResponse & { error?: string; cid?: string | null };
+          const payload = await readApiResponse<MoleculeGenerationResponse & { error?: string; cid?: string | null }>(response, '3D generation failed');
           if (!response.ok || !payload.success) {
-            throw new Error(payload.error || '3D generation failed');
+            throw new Error(apiErrorMessage(payload.error, '3D generation failed'));
           }
           return payload;
         });
@@ -287,9 +287,9 @@ export function MoleculeStudio() {
     if (cached) return cached;
 
     const structureResp = await fetch(`/api/chem/pubchem/structure?cid=${encodeURIComponent(cid)}&format=sdf3d`);
-    const structurePayload = (await structureResp.json()) as { error?: string; data?: string };
+    const structurePayload = await readApiResponse<{ error?: string; data?: string }>(structureResp, 'PubChem structure fetch failed');
     if (!structureResp.ok || !structurePayload.data) {
-      throw new Error(structurePayload.error || 'PubChem structure fetch failed');
+      throw new Error(apiErrorMessage(structurePayload.error, 'PubChem structure fetch failed'));
     }
     structureCache.current.set(cid, structurePayload.data);
     return structurePayload.data;
@@ -353,14 +353,14 @@ export function MoleculeStudio() {
         let cached = searchResultCache.current.get(cacheKey);
         if (!cached) {
           const response = await fetch(`/api/chem/pubchem/search?query=${encodeURIComponent(trimmed)}&limit=8`);
-          const payload = (await response.json()) as SearchCandidate & {
+          const payload = await readApiResponse<SearchCandidate & {
             error?: string;
             result?: SearchCandidate;
             results?: SearchCandidate[];
             needsSelection?: boolean;
-          };
+          }>(response, 'Search failed');
           if (!response.ok) {
-            throw new Error(payload.error || 'Search failed');
+            throw new Error(apiErrorMessage(payload.error, 'Search failed'));
           }
 
           const candidates = (payload.results?.length ? payload.results : payload.result ? [payload.result] : [payload]).filter(
@@ -500,9 +500,9 @@ export function MoleculeStudio() {
       setPdbMeta(undefined);
       try {
         const response = await fetch(`/api/chem/pdb/${encodeURIComponent(pdbId)}`);
-        const payload = (await response.json()) as PdbRecord & { error?: string };
+        const payload = await readApiResponse<PdbRecord & { error?: string }>(response, 'PDB load failed');
         if (!response.ok) {
-          throw new Error(payload.error || 'PDB load failed');
+          throw new Error(apiErrorMessage(payload.error, 'PDB load failed'));
         }
 
         setProperties(emptyProperties());
@@ -950,6 +950,29 @@ function firstExportValue(...values: Array<string | null | undefined>) {
 
 function stripFileExtension(value?: string | null) {
   return value?.replace(/\.[a-zA-Z0-9]{1,8}$/u, '') || '';
+}
+
+async function readApiResponse<T>(response: Response, fallbackMessage: string): Promise<T> {
+  const text = await response.text();
+  if (!text.trim()) return {} as T;
+
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    const normalized = text.trim().slice(0, 240);
+    if (/fetch failed|network|failed to fetch|ECONNRESET|ENOTFOUND|ETIMEDOUT/iu.test(normalized)) {
+      throw new Error('Cannot reach the ChemVault chemistry service. Check the network connection and try again.');
+    }
+    throw new Error(`${fallbackMessage}. The service returned an invalid response.`);
+  }
+}
+
+function apiErrorMessage(value: string | undefined, fallbackMessage: string) {
+  const message = value?.trim() || fallbackMessage;
+  if (/fetch failed|network|failed to fetch|ECONNRESET|ENOTFOUND|ETIMEDOUT|CHEM_API_PROXY_FAILED/iu.test(message)) {
+    return 'Cannot reach the ChemVault chemistry service. Check the network connection and try again.';
+  }
+  return message;
 }
 
 function searchCacheKey(value: string) {

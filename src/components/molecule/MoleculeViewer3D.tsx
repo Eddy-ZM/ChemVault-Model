@@ -9,7 +9,8 @@ type SurfaceType = { VDW: number };
 type ThreeDMolAtom = { elem: string; x: number; y: number; z: number };
 type ThreeDMolModel = { selectedAtoms: (query: unknown) => ThreeDMolAtom[] };
 type ThreeDMolViewer = {
-  setBackgroundColor: (color: string | number) => void;
+  config?: { backgroundAlpha?: number; backgroundColor?: string | number };
+  setBackgroundColor: (color: string | number, alpha?: number) => void;
   addModel: (modelData: string, format: string) => ThreeDMolModel;
   removeAllSurfaces?: () => void;
   removeAllLabels?: () => void;
@@ -22,7 +23,7 @@ type ThreeDMolViewer = {
   pngURI: () => string;
   resize?: () => void;
 };
-type ThreeDMolApi = { createViewer: (element: HTMLElement, options: { defaultcolors: unknown }) => ThreeDMolViewer; rasmolElementColors: unknown; SurfaceType: SurfaceType };
+type ThreeDMolApi = { createViewer: (element: HTMLElement, options: { backgroundAlpha?: number; backgroundColor?: string | number; defaultcolors: unknown }) => ThreeDMolViewer; rasmolElementColors: unknown; SurfaceType: SurfaceType };
 
 const THREE_DMOL_SOURCES = ['/vendor/3Dmol-min.js', 'https://unpkg.com/3dmol@2.5.5/build/3Dmol-min.js'];
 
@@ -100,10 +101,23 @@ function load3dmolScript(): Promise<void> {
   });
 }
 
-function normalizeBackground(value: string) {
-  if (value === 'black') return 'black';
-  if (value === 'transparent') return 0x00000000;
-  return 'white';
+function setViewerBackground(viewerInstance: ThreeDMolViewer | null, value: string) {
+  if (!viewerInstance) return;
+  if (value === 'transparent') {
+    if (viewerInstance.config) {
+      viewerInstance.config.backgroundAlpha = 0;
+      viewerInstance.config.backgroundColor = 0x000000;
+    }
+    viewerInstance.setBackgroundColor(0x000000, 0);
+    return;
+  }
+
+  const color = value === 'black' ? 'black' : 'white';
+  if (viewerInstance.config) {
+    viewerInstance.config.backgroundAlpha = 1;
+    viewerInstance.config.backgroundColor = color;
+  }
+  viewerInstance.setBackgroundColor(color, 1);
 }
 
 export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function MoleculeViewer3D(
@@ -133,9 +147,13 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
         if (!mounted || !container.current) return;
         const threeDMol = (window as { $3Dmol?: ThreeDMolApi }).$3Dmol;
         if (!threeDMol) return;
-        viewer.current = threeDMol.createViewer(container.current, { defaultcolors: threeDMol.rasmolElementColors });
+        viewer.current = threeDMol.createViewer(container.current, {
+          backgroundAlpha: 1,
+          backgroundColor: 'white',
+          defaultcolors: threeDMol.rasmolElementColors
+        });
         setReady(true);
-        viewer.current.setBackgroundColor(normalizeBackground('white'));
+        setViewerBackground(viewer.current, 'white');
         setError(null);
         onReadyRef.current?.();
       })
@@ -156,6 +174,7 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
     if (!viewer.current || !model.current) return;
 
     try {
+      setViewerBackground(viewer.current, background);
       viewer.current.removeAllSurfaces?.();
       if (viewer.current.removeAllLabels) viewer.current.removeAllLabels();
 
@@ -208,7 +227,7 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
       setError('Cannot render this structure with current style.');
       // defensive: keep interface stable even if 3dmol API differs by version
     }
-  }, [representation, showHydrogens, showAtomLabels]);
+  }, [background, representation, showHydrogens, showAtomLabels]);
 
   const loadModel = useCallback(
     async (modelData: string | null, format: StructureFormat = 'sdf') => {
@@ -241,6 +260,8 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
       },
       exportPng: () => {
         if (!viewer.current) return null;
+        setViewerBackground(viewer.current, background);
+        viewer.current.render();
         return viewer.current.pngURI();
       },
       resetView: () => {
@@ -259,7 +280,7 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
         }
         if (typeof backgroundColor === 'string') {
           setBackground(backgroundColor);
-          viewer.current?.setBackgroundColor(normalizeBackground(backgroundColor));
+          setViewerBackground(viewer.current, backgroundColor);
         }
         if (typeof showHs === 'boolean') {
           setShowHydrogens(showHs);
@@ -272,7 +293,7 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
         });
       }
     }),
-    [applyStyle, loadModel, ready]
+    [applyStyle, background, loadModel, ready]
   );
 
   useEffect(() => {
@@ -308,7 +329,13 @@ export const MoleculeViewer3D = forwardRef<MoleculeViewerHandle, Props>(function
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       {showHeader ? <h2 className="text-lg font-semibold">3D Viewer</h2> : null}
-      <div className="relative min-h-[240px] flex-1 overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className={`relative min-h-[240px] flex-1 overflow-hidden rounded-xl border border-slate-200 ${
+        background === 'transparent'
+          ? 'bg-[linear-gradient(45deg,#f8fafc_25%,transparent_25%),linear-gradient(-45deg,#f8fafc_25%,transparent_25%),linear-gradient(45deg,transparent_75%,#f8fafc_75%),linear-gradient(-45deg,transparent_75%,#f8fafc_75%)] bg-[length:24px_24px] bg-[position:0_0,0_12px,12px_-12px,-12px_0] bg-white'
+          : background === 'black'
+            ? 'bg-black'
+            : 'bg-white'
+      }`}>
         <div ref={container} className="h-full w-full" />
         {!ready ? <div className="absolute inset-0 grid place-items-center text-sm font-semibold text-slate-600">Preparing viewer</div> : null}
         {error ? (

@@ -8,6 +8,8 @@ import { analyzeElectrostatics, structureToXyz } from '@/lib/chem/electrostaticA
 import type {
   CommercialQuantumEngineKind,
   ExternalQuantumEngineConfig,
+  GaussianBridgeTools,
+  GaussianTaskTemplateId,
   LocalEngineStatus,
   LocalOpenSourceEngineKind,
   QuantumCalculationFileAttachment,
@@ -83,6 +85,57 @@ const engineOptions: Array<{ value: QuantumEngineKind; label: string; descriptio
   { value: 'pyscf', label: 'PySCF DFT/HF', description: 'Local open-source ab initio engine' },
   { value: 'gaussian', label: 'Gaussian', description: 'External licensed engine' },
   { value: 'orca', label: 'ORCA', description: 'External licensed engine' }
+];
+
+const gaussianTaskTemplates: Array<{
+  id: GaussianTaskTemplateId;
+  label: string;
+  description: string;
+  calculationMode: QuantumCalculationMode;
+  routeOptions: string;
+}> = [
+  {
+    id: 'single-point',
+    label: 'SP',
+    description: 'Single-point energy, dipole, and population analysis.',
+    calculationMode: 'single-point',
+    routeOptions: 'Pop=Full'
+  },
+  {
+    id: 'geometry-optimization',
+    label: 'Opt',
+    description: 'Geometry optimization before result parsing.',
+    calculationMode: 'geometry-optimization',
+    routeOptions: 'Pop=Full'
+  },
+  {
+    id: 'frequency',
+    label: 'Freq',
+    description: 'Frequency analysis from the current geometry.',
+    calculationMode: 'single-point',
+    routeOptions: 'Pop=Full'
+  },
+  {
+    id: 'optimization-frequency',
+    label: 'Opt + Freq',
+    description: 'Optimize geometry and then run frequency analysis.',
+    calculationMode: 'geometry-optimization',
+    routeOptions: 'Pop=Full'
+  },
+  {
+    id: 'td-dft',
+    label: 'TD-DFT',
+    description: 'Excited-state bridge template with ten states.',
+    calculationMode: 'single-point',
+    routeOptions: 'Pop=Full'
+  },
+  {
+    id: 'nmr',
+    label: 'NMR',
+    description: 'NMR shielding bridge template.',
+    calculationMode: 'single-point',
+    routeOptions: 'Pop=Full'
+  }
 ];
 
 const defaultExternalConfigs: Record<CommercialQuantumEngineKind, ExternalQuantumEngineConfig> = {
@@ -202,6 +255,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   const [charge, setCharge] = useState(0);
   const [unpairedElectrons, setUnpairedElectrons] = useState(0);
   const [calculationMode, setCalculationMode] = useState<QuantumCalculationMode>('single-point');
+  const [gaussianTask, setGaussianTask] = useState<GaussianTaskTemplateId>('single-point');
   const [externalConfig, setExternalConfig] = useState<ExternalQuantumEngineConfig>(defaultExternalConfigs.gaussian);
   const [pyscfMethod, setPyscfMethod] = useState('B3LYP');
   const [pyscfBasisSet, setPyscfBasisSet] = useState('6-31G');
@@ -220,6 +274,12 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   const [enginePreferenceNotice, setEnginePreferenceNotice] = useState<QuantumEnginePreference | null>(null);
   const [advancedSettingsOpen, setAdvancedSettingsOpen] = useState(false);
   const [exportIncludeLog, setExportIncludeLog] = useState(false);
+  const [gaussianTools, setGaussianTools] = useState<GaussianBridgeTools | null>(null);
+  const [gaussianBridgeBusy, setGaussianBridgeBusy] = useState<'tools' | 'fchk' | 'cube' | 'open' | null>(null);
+  const [gaussianBridgeMessage, setGaussianBridgeMessage] = useState('');
+  const [gaussianFchk, setGaussianFchk] = useState<QuantumCalculationFileAttachment | null>(null);
+  const [gaussianCube, setGaussianCube] = useState<QuantumCalculationFileAttachment | null>(null);
+  const [cubeKind, setCubeKind] = useState('density=scf');
 
   useEffect(() => {
     const preference = loadQuantumEnginePreference();
@@ -302,6 +362,15 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   }, []);
 
   useEffect(() => {
+    if (selectedEngine === 'gaussian') {
+      void refreshGaussianBridgeTools();
+    } else {
+      setGaussianTools(null);
+      setGaussianBridgeMessage('');
+    }
+  }, [configRevision, selectedEngine]);
+
+  useEffect(() => {
     const api = window.chemVaultDesktop;
     if (!api?.onQuantumCalculationProgress) return;
     return api.onQuantumCalculationProgress((progress) => {
@@ -312,12 +381,16 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   useEffect(() => {
     setResult(null);
     setError('');
+    setGaussianFchk(null);
+    setGaussianCube(null);
+    setGaussianBridgeMessage('');
   }, [
     xyz,
     selectedEngine,
     charge,
     unpairedElectrons,
     calculationMode,
+    gaussianTask,
     externalConfig.method,
     externalConfig.basisSet,
     externalConfig.routeOptions,
@@ -426,6 +499,109 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     }
   }
 
+  async function refreshGaussianBridgeTools() {
+    const api = window.chemVaultDesktop;
+    if (!api?.getGaussianBridgeTools) return;
+
+    setGaussianBridgeBusy('tools');
+    try {
+      setGaussianTools(await api.getGaussianBridgeTools());
+    } catch (toolError) {
+      setGaussianBridgeMessage(toolError instanceof Error ? toolError.message : 'Could not inspect Gaussian bridge tools.');
+    } finally {
+      setGaussianBridgeBusy(null);
+    }
+  }
+
+  function applyGaussianTaskTemplate(templateId: GaussianTaskTemplateId) {
+    const template = gaussianTaskTemplates.find((item) => item.id === templateId);
+    if (!template) return;
+
+    setGaussianTask(template.id);
+    setCalculationMode(template.calculationMode);
+    setExternalConfig((config) => ({
+      ...config,
+      engine: 'gaussian',
+      routeOptions: template.routeOptions
+    }));
+    setGaussianBridgeMessage(`${template.label} template applied. Review the Gaussian input preview before running if needed.`);
+  }
+
+  async function generateGaussianFchk() {
+    const api = window.chemVaultDesktop;
+    const checkpointBase64 = result?.gaussianFiles?.checkpoint?.contentBase64;
+    if (!api?.runGaussianFormchk || !result || result.engine !== 'gaussian' || !checkpointBase64) return;
+
+    setGaussianBridgeBusy('fchk');
+    setGaussianBridgeMessage('');
+    try {
+      const bridgeResult = await api.runGaussianFormchk({
+        checkpointBase64,
+        fileBaseName: exportBaseName
+      });
+      if (bridgeResult.ok && bridgeResult.attachment) {
+        setGaussianFchk(bridgeResult.attachment);
+        setGaussianBridgeMessage('FCHK generated from the Gaussian checkpoint.');
+      } else {
+        setGaussianBridgeMessage(bridgeResult.error || bridgeResult.outputTail || 'FCHK generation failed.');
+      }
+    } catch (bridgeError) {
+      setGaussianBridgeMessage(bridgeError instanceof Error ? bridgeError.message : 'FCHK generation failed.');
+    } finally {
+      setGaussianBridgeBusy(null);
+    }
+  }
+
+  async function generateGaussianCube() {
+    const api = window.chemVaultDesktop;
+    const checkpointBase64 = result?.gaussianFiles?.checkpoint?.contentBase64;
+    const formattedCheckpointBase64 = gaussianFchk?.contentBase64;
+    if (!api?.runGaussianCubegen || !result || result.engine !== 'gaussian' || (!checkpointBase64 && !formattedCheckpointBase64)) return;
+
+    setGaussianBridgeBusy('cube');
+    setGaussianBridgeMessage('');
+    try {
+      const bridgeResult = await api.runGaussianCubegen({
+        checkpointBase64,
+        formattedCheckpointBase64,
+        cubeKind,
+        fileBaseName: exportBaseName
+      });
+      if (bridgeResult.ok && bridgeResult.attachment) {
+        setGaussianCube(bridgeResult.attachment);
+        setGaussianBridgeMessage(`Cube generated with cubegen kind "${cubeKind}".`);
+      } else {
+        setGaussianBridgeMessage(bridgeResult.error || bridgeResult.outputTail || 'Cube generation failed.');
+      }
+    } catch (bridgeError) {
+      setGaussianBridgeMessage(bridgeError instanceof Error ? bridgeError.message : 'Cube generation failed.');
+    } finally {
+      setGaussianBridgeBusy(null);
+    }
+  }
+
+  async function openGaussianBridgeInGaussView() {
+    const api = window.chemVaultDesktop;
+    if (!api?.openGaussianInGaussView || !result || result.engine !== 'gaussian') return;
+
+    setGaussianBridgeBusy('open');
+    setGaussianBridgeMessage('');
+    try {
+      const openResult = await api.openGaussianInGaussView({
+        checkpointBase64: result.gaussianFiles?.checkpoint?.contentBase64,
+        formattedCheckpointBase64: gaussianFchk?.contentBase64,
+        inputText: result.gaussianFiles?.input?.contentText,
+        outputText: result.gaussianFiles?.output?.contentText || result.outputLog || result.outputTail,
+        fileBaseName: exportBaseName
+      });
+      setGaussianBridgeMessage(openResult.message || openResult.error || 'Gaussian bridge folder opened.');
+    } catch (openError) {
+      setGaussianBridgeMessage(openError instanceof Error ? openError.message : 'Could not open GaussView.');
+    } finally {
+      setGaussianBridgeBusy(null);
+    }
+  }
+
   function handleSetupEngineSelected(engine: QuantumEngineKind, label: string) {
     selectEngine(engine, label);
     setConfigRevision((value) => value + 1);
@@ -462,7 +638,14 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         basisSet: commercialEngine ? externalConfig.basisSet : selectedEngine === 'pyscf' ? pyscfBasisSet : undefined,
         routeOptions: commercialEngine ? externalConfig.routeOptions : undefined,
         calculationMode,
-        timeoutMs: selectedEngine === 'pyscf' ? 600000 : calculationMode === 'geometry-optimization' ? 600000 : 180000
+        gaussianTask: selectedEngine === 'gaussian' ? gaussianTask : undefined,
+        timeoutMs: selectedEngine === 'gaussian'
+          ? gaussianTaskTimeout(gaussianTask)
+          : selectedEngine === 'pyscf'
+            ? 600000
+            : calculationMode === 'geometry-optimization'
+              ? 600000
+              : 180000
       });
       setResult(nextResult);
       if (!nextResult.ok) {
@@ -502,6 +685,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     [metadata, result?.engine, selectedEngine]
   );
   const selectedEngineOption = engineOptions.find((option) => option.value === selectedEngine) || engineOptions[0];
+  const selectedGaussianTaskTemplate = gaussianTaskTemplates.find((template) => template.id === gaussianTask) || gaussianTaskTemplates[0];
   const engineReady = Boolean(status?.available);
   const statusDetails = statusLoading
     ? `Checking ${engineLabel(selectedEngine)} availability and configuration.`
@@ -592,12 +776,24 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     downloadBinary(`${exportBaseName}_${exportTimestamp()}_gaussian.chk`, bytes, checkpoint.mimeType || 'application/octet-stream');
   }
 
+  function exportGaussianFchk() {
+    const bytes = attachmentBytes(gaussianFchk || undefined);
+    if (!bytes) return;
+    downloadBinary(`${exportBaseName}_${exportTimestamp()}_gaussian.fchk`, bytes, gaussianFchk?.mimeType || 'chemical/x-gaussian-formatted-checkpoint');
+  }
+
+  function exportGaussianCube() {
+    const bytes = attachmentBytes(gaussianCube || undefined);
+    if (!bytes) return;
+    downloadBinary(`${exportBaseName}_${exportTimestamp()}_gaussian.cube`, bytes, gaussianCube?.mimeType || 'chemical/x-cube');
+  }
+
   function exportGaussianSuite() {
     if (!result || result.engine !== 'gaussian') return;
 
     const timestamp = exportTimestamp();
     const fileBase = `${exportBaseName}_${timestamp}_gaussian`;
-    const entries = gaussianSuiteEntries(result, fileBase);
+    const entries = gaussianSuiteEntries(result, fileBase, gaussianFchk || undefined, gaussianCube || undefined);
     if (!entries.length) return;
 
     downloadBinary(`${fileBase}_suite.zip`, createZip(entries), 'application/zip');
@@ -606,7 +802,23 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   const gaussianInputReady = result?.engine === 'gaussian' && Boolean(result.gaussianFiles?.input?.contentText);
   const gaussianOutputReady = result?.engine === 'gaussian' && Boolean(result.gaussianFiles?.output?.contentText || result.outputLog || result.outputTail);
   const gaussianCheckpointReady = result?.engine === 'gaussian' && Boolean(result.gaussianFiles?.checkpoint?.contentBase64);
-  const gaussianSuiteReady = Boolean(gaussianInputReady || gaussianOutputReady || gaussianCheckpointReady);
+  const gaussianFchkReady = Boolean(gaussianFchk?.contentBase64 || gaussianFchk?.contentText);
+  const gaussianCubeReady = Boolean(gaussianCube?.contentBase64 || gaussianCube?.contentText);
+  const gaussianSuiteReady = Boolean(gaussianInputReady || gaussianOutputReady || gaussianCheckpointReady || gaussianFchkReady || gaussianCubeReady);
+  const gaussianInputPreview = useMemo(
+    () => selectedEngine === 'gaussian' && xyz
+      ? buildGaussianInputPreview(xyz, {
+          basisSet: externalConfig.basisSet,
+          calculationMode,
+          charge,
+          gaussianTask,
+          method: externalConfig.method,
+          routeOptions: externalConfig.routeOptions || '',
+          unpairedElectrons
+        })
+      : '',
+    [calculationMode, charge, externalConfig.basisSet, externalConfig.method, externalConfig.routeOptions, gaussianTask, selectedEngine, unpairedElectrons, xyz]
+  );
 
   return (
     <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4">
@@ -658,7 +870,11 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
           <div className="mt-3 space-y-2">
             <ReadinessItem label="Structure" ready={Boolean(xyz)} value={xyz ? 'Loaded' : 'Load a 3D structure'} />
             <ReadinessItem label="Engine" ready={engineReady} value={statusLoading ? 'Checking' : engineReady ? 'Ready' : 'Needs setup'} />
-            <ReadinessItem label="Mode" ready={selectedEngine !== 'pyscf' || calculationMode === 'single-point'} value={calculationMode === 'geometry-optimization' ? 'Geometry optimization' : 'Single point'} />
+            <ReadinessItem
+              label="Mode"
+              ready={selectedEngine !== 'pyscf' || calculationMode === 'single-point'}
+              value={selectedEngine === 'gaussian' ? selectedGaussianTaskTemplate.label : calculationMode === 'geometry-optimization' ? 'Geometry optimization' : 'Single point'}
+            />
           </div>
           <p className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-5 ${engineReady ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
             {statusDetails}
@@ -695,7 +911,13 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
           <span className="block text-xs font-medium text-slate-500">Calculation type</span>
           <select
             value={calculationMode}
-            onChange={(event) => setCalculationMode(event.target.value as 'single-point' | 'geometry-optimization')}
+            onChange={(event) => {
+              const nextMode = event.target.value as QuantumCalculationMode;
+              setCalculationMode(nextMode);
+              if (selectedEngine === 'gaussian') {
+                setGaussianTask(nextMode === 'geometry-optimization' ? 'geometry-optimization' : 'single-point');
+              }
+            }}
             className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-400"
           >
             <option value="single-point">Single-point analysis</option>
@@ -821,6 +1043,59 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
               Auto Detect
             </button>
           </div>
+
+          {selectedEngine === 'gaussian' ? (
+            <div className="mt-4 rounded-2xl border border-sky-200 bg-white p-3">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Gaussian bridge templates</p>
+                  <p className="mt-1 text-xs leading-5 text-slate-600">
+                    Apply common Gaussian route templates, then review or edit the generated input before running.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={refreshGaussianBridgeTools}
+                  disabled={gaussianBridgeBusy === 'tools'}
+                  className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {gaussianBridgeBusy === 'tools' ? 'Checking' : 'Check tools'}
+                </button>
+              </div>
+
+              <div className="mt-3 grid gap-2 md:grid-cols-3 xl:grid-cols-6">
+                {gaussianTaskTemplates.map((template) => (
+                  <button
+                    key={template.id}
+                    type="button"
+                    onClick={() => applyGaussianTaskTemplate(template.id)}
+                    title={template.description}
+                    className={`rounded-xl border px-3 py-2 text-left text-xs transition ${
+                      gaussianTask === template.id
+                        ? 'border-sky-400 bg-sky-50 text-sky-950'
+                        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+                    }`}
+                  >
+                    <span className="block font-bold">{template.label}</span>
+                    <span className="mt-1 block leading-4 text-slate-500">{template.description}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="mt-3 grid gap-2 lg:grid-cols-3">
+                <BridgeStatus label="formchk" status={gaussianTools?.formchk} />
+                <BridgeStatus label="cubegen" status={gaussianTools?.cubegen} />
+                <BridgeStatus label="GaussView" status={gaussianTools?.gaussView} />
+              </div>
+
+              {gaussianInputPreview ? (
+                <details className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                  <summary className="cursor-pointer text-xs font-semibold text-slate-700">Gaussian input preview</summary>
+                  <pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap rounded-lg bg-white p-3 text-xs leading-5 text-slate-700">{gaussianInputPreview}</pre>
+                </details>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)_minmax(0,1fr)]">
             <label className="min-w-0">
@@ -1027,6 +1302,63 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
                       CHK
                     </button>
                   </div>
+                  <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className="flex flex-wrap items-end gap-2">
+                      <label className="min-w-[220px] flex-1">
+                        <span className="block text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">cubegen kind</span>
+                        <input
+                          type="text"
+                          value={cubeKind}
+                          onChange={(event) => setCubeKind(event.target.value)}
+                          placeholder="density=scf"
+                          className="mt-1 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs text-slate-900 outline-none focus:border-sky-400"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        onClick={generateGaussianFchk}
+                        disabled={!gaussianCheckpointReady || gaussianBridgeBusy === 'fchk'}
+                        className="rounded-xl border border-sky-300 bg-white px-4 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {gaussianBridgeBusy === 'fchk' ? 'Generating' : 'Generate FCHK'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={exportGaussianFchk}
+                        disabled={!gaussianFchkReady}
+                        className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Export FCHK
+                      </button>
+                      <button
+                        type="button"
+                        onClick={generateGaussianCube}
+                        disabled={(!gaussianCheckpointReady && !gaussianFchkReady) || gaussianBridgeBusy === 'cube'}
+                        className="rounded-xl border border-sky-300 bg-white px-4 py-2 text-xs font-semibold text-sky-800 hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {gaussianBridgeBusy === 'cube' ? 'Generating' : 'Generate CUBE'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={exportGaussianCube}
+                        disabled={!gaussianCubeReady}
+                        className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        Export CUBE
+                      </button>
+                      <button
+                        type="button"
+                        onClick={openGaussianBridgeInGaussView}
+                        disabled={!gaussianSuiteReady || gaussianBridgeBusy === 'open'}
+                        className="rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-2 text-xs font-semibold text-emerald-800 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        {gaussianBridgeBusy === 'open' ? 'Opening' : 'Open GaussView'}
+                      </button>
+                    </div>
+                    {gaussianBridgeMessage ? (
+                      <p className="mt-3 rounded-xl border border-slate-200 bg-white px-3 py-2 text-[11px] leading-5 text-slate-600">{gaussianBridgeMessage}</p>
+                    ) : null}
+                  </div>
                 </div>
               ) : null}
             </div>
@@ -1036,7 +1368,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
             <Metric label="Total energy" value={result.energyHartree === null ? 'N/A' : `${formatNumber(result.energyHartree)} Eh`} />
             <Metric label="Dipole magnitude" value={result.dipoleDebye ? `${formatNumber(result.dipoleDebye.total)} D` : 'N/A'} />
             <Metric label="Partial charges" value={String(result.charges.length)} />
-            <Metric label="Run mode" value={result.calculationMode === 'geometry-optimization' ? 'Optimized' : 'Single point'} />
+            <Metric label="Run mode" value={result.gaussianTaskLabel || (result.calculationMode === 'geometry-optimization' ? 'Optimized' : 'Single point')} />
             <Metric label="Elapsed time" value={`${(result.elapsedMs / 1000).toFixed(1)} s`} />
           </div>
 
@@ -1452,6 +1784,23 @@ function ReadinessItem({ label, ready, value }: { label: string; ready: boolean;
   );
 }
 
+function BridgeStatus({ label, status }: { label: string; status?: { available: boolean; message: string; path?: string } }) {
+  const available = Boolean(status?.available);
+  return (
+    <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+      <span className="flex items-center justify-between gap-2">
+        <span className="font-semibold text-slate-600">{label}</span>
+        <span className={`rounded-full px-2 py-1 font-semibold ${available ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
+          {available ? 'ready' : 'missing'}
+        </span>
+      </span>
+      <span className="mt-1 block truncate text-[11px] text-slate-500" title={status?.message || 'Not checked yet'}>
+        {status?.message || 'Not checked yet'}
+      </span>
+    </p>
+  );
+}
+
 function VectorCard({ subtitle, title, unit, vector }: { subtitle: string; title: string; unit: string; vector: { x: number; y: number; z: number } }) {
   return (
     <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
@@ -1486,7 +1835,12 @@ function quantumExportBaseName(metadata: Metadata | undefined, engine: QuantumEn
   return safeFileBaseName(`${sourceName}_${engine}_quantum`);
 }
 
-function gaussianSuiteEntries(result: QuantumCalculationResult, fileBase: string): ZipEntry[] {
+function gaussianSuiteEntries(
+  result: QuantumCalculationResult,
+  fileBase: string,
+  formattedCheckpoint?: QuantumCalculationFileAttachment,
+  cube?: QuantumCalculationFileAttachment
+): ZipEntry[] {
   const entries: ZipEntry[] = [];
   const input = result.gaussianFiles?.input;
   const output = result.gaussianFiles?.output?.contentText || result.outputLog || result.outputTail;
@@ -1505,7 +1859,85 @@ function gaussianSuiteEntries(result: QuantumCalculationResult, fileBase: string
     entries.push({ path: `${fileBase}.chk`, content: checkpointBytes });
   }
 
+  const fchkBytes = attachmentBytes(formattedCheckpoint);
+  if (fchkBytes) {
+    entries.push({ path: `${fileBase}.fchk`, content: fchkBytes });
+  }
+
+  const cubeBytes = attachmentBytes(cube);
+  if (cubeBytes) {
+    entries.push({ path: `${fileBase}.cube`, content: cubeBytes });
+  }
+
   return entries;
+}
+
+function buildGaussianInputPreview(
+  xyz: string,
+  options: {
+    basisSet: string;
+    calculationMode: QuantumCalculationMode;
+    charge: number;
+    gaussianTask: GaussianTaskTemplateId;
+    method: string;
+    routeOptions: string;
+    unpairedElectrons: number;
+  }
+) {
+  const atoms = parseXyzPreviewAtoms(xyz);
+  if (!atoms.length) return '';
+  const routeParts = [
+    '#p',
+    `${options.method || 'B3LYP'}/${options.basisSet || '6-31G(d)'}`,
+    gaussianRouteKeywords(options.gaussianTask, options.calculationMode),
+    options.routeOptions
+  ].filter(Boolean);
+
+  return [
+    '%chk=chemvault.chk',
+    routeParts.join(' '),
+    '',
+    'ChemVault Model external Gaussian job',
+    '',
+    `${Number.isFinite(options.charge) ? options.charge : 0} ${(Number.isFinite(options.unpairedElectrons) ? options.unpairedElectrons : 0) + 1}`,
+    ...atoms.map((atom) => `${atom.element} ${formatGaussianCoordinate(atom.x)} ${formatGaussianCoordinate(atom.y)} ${formatGaussianCoordinate(atom.z)}`),
+    '',
+    ''
+  ].join('\n');
+}
+
+function parseXyzPreviewAtoms(xyz: string) {
+  const lines = xyz.split(/\r?\n/u).filter((line) => line.trim());
+  const atomCount = Number.parseInt(lines[0] || '', 10);
+  if (!Number.isFinite(atomCount) || atomCount <= 0) return [];
+  return lines.slice(2, 2 + atomCount).map((line) => {
+    const [element, rawX, rawY, rawZ] = line.trim().split(/\s+/u);
+    return {
+      element: /^[A-Za-z][a-z]?$/u.test(element || '') ? element : 'X',
+      x: Number(rawX) || 0,
+      y: Number(rawY) || 0,
+      z: Number(rawZ) || 0
+    };
+  });
+}
+
+function gaussianRouteKeywords(task: GaussianTaskTemplateId, calculationMode: QuantumCalculationMode) {
+  if (task === 'geometry-optimization') return 'Opt';
+  if (task === 'frequency') return 'Freq';
+  if (task === 'optimization-frequency') return 'Opt Freq';
+  if (task === 'td-dft') return 'TD(NStates=10)';
+  if (task === 'nmr') return 'NMR=GIAO';
+  return calculationMode === 'geometry-optimization' ? 'Opt' : 'SP';
+}
+
+function gaussianTaskTimeout(task: GaussianTaskTemplateId) {
+  if (task === 'single-point') return 180000;
+  if (task === 'td-dft' || task === 'nmr' || task === 'frequency') return 600000;
+  return 900000;
+}
+
+function formatGaussianCoordinate(value: number) {
+  return Number.isFinite(value) ? value.toFixed(8) : '0.00000000';
 }
 
 function attachmentBytes(attachment?: QuantumCalculationFileAttachment) {
@@ -1589,7 +2021,7 @@ function buildQuantumReportHtml(result: QuantumCalculationResult, context: Quant
       <div class="grid">
         <div class="metric"><div class="label">Engine</div><div class="value">${escapeHtml(result.engineLabel)}</div></div>
         <div class="metric"><div class="label">Method</div><div class="value">${escapeHtml(result.method)}</div></div>
-        <div class="metric"><div class="label">Mode</div><div class="value">${escapeHtml(result.calculationMode)}</div></div>
+        <div class="metric"><div class="label">Mode</div><div class="value">${escapeHtml(result.gaussianTaskLabel || result.calculationMode)}</div></div>
         <div class="metric"><div class="label">Elapsed</div><div class="value">${(result.elapsedMs / 1000).toFixed(1)} s</div></div>
       </div>
       <p><strong>Molecule:</strong> ${escapeHtml(exportMoleculeLabel(context.metadata))}</p>
@@ -1651,7 +2083,7 @@ function buildQuantumLogText(result: QuantumCalculationResult, context: QuantumE
     `Molecule: ${exportMoleculeLabel(context.metadata)}`,
     `Engine: ${result.engineLabel}`,
     `Method: ${result.method}`,
-    `Calculation mode: ${result.calculationMode}`,
+    `Calculation mode: ${result.gaussianTaskLabel || result.calculationMode}`,
     `Total charge: ${context.charge}`,
     `Unpaired electrons: ${context.unpairedElectrons}`,
     `Status: ${result.ok ? 'Completed' : result.error || 'Not completed'}`,

@@ -6,6 +6,14 @@ export type LocalOpenSourceEngineKind = 'xtb' | 'pyscf' | 'psi4';
 
 export type QuantumCalculationMode = 'single-point' | 'geometry-optimization';
 
+export type GaussianTaskTemplateId =
+  | 'single-point'
+  | 'geometry-optimization'
+  | 'frequency'
+  | 'optimization-frequency'
+  | 'td-dft'
+  | 'nmr';
+
 export type QuantumEngineStatus = {
   available: boolean;
   engine: QuantumEngineKind;
@@ -110,6 +118,7 @@ export type QuantumCalculationRequest = {
   basisSet?: string;
   routeOptions?: string;
   calculationMode?: QuantumCalculationMode;
+  gaussianTask?: GaussianTaskTemplateId;
   timeoutMs?: number;
 };
 
@@ -134,12 +143,52 @@ export type GaussianCalculationFiles = {
   checkpointUnavailableReason?: string;
 };
 
+export type GaussianBridgeToolStatus = {
+  available: boolean;
+  path?: string;
+  message: string;
+};
+
+export type GaussianBridgeTools = {
+  formchk: GaussianBridgeToolStatus;
+  cubegen: GaussianBridgeToolStatus;
+  gaussView: GaussianBridgeToolStatus;
+};
+
+export type GaussianBridgeRequest = {
+  checkpointBase64?: string;
+  inputText?: string;
+  outputText?: string;
+  formattedCheckpointBase64?: string;
+  cubeKind?: string;
+  fileBaseName?: string;
+};
+
+export type GaussianBridgeResult = {
+  ok: boolean;
+  attachment?: QuantumCalculationFileAttachment;
+  outputTail: string;
+  toolPath?: string;
+  workDir?: string;
+  error?: string;
+};
+
+export type GaussianOpenResult = {
+  ok: boolean;
+  message: string;
+  directory?: string;
+  openedWith?: string;
+  error?: string;
+};
+
 export type QuantumCalculationResult = {
   ok: boolean;
   engine: QuantumEngineKind;
   engineLabel: string;
   method: string;
   calculationMode: QuantumCalculationMode;
+  gaussianTask?: GaussianTaskTemplateId;
+  gaussianTaskLabel?: string;
   energyHartree: number | null;
   dipoleDebye: {
     x: number;

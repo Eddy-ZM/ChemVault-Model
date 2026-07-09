@@ -13,6 +13,7 @@ const DEFAULT_VERSION_MANIFEST_URL = 'https://model.chemvault.science/app-versio
 const QUANTUM_TIMEOUT_MS = 180000;
 const MAX_QUANTUM_INPUT_BYTES = 2 * 1024 * 1024;
 const MAX_GAUSSIAN_CHECKPOINT_BYTES = 128 * 1024 * 1024;
+const MAX_GAUSSIAN_BRIDGE_ATTACHMENT_BYTES = 128 * 1024 * 1024;
 const VERSION_CHECK_TIMEOUT_MS = 8000;
 const PYSCF_INSTALL_TIMEOUT_MS = 1200000;
 const PYSCF_PIP_TIMEOUT_SECONDS = 120;
@@ -84,6 +85,10 @@ ipcMain.handle('quantum:external-config:get', async (_event, engine) => getExter
 ipcMain.handle('quantum:external-config:save', async (_event, config) => saveExternalQuantumConfig(config));
 ipcMain.handle('quantum:external-config:discover', async (_event, engine) => discoverAndSaveExternalQuantumConfig(engine));
 ipcMain.handle('quantum:select-executable', async (_event, engine) => selectQuantumEngineExecutable(engine));
+ipcMain.handle('quantum:gaussian-tools', async () => getGaussianBridgeTools());
+ipcMain.handle('quantum:gaussian-formchk', async (_event, request) => runGaussianFormchk(request));
+ipcMain.handle('quantum:gaussian-cubegen', async (_event, request) => runGaussianCubegen(request));
+ipcMain.handle('quantum:gaussian-open-gaussview', async (_event, request) => openGaussianInGaussView(request));
 ipcMain.handle('quantum:local-engines:list', async () => getLocalOpenSourceEngines());
 ipcMain.handle('quantum:local-engine:install', async (event, engine) => installLocalOpenSourceEngine(engine, (progress) => {
   event.sender.send('quantum:local-engine:install-progress', progress);
@@ -897,6 +902,8 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
   const config = await getExternalQuantumConfig(engineKind);
   const engineLabel = QUANTUM_ENGINE_LABELS[engineKind] || 'External engine';
   const calculationMode = normalizeCalculationMode(request?.calculationMode);
+  const gaussianTask = engineKind === 'gaussian' ? normalizeGaussianTask(request?.gaussianTask, calculationMode) : undefined;
+  const gaussianTaskLabel = gaussianTask ? gaussianTaskLabelFor(gaussianTask) : undefined;
   const method = sanitizeQuantumToken(request?.method) || config.method;
   const basisSet = sanitizeQuantumToken(request?.basisSet) || config.basisSet;
   const routeOptions = sanitizeRouteOptions(request?.routeOptions || config.routeOptions || '');
@@ -907,6 +914,7 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
     engineLabel,
     method: methodLabel,
     calculationMode,
+    ...(gaussianTask ? { gaussianTask, gaussianTaskLabel } : {}),
     energyHartree: null,
     dipoleDebye: null,
     charges: [],
@@ -945,7 +953,7 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
   try {
     emitCalculationProgress(onProgress, engineKind, 'writing-input', 18, `Writing ${engineLabel} input files.`, undefined, startedAt);
     const job = engineKind === 'gaussian'
-      ? await prepareGaussianJob(workDir, xyz, { charge, multiplicity, method, basisSet, routeOptions, calculationMode })
+      ? await prepareGaussianJob(workDir, xyz, { charge, multiplicity, method, basisSet, routeOptions, calculationMode, gaussianTask })
       : await prepareOrcaJob(workDir, xyz, { charge, multiplicity, method, basisSet, routeOptions, calculationMode });
     emitCalculationProgress(onProgress, engineKind, 'starting-engine', 28, `Starting ${engineLabel} calculation process.`, undefined, startedAt);
     const runStartedAt = Date.now();
@@ -1001,6 +1009,7 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
       engineLabel,
       method: methodLabel,
       calculationMode,
+      ...(gaussianTask ? { gaussianTask, gaussianTaskLabel } : {}),
       energyHartree,
       dipoleDebye,
       charges,
@@ -2323,6 +2332,226 @@ async function selectQuantumEngineExecutable(engineValue) {
   return result.filePaths[0];
 }
 
+async function getGaussianBridgeTools() {
+  const config = await getExternalQuantumConfig('gaussian');
+  const formchkPath = resolveGaussianTool('formchk', config.executablePath);
+  const cubegenPath = resolveGaussianTool('cubegen', config.executablePath);
+  const gaussViewPath = resolveGaussianTool('gaussview', config.executablePath);
+
+  return {
+    formchk: gaussianToolStatus('formchk', formchkPath),
+    cubegen: gaussianToolStatus('cubegen', cubegenPath),
+    gaussView: gaussianToolStatus('GaussView', gaussViewPath)
+  };
+}
+
+async function runGaussianFormchk(request) {
+  const config = await getExternalQuantumConfig('gaussian');
+  const toolPath = resolveGaussianTool('formchk', config.executablePath);
+  if (!toolPath) {
+    return {
+      ok: false,
+      outputTail: '',
+      error: 'Gaussian formchk was not found. Confirm Gaussian is installed and that formchk is available next to g16.exe or on PATH.'
+    };
+  }
+
+  const workDir = await fs.promises.mkdtemp(path.join(app.getPath('temp'), 'chemvault-gaussian-formchk-'));
+  try {
+    const fileBase = bridgeFileBaseName(request?.fileBaseName || 'chemvault_gaussian');
+    const chkPath = path.join(workDir, `${fileBase}.chk`);
+    const fchkPath = path.join(workDir, `${fileBase}.fchk`);
+    await writeBase64File(chkPath, request?.checkpointBase64, 'Gaussian checkpoint data is required before formchk can run.');
+    const processResult = await runProcess(toolPath, [chkPath, fchkPath], {
+      cwd: workDir,
+      timeoutMs: 180000,
+      env: buildGaussianEnv(config.executablePath || toolPath, workDir)
+    });
+    const output = `${processResult.stdout}\n${processResult.stderr}`.trim();
+    if (processResult.exitCode !== 0 || !isReadableFile(fchkPath)) {
+      return {
+        ok: false,
+        outputTail: outputTail(output),
+        toolPath,
+        error: outputTail(output) || `formchk exited with code ${processResult.exitCode}.`
+      };
+    }
+
+    const attachment = await readBridgeAttachment(fchkPath, 'chemical/x-gaussian-formatted-checkpoint');
+    return {
+      ok: Boolean(attachment),
+      attachment,
+      outputTail: outputTail(output) || 'formchk completed and generated a formatted checkpoint file.',
+      toolPath,
+      error: attachment ? undefined : 'The formatted checkpoint file was too large to return to the app.'
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      outputTail: '',
+      toolPath,
+      error: error instanceof Error ? error.message : 'formchk failed.'
+    };
+  } finally {
+    await fs.promises.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function runGaussianCubegen(request) {
+  const config = await getExternalQuantumConfig('gaussian');
+  const formchkPath = resolveGaussianTool('formchk', config.executablePath);
+  const cubegenPath = resolveGaussianTool('cubegen', config.executablePath);
+  if (!cubegenPath) {
+    return {
+      ok: false,
+      outputTail: '',
+      error: 'Gaussian cubegen was not found. Confirm Gaussian is installed and that cubegen is available next to g16.exe or on PATH.'
+    };
+  }
+  if (!formchkPath && !request?.formattedCheckpointBase64) {
+    return {
+      ok: false,
+      outputTail: '',
+      toolPath: cubegenPath,
+      error: 'A formatted checkpoint is required for cubegen. formchk was not found, so ChemVault could not create one automatically.'
+    };
+  }
+
+  const workDir = await fs.promises.mkdtemp(path.join(app.getPath('temp'), 'chemvault-gaussian-cubegen-'));
+  try {
+    const fileBase = bridgeFileBaseName(request?.fileBaseName || 'chemvault_gaussian');
+    const fchkPath = path.join(workDir, `${fileBase}.fchk`);
+    const cubePath = path.join(workDir, `${fileBase}.cube`);
+    const outputParts = [];
+    const env = buildGaussianEnv(config.executablePath || cubegenPath, workDir);
+
+    if (request?.formattedCheckpointBase64) {
+      await writeBase64File(fchkPath, request.formattedCheckpointBase64, 'Formatted checkpoint data was empty.');
+    } else {
+      const chkPath = path.join(workDir, `${fileBase}.chk`);
+      await writeBase64File(chkPath, request?.checkpointBase64, 'Gaussian checkpoint data is required before cubegen can run.');
+      const formchkResult = await runProcess(formchkPath, [chkPath, fchkPath], {
+        cwd: workDir,
+        timeoutMs: 180000,
+        env
+      });
+      outputParts.push(`${formchkResult.stdout}\n${formchkResult.stderr}`.trim());
+      if (formchkResult.exitCode !== 0 || !isReadableFile(fchkPath)) {
+        const output = outputParts.filter(Boolean).join('\n');
+        return {
+          ok: false,
+          outputTail: outputTail(output),
+          toolPath: cubegenPath,
+          error: outputTail(output) || `formchk exited with code ${formchkResult.exitCode}.`
+        };
+      }
+    }
+
+    const kind = sanitizeCubegenKind(request?.cubeKind || 'density=scf');
+    const cubegenResult = await runProcess(cubegenPath, ['0', kind, fchkPath, cubePath, '0', 'h'], {
+      cwd: workDir,
+      timeoutMs: 300000,
+      env
+    });
+    outputParts.push(`${cubegenResult.stdout}\n${cubegenResult.stderr}`.trim());
+    const output = outputParts.filter(Boolean).join('\n');
+    if (cubegenResult.exitCode !== 0 || !isReadableFile(cubePath)) {
+      return {
+        ok: false,
+        outputTail: outputTail(output),
+        toolPath: cubegenPath,
+        error: outputTail(output) || `cubegen exited with code ${cubegenResult.exitCode}.`
+      };
+    }
+
+    const attachment = await readBridgeAttachment(cubePath, 'chemical/x-cube');
+    return {
+      ok: Boolean(attachment),
+      attachment,
+      outputTail: outputTail(output) || `cubegen completed with kind ${kind}.`,
+      toolPath: cubegenPath,
+      error: attachment ? undefined : 'The cube file was too large to return to the app.'
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      outputTail: '',
+      toolPath: cubegenPath,
+      error: error instanceof Error ? error.message : 'cubegen failed.'
+    };
+  } finally {
+    await fs.promises.rm(workDir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+async function openGaussianInGaussView(request) {
+  const config = await getExternalQuantumConfig('gaussian');
+  const tools = await getGaussianBridgeTools();
+  const fileBase = bridgeFileBaseName(request?.fileBaseName || 'chemvault_gaussian');
+  const directory = path.join(app.getPath('userData'), 'gaussian-bridge', `${fileBase}-${Date.now()}`);
+  await fs.promises.mkdir(directory, { recursive: true });
+
+  const files = [];
+  if (request?.inputText) {
+    const inputPath = path.join(directory, `${fileBase}.gjf`);
+    await fs.promises.writeFile(inputPath, request.inputText, 'utf8');
+    files.push(inputPath);
+  }
+  if (request?.outputText) {
+    const outputPath = path.join(directory, `${fileBase}.txt`);
+    await fs.promises.writeFile(outputPath, request.outputText, 'utf8');
+    files.push(outputPath);
+  }
+  if (request?.checkpointBase64) {
+    const checkpointPath = path.join(directory, `${fileBase}.chk`);
+    await writeBase64File(checkpointPath, request.checkpointBase64, 'Checkpoint data was empty.');
+    files.push(checkpointPath);
+  }
+  if (request?.formattedCheckpointBase64) {
+    const fchkPath = path.join(directory, `${fileBase}.fchk`);
+    await writeBase64File(fchkPath, request.formattedCheckpointBase64, 'Formatted checkpoint data was empty.');
+    files.push(fchkPath);
+  }
+
+  const primary = files.find((filePath) => /\.(fchk|chk|gjf)$/iu.test(filePath)) || files[0] || directory;
+  const gaussViewPath = tools.gaussView.path;
+  if (gaussViewPath) {
+    try {
+      const child = spawn(gaussViewPath, primary && primary !== directory ? [primary] : [], {
+        cwd: directory,
+        env: buildGaussianEnv(config.executablePath || gaussViewPath, directory),
+        detached: true,
+        windowsHide: false,
+        shell: process.platform === 'win32' && /\.(cmd|bat)$/iu.test(gaussViewPath)
+      });
+      child.unref();
+      return {
+        ok: true,
+        directory,
+        openedWith: gaussViewPath,
+        message: 'GaussView was opened with the exported Gaussian bridge files.'
+      };
+    } catch (error) {
+      await shell.openPath(directory);
+      return {
+        ok: false,
+        directory,
+        openedWith: gaussViewPath,
+        message: 'The bridge folder was opened because GaussView could not be started.',
+        error: error instanceof Error ? error.message : 'GaussView could not be started.'
+      };
+    }
+  }
+
+  await shell.openPath(directory);
+  return {
+    ok: false,
+    directory,
+    message: 'GaussView was not found. ChemVault opened the Gaussian bridge folder instead.',
+    error: 'GaussView executable was not found in common Gaussian locations or PATH.'
+  };
+}
+
 async function readExternalEngineConfigs() {
   try {
     const content = await fs.promises.readFile(externalEngineConfigPath(), 'utf8');
@@ -2606,6 +2835,62 @@ function discoverExternalEngineExecutable(engine) {
       path.join(root, 'wbin', name)
     ]))
   ]);
+}
+
+function resolveGaussianTool(tool, executablePath) {
+  const names = gaussianToolNames(tool);
+  return findReadableCandidate([
+    ...findPathExecutables(names),
+    ...gaussianToolRoots(executablePath).flatMap((root) => names.flatMap((name) => [
+      path.join(root, name),
+      path.join(root, 'bin', name),
+      path.join(root, 'wbin', name),
+      path.join(root, 'g16', name),
+      path.join(root, 'g16w', name),
+      path.join(root, 'g09', name),
+      path.join(root, 'g09w', name)
+    ]))
+  ]);
+}
+
+function gaussianToolNames(tool) {
+  if (tool === 'cubegen') return process.platform === 'win32' ? ['cubegen.exe', 'cubegen.bat', 'cubegen.cmd'] : ['cubegen'];
+  if (tool === 'formchk') return process.platform === 'win32' ? ['formchk.exe', 'formchk.bat', 'formchk.cmd'] : ['formchk'];
+  return process.platform === 'win32'
+    ? ['gview.exe', 'gaussview.exe', 'gv.exe', 'GaussView.exe']
+    : ['gview', 'gaussview', 'gv'];
+}
+
+function gaussianToolRoots(executablePath) {
+  const roots = [];
+  const normalized = String(executablePath || '').trim();
+  if (normalized) {
+    const executableDir = isReadableFile(normalized) ? path.dirname(normalized) : normalized;
+    const installRoot = gaussianInstallRoot(executableDir);
+    roots.push(
+      executableDir,
+      path.join(executableDir, 'bin'),
+      path.join(executableDir, 'wbin'),
+      installRoot,
+      path.join(installRoot, 'g16'),
+      path.join(installRoot, 'g16w'),
+      path.join(installRoot, 'g09'),
+      path.join(installRoot, 'g09w')
+    );
+  }
+  return uniquePaths([
+    ...roots,
+    ...gaussianDiscoveryRoots(),
+    ...windowsProgramRoots(['GaussView', 'Gaussian\\GaussView', 'Gaussian\\GVW', 'GVW'])
+  ]);
+}
+
+function gaussianToolStatus(label, toolPath) {
+  return {
+    available: Boolean(toolPath),
+    path: toolPath || undefined,
+    message: toolPath ? `${label} found at ${toolPath}.` : `${label} was not found in the configured Gaussian installation or PATH.`
+  };
 }
 
 function discoverPsi4Executable() {
@@ -3068,7 +3353,7 @@ async function prepareGaussianJob(workDir, xyz, options) {
   const routeParts = [
     '#p',
     `${options.method}/${options.basisSet}`,
-    options.calculationMode === 'geometry-optimization' ? 'Opt' : 'SP',
+    gaussianRouteKeywords(options.gaussianTask, options.calculationMode),
     options.routeOptions
   ].filter(Boolean);
   const content = [
@@ -3137,6 +3422,28 @@ async function readOptionalText(filePath) {
   }
 }
 
+async function writeBase64File(filePath, contentBase64, missingMessage) {
+  const text = String(contentBase64 || '').trim();
+  if (!text) throw new Error(missingMessage || 'File data was empty.');
+  await fs.promises.writeFile(filePath, Buffer.from(text, 'base64'));
+}
+
+async function readBridgeAttachment(filePath, mimeType) {
+  try {
+    const stat = await fs.promises.stat(filePath);
+    if (!stat.isFile() || stat.size > MAX_GAUSSIAN_BRIDGE_ATTACHMENT_BYTES) return null;
+    const buffer = await fs.promises.readFile(filePath);
+    return {
+      fileName: path.basename(filePath),
+      mimeType,
+      byteLength: buffer.length,
+      contentBase64: buffer.toString('base64')
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function readOptionalBinaryAttachment(filePath, maxBytes) {
   try {
     const stat = await fs.promises.stat(filePath);
@@ -3192,6 +3499,54 @@ function boundedInteger(value, fallback, min, max) {
 
 function normalizeCalculationMode(value) {
   return value === 'geometry-optimization' ? 'geometry-optimization' : 'single-point';
+}
+
+function sanitizeCubegenKind(value) {
+  return String(value || 'density=scf')
+    .replace(/[\r\n]/gu, '')
+    .replace(/[^a-zA-Z0-9_=(),+\-.]/gu, '')
+    .trim()
+    .slice(0, 80) || 'density=scf';
+}
+
+function bridgeFileBaseName(value) {
+  return String(value || 'chemvault_gaussian')
+    .replace(/[^a-zA-Z0-9-_]/gu, '_')
+    .replace(/_+/gu, '_')
+    .replace(/^_+|_+$/gu, '')
+    .slice(0, 80) || 'chemvault_gaussian';
+}
+
+function normalizeGaussianTask(value, calculationMode = 'single-point') {
+  const normalized = String(value || '').trim();
+  if (
+    normalized === 'frequency' ||
+    normalized === 'optimization-frequency' ||
+    normalized === 'td-dft' ||
+    normalized === 'nmr'
+  ) {
+    return normalized;
+  }
+  return calculationMode === 'geometry-optimization' ? 'geometry-optimization' : 'single-point';
+}
+
+function gaussianTaskLabelFor(task) {
+  if (task === 'geometry-optimization') return 'Geometry optimization';
+  if (task === 'frequency') return 'Frequency analysis';
+  if (task === 'optimization-frequency') return 'Optimization + frequency';
+  if (task === 'td-dft') return 'TD-DFT excited states';
+  if (task === 'nmr') return 'NMR shielding';
+  return 'Single point';
+}
+
+function gaussianRouteKeywords(task, calculationMode = 'single-point') {
+  const normalized = normalizeGaussianTask(task, calculationMode);
+  if (normalized === 'geometry-optimization') return 'Opt';
+  if (normalized === 'frequency') return 'Freq';
+  if (normalized === 'optimization-frequency') return 'Opt Freq';
+  if (normalized === 'td-dft') return 'TD(NStates=10)';
+  if (normalized === 'nmr') return 'NMR=GIAO';
+  return 'SP';
 }
 
 function extractVersion(output) {

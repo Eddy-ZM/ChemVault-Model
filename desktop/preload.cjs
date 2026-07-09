@@ -23,6 +23,10 @@ contextBridge.exposeInMainWorld('chemVaultDesktop', {
   discoverExternalQuantumConfig: (engine) => ipcRenderer.invoke('quantum:external-config:discover', engine),
   saveExternalQuantumConfig: (config) => ipcRenderer.invoke('quantum:external-config:save', config),
   selectQuantumEngineExecutable: (engine) => ipcRenderer.invoke('quantum:select-executable', engine),
+  getGaussianBridgeTools: () => ipcRenderer.invoke('quantum:gaussian-tools'),
+  runGaussianFormchk: (request) => ipcRenderer.invoke('quantum:gaussian-formchk', request),
+  runGaussianCubegen: (request) => ipcRenderer.invoke('quantum:gaussian-cubegen', request),
+  openGaussianInGaussView: (request) => ipcRenderer.invoke('quantum:gaussian-open-gaussview', request),
   onQuantumCalculationProgress: (handler) => {
     const listener = (_event, progress) => handler(progress);
     ipcRenderer.on('quantum:run-progress', listener);

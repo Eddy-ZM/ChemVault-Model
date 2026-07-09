@@ -145,7 +145,11 @@ set, and route options, then save the port. Users are responsible for having a
 valid local license and installation for any commercial engine they connect.
 Gaussian runs can also export a native Gaussian suite as a ZIP package with the
 generated `.gjf` input, `.txt` engine output, and `.chk` checkpoint file when
-the checkpoint is produced and small enough to attach.
+the checkpoint is produced and small enough to attach. Desktop bridge tools can
+also call the user's local Gaussian utilities to generate `.fchk` formatted
+checkpoints, generate `.cube` volumetric files through `cubegen`, preview the
+generated Gaussian input, apply common route templates, and open the generated
+files in GaussView when it is installed.
 
 ### GitHub Actions
 

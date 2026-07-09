@@ -152,7 +152,7 @@ export function createQuantumPdfDocument(result: QuantumCalculationResult, conte
     ['Total energy', result.energyHartree === null ? 'N/A' : `${formatNumber(result.energyHartree)} Eh`],
     ['Dipole magnitude', result.dipoleDebye ? `${formatNumber(result.dipoleDebye.total)} D` : 'N/A'],
     ['Partial charges', String(result.charges.length)],
-    ['Run mode', result.calculationMode === 'geometry-optimization' ? 'Optimized' : 'Single point'],
+    ['Run mode', result.gaussianTaskLabel || (result.calculationMode === 'geometry-optimization' ? 'Optimized' : 'Single point')],
     ['Elapsed time', `${(result.elapsedMs / 1000).toFixed(1)} s`]
   ]);
   if (result.dipoleDebye) drawPdfDipoleCard(layout, result);
@@ -514,7 +514,7 @@ function quantumSummaryRows(result: QuantumCalculationResult, context: QuantumEx
     ['Molecule', moleculeLabel(context.metadata)],
     ['Engine', result.engineLabel],
     ['Method', result.method],
-    ['Calculation mode', result.calculationMode],
+    ['Calculation mode', result.gaussianTaskLabel || result.calculationMode],
     ['Total charge', String(context.charge)],
     ['Unpaired electrons', String(context.unpairedElectrons)],
     ['Status', result.ok ? 'Completed' : result.error || 'Not completed']

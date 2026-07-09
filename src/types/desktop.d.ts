@@ -4,6 +4,10 @@ import type {
   CommercialQuantumEngineKind,
   EngineSetupRequest,
   ExternalQuantumEngineConfig,
+  GaussianBridgeRequest,
+  GaussianBridgeResult,
+  GaussianBridgeTools,
+  GaussianOpenResult,
   LocalEngineInstallProgress,
   LocalEngineInstallResult,
   LocalEngineSelectResult,
@@ -65,6 +69,10 @@ declare global {
       }>;
       saveExternalQuantumConfig: (config: ExternalQuantumEngineConfig) => Promise<ExternalQuantumEngineConfig>;
       selectQuantumEngineExecutable: (engine: CommercialQuantumEngineKind) => Promise<string | null>;
+      getGaussianBridgeTools: () => Promise<GaussianBridgeTools>;
+      runGaussianFormchk: (request: GaussianBridgeRequest) => Promise<GaussianBridgeResult>;
+      runGaussianCubegen: (request: GaussianBridgeRequest) => Promise<GaussianBridgeResult>;
+      openGaussianInGaussView: (request: GaussianBridgeRequest) => Promise<GaussianOpenResult>;
       onQuantumCalculationProgress: (handler: (progress: QuantumCalculationProgress) => void) => () => void;
       runQuantumCalculation: (request: QuantumCalculationRequest) => Promise<QuantumCalculationResult>;
     };

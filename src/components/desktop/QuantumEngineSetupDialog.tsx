@@ -8,7 +8,6 @@ import type {
   ExternalQuantumEngineConfig,
   LocalEngineInstallProgress,
   LocalEngineInstallResult,
-  LocalEngineSelectResult,
   LocalEngineStatus,
   LocalOpenSourceEngineKind,
   QuantumEngineKind
@@ -178,24 +177,6 @@ export function QuantumEngineSetupDialog({ mode, onClose, onEngineSelected, onEn
     }
   }
 
-  async function selectLocalApplication(engine: LocalOpenSourceEngineKind) {
-    const api = window.chemVaultDesktop;
-    if (!api?.selectLocalOpenSourceEngineExecutable) return;
-
-    setManualSelectMessage('');
-    const result: LocalEngineSelectResult = await api.selectLocalOpenSourceEngineExecutable(engine);
-    if (result.canceled) {
-      setManualSelectMessage('Selection was canceled.');
-      return;
-    }
-
-    setManualSelectMessage(result.message || `${localEngineLabel(engine)} application selected.`);
-    if (isSelectableLocalEngine(engine)) {
-      onEngineSelected?.(engine, localEngineLabel(engine));
-    }
-    await scanExistingEngines();
-  }
-
   async function selectCommercialApplication(engine: CommercialQuantumEngineKind) {
     const api = window.chemVaultDesktop;
     if (!api?.selectQuantumEngineExecutable || !api.saveExternalQuantumConfig) return;
@@ -221,6 +202,27 @@ export function QuantumEngineSetupDialog({ mode, onClose, onEngineSelected, onEn
     onEngineSelected?.(engine, label);
     onEnginesChanged?.();
     closeDialog();
+  }
+
+  function openPyscfInstall() {
+    setManualSelectMessage('');
+    setInstallResult(null);
+    setInstallProgress(null);
+    setActiveMode('install');
+  }
+
+  function showLocalInstallGuide(engine: LocalOpenSourceEngineKind) {
+    if (engine === 'pyscf') {
+      openPyscfInstall();
+      return;
+    }
+
+    const status = localEngines.find((item) => item.engine === engine);
+    setManualSelectMessage(
+      `${localEngineLabel(engine)} is a local open-source engine. Install it first, then click Scan again. ${
+        status?.installCommand || status?.message || ''
+      }`.trim()
+    );
   }
 
   return (
@@ -264,9 +266,10 @@ export function QuantumEngineSetupDialog({ mode, onClose, onEngineSelected, onEn
               scanning={scanning}
               scanMessage={scanMessage}
               onExit={closeDialog}
+              onInstallPyScf={openPyscfInstall}
               onRefresh={() => void scanExistingEngines()}
               onSelectCommercial={(engine) => void selectCommercialApplication(engine)}
-              onSelectLocal={(engine) => void selectLocalApplication(engine)}
+              onShowLocalSetup={showLocalInstallGuide}
               onUseDetected={useDetectedEngine}
             />
           ) : null}
@@ -401,9 +404,10 @@ function ConfigureView({
   localEngines,
   manualSelectMessage,
   onExit,
+  onInstallPyScf,
   onRefresh,
   onSelectCommercial,
-  onSelectLocal,
+  onShowLocalSetup,
   onUseDetected,
   scanning,
   scanMessage
@@ -417,9 +421,10 @@ function ConfigureView({
   scanning: boolean;
   scanMessage: string;
   onExit: () => void;
+  onInstallPyScf: () => void;
   onRefresh: () => void;
   onSelectCommercial: (engine: CommercialQuantumEngineKind) => void;
-  onSelectLocal: (engine: LocalOpenSourceEngineKind) => void;
+  onShowLocalSetup: (engine: LocalOpenSourceEngineKind) => void;
   onUseDetected: (engine: QuantumEngineKind, label: string) => void;
 }) {
   return (
@@ -480,18 +485,40 @@ function ConfigureView({
       )}
 
       <div className="rounded-2xl border border-slate-200 bg-white p-4">
-        <p className="text-sm font-bold text-slate-950">Choose application manually</p>
-        <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-          {(['xtb', 'pyscf', 'psi4'] as LocalOpenSourceEngineKind[]).map((engine) => (
-            <button
-              key={engine}
-              type="button"
-              onClick={() => onSelectLocal(engine)}
-              className="rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-white"
-            >
-              {localEngineLabel(engine)}
-            </button>
-          ))}
+        <p className="text-sm font-bold text-slate-950">Install local open-source engines</p>
+        <p className="mt-1 text-sm leading-6 text-slate-600">
+          xTB, PySCF, and Psi4 must be installed or managed before they can be used. They are not application choices.
+        </p>
+        <div className="mt-3 grid gap-3 lg:grid-cols-3">
+          <LocalSetupCard
+            actionLabel="Install guide"
+            label="xTB"
+            note="Install xTB on Windows, add xtb.exe to PATH, set CHEMVAULT_XTB_PATH, or bundle it with the desktop package."
+            onAction={() => onShowLocalSetup('xtb')}
+          />
+          <LocalSetupCard
+            actionLabel="Install PySCF"
+            label="PySCF"
+            note="Let ChemVault create a managed Python environment and install PySCF automatically."
+            primary
+            onAction={onInstallPyScf}
+          />
+          <LocalSetupCard
+            actionLabel="Install guide"
+            label="Psi4"
+            note="Install Psi4 with Conda or Mamba, then restart ChemVault Model and scan again."
+            onAction={() => onShowLocalSetup('psi4')}
+          />
+        </div>
+        {manualSelectMessage ? <p className="mt-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-700">{manualSelectMessage}</p> : null}
+      </div>
+
+      <div className="rounded-2xl border border-slate-200 bg-white p-4">
+        <p className="text-sm font-bold text-slate-950">Choose commercial application manually</p>
+        <p className="mt-1 text-sm leading-6 text-slate-600">
+          Use this only for an installed, licensed Gaussian or ORCA executable.
+        </p>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
           {(['gaussian', 'orca'] as CommercialQuantumEngineKind[]).map((engine) => (
             <button
               key={engine}
@@ -503,7 +530,6 @@ function ConfigureView({
             </button>
           ))}
         </div>
-        {manualSelectMessage ? <p className="mt-3 text-sm leading-6 text-slate-600">{manualSelectMessage}</p> : null}
       </div>
 
       <details className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -600,6 +626,38 @@ function EngineChoiceCard({
       </div>
       <p className="mt-3 text-xs leading-5 text-emerald-800">{message}</p>
       {path ? <p className="mt-2 break-all font-mono text-[11px] leading-5 text-emerald-700">{path}</p> : null}
+    </article>
+  );
+}
+
+function LocalSetupCard({
+  actionLabel,
+  label,
+  note,
+  onAction,
+  primary = false
+}: {
+  actionLabel: string;
+  label: string;
+  note: string;
+  onAction: () => void;
+  primary?: boolean;
+}) {
+  return (
+    <article className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <p className="text-sm font-bold text-slate-950">{label}</p>
+      <p className="mt-2 text-xs leading-5 text-slate-600">{note}</p>
+      <button
+        type="button"
+        onClick={onAction}
+        className={`mt-3 rounded-xl px-3 py-2 text-xs font-semibold ${
+          primary
+            ? 'bg-slate-950 text-white hover:bg-slate-800'
+            : 'border border-slate-300 bg-white text-slate-700 hover:border-sky-300 hover:text-sky-800'
+        }`}
+      >
+        {actionLabel}
+      </button>
     </article>
   );
 }

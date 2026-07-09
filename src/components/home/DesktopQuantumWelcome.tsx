@@ -145,7 +145,7 @@ export function DesktopQuantumWelcome() {
                 >
                   <span className="block text-sm font-bold">Use existing engine</span>
                   <span className="mt-1 block text-xs leading-5 text-sky-800">
-                    Select Gaussian, ORCA, xTB, or an existing Python environment already installed on this computer.
+                    Connect an installed Gaussian or ORCA executable, or review local open-source engine setup.
                   </span>
                 </button>
 

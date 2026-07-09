@@ -143,6 +143,9 @@ engine port instead of bundling licensed software. In the desktop calculation
 panel, choose Gaussian or ORCA, select the executable path, set method, basis
 set, and route options, then save the port. Users are responsible for having a
 valid local license and installation for any commercial engine they connect.
+Gaussian runs can also export a native Gaussian suite as a ZIP package with the
+generated `.gjf` input, `.txt` engine output, and `.chk` checkpoint file when
+the checkpoint is produced and small enough to attach.
 
 ### GitHub Actions
 

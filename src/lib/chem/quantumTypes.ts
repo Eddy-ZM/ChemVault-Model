@@ -119,6 +119,21 @@ export type QuantumAtomCharge = {
   charge: number;
 };
 
+export type QuantumCalculationFileAttachment = {
+  fileName: string;
+  mimeType: string;
+  byteLength?: number;
+  contentBase64?: string;
+  contentText?: string;
+};
+
+export type GaussianCalculationFiles = {
+  input?: QuantumCalculationFileAttachment;
+  output?: QuantumCalculationFileAttachment;
+  checkpoint?: QuantumCalculationFileAttachment;
+  checkpointUnavailableReason?: string;
+};
+
 export type QuantumCalculationResult = {
   ok: boolean;
   engine: QuantumEngineKind;
@@ -138,5 +153,6 @@ export type QuantumCalculationResult = {
   warnings: string[];
   outputTail: string;
   outputLog?: string;
+  gaussianFiles?: GaussianCalculationFiles;
   error?: string;
 };

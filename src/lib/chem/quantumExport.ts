@@ -33,7 +33,7 @@ const PDF_BOTTOM_MARGIN = 58;
 const PDF_CONTENT_WIDTH = PDF_PAGE_WIDTH - PDF_MARGIN * 2;
 const PDF_MAX_LOG_LINES = 1600;
 
-type ZipEntry = {
+export type ZipEntry = {
   path: string;
   content: string | Uint8Array;
 };
@@ -726,7 +726,7 @@ function wordField(instruction: string, fallback: string) {
   ].join('');
 }
 
-function createZip(entries: ZipEntry[]) {
+export function createZip(entries: ZipEntry[]) {
   const localParts: Uint8Array[] = [];
   const centralParts: Uint8Array[] = [];
   let offset = 0;

@@ -10,6 +10,7 @@ import type {
   ExternalQuantumEngineConfig,
   LocalEngineStatus,
   LocalOpenSourceEngineKind,
+  QuantumCalculationFileAttachment,
   QuantumCalculationProgress,
   QuantumCalculationMode,
   QuantumCalculationResult,
@@ -25,9 +26,11 @@ import {
 } from '@/lib/chem/quantumPreference';
 import {
   CHEMVAULT_COPYRIGHT_NOTICE,
+  createZip,
   createQuantumExcelWorkbook,
   createQuantumPdfDocument,
-  createQuantumWordDocument
+  createQuantumWordDocument,
+  type ZipEntry
 } from '@/lib/chem/quantumExport';
 import { MoleculeProperties } from '@/lib/chem/types';
 import { formatValue } from '@/lib/chem/moleculeUtils';
@@ -566,6 +569,45 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     );
   }
 
+  function exportGaussianInput() {
+    if (!result || result.engine !== 'gaussian') return;
+    const input = result.gaussianFiles?.input;
+    if (!input?.contentText) return;
+    downloadText(`${exportBaseName}_${exportTimestamp()}_gaussian.gjf`, input.contentText, input.mimeType || 'text/plain');
+  }
+
+  function exportGaussianOutputText() {
+    if (!result || result.engine !== 'gaussian') return;
+    const output = result.gaussianFiles?.output?.contentText || result.outputLog || result.outputTail;
+    if (!output) return;
+    downloadText(`${exportBaseName}_${exportTimestamp()}_gaussian.txt`, output, 'text/plain');
+  }
+
+  function exportGaussianCheckpoint() {
+    if (!result || result.engine !== 'gaussian') return;
+    const checkpoint = result.gaussianFiles?.checkpoint;
+    if (!checkpoint?.contentBase64) return;
+    const bytes = base64ToBytes(checkpoint.contentBase64);
+    if (!bytes) return;
+    downloadBinary(`${exportBaseName}_${exportTimestamp()}_gaussian.chk`, bytes, checkpoint.mimeType || 'application/octet-stream');
+  }
+
+  function exportGaussianSuite() {
+    if (!result || result.engine !== 'gaussian') return;
+
+    const timestamp = exportTimestamp();
+    const fileBase = `${exportBaseName}_${timestamp}_gaussian`;
+    const entries = gaussianSuiteEntries(result, fileBase);
+    if (!entries.length) return;
+
+    downloadBinary(`${fileBase}_suite.zip`, createZip(entries), 'application/zip');
+  }
+
+  const gaussianInputReady = result?.engine === 'gaussian' && Boolean(result.gaussianFiles?.input?.contentText);
+  const gaussianOutputReady = result?.engine === 'gaussian' && Boolean(result.gaussianFiles?.output?.contentText || result.outputLog || result.outputTail);
+  const gaussianCheckpointReady = result?.engine === 'gaussian' && Boolean(result.gaussianFiles?.checkpoint?.contentBase64);
+  const gaussianSuiteReady = Boolean(gaussianInputReady || gaussianOutputReady || gaussianCheckpointReady);
+
   return (
     <div className="mt-5 rounded-3xl border border-slate-200 bg-white p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -935,6 +977,58 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
               >
                 Export Log
               </button>
+              {result.engine === 'gaussian' ? (
+                <div className="basis-full rounded-2xl border border-sky-200 bg-white px-3 py-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div>
+                      <p className="text-xs font-bold text-slate-950">Gaussian native files</p>
+                      <p className="mt-1 text-[11px] leading-4 text-slate-500">
+                        Export files for Gaussian and GaussView workflows: GJF input, TXT output, and CHK checkpoint when generated.
+                      </p>
+                    </div>
+                    {result.gaussianFiles?.checkpointUnavailableReason && !gaussianCheckpointReady ? (
+                      <span className="rounded-full bg-amber-50 px-2 py-1 text-[11px] font-semibold text-amber-800">
+                        CHK unavailable
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={exportGaussianSuite}
+                      disabled={!gaussianSuiteReady}
+                      className="rounded-xl border border-sky-300 bg-sky-50 px-4 py-2 text-xs font-semibold text-sky-900 hover:bg-white disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      Gaussian Suite
+                    </button>
+                    <button
+                      type="button"
+                      onClick={exportGaussianInput}
+                      disabled={!gaussianInputReady}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      GJF
+                    </button>
+                    <button
+                      type="button"
+                      onClick={exportGaussianOutputText}
+                      disabled={!gaussianOutputReady}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      TXT
+                    </button>
+                    <button
+                      type="button"
+                      onClick={exportGaussianCheckpoint}
+                      disabled={!gaussianCheckpointReady}
+                      title={gaussianCheckpointReady ? 'Export Gaussian checkpoint file' : result.gaussianFiles?.checkpointUnavailableReason || 'No Gaussian checkpoint file was attached to this calculation.'}
+                      className="rounded-xl border border-slate-300 bg-white px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      CHK
+                    </button>
+                  </div>
+                </div>
+              ) : null}
             </div>
           </div>
 
@@ -1390,6 +1484,43 @@ function quantumExportBaseName(metadata: Metadata | undefined, engine: QuantumEn
     metadata?.smiles ||
     'molecule';
   return safeFileBaseName(`${sourceName}_${engine}_quantum`);
+}
+
+function gaussianSuiteEntries(result: QuantumCalculationResult, fileBase: string): ZipEntry[] {
+  const entries: ZipEntry[] = [];
+  const input = result.gaussianFiles?.input;
+  const output = result.gaussianFiles?.output?.contentText || result.outputLog || result.outputTail;
+  const checkpoint = result.gaussianFiles?.checkpoint;
+
+  if (input?.contentText) {
+    entries.push({ path: `${fileBase}.gjf`, content: input.contentText });
+  }
+
+  if (output) {
+    entries.push({ path: `${fileBase}.txt`, content: output });
+  }
+
+  const checkpointBytes = attachmentBytes(checkpoint);
+  if (checkpointBytes) {
+    entries.push({ path: `${fileBase}.chk`, content: checkpointBytes });
+  }
+
+  return entries;
+}
+
+function attachmentBytes(attachment?: QuantumCalculationFileAttachment) {
+  if (attachment?.contentBase64) return base64ToBytes(attachment.contentBase64);
+  if (attachment?.contentText) return new TextEncoder().encode(attachment.contentText);
+  return null;
+}
+
+function base64ToBytes(value: string) {
+  const binary = window.atob(value);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 function exportTimestamp() {

@@ -12,6 +12,7 @@ const DEFAULT_START_PATH = '/';
 const DEFAULT_VERSION_MANIFEST_URL = 'https://model.chemvault.science/app-version.json';
 const QUANTUM_TIMEOUT_MS = 180000;
 const MAX_QUANTUM_INPUT_BYTES = 2 * 1024 * 1024;
+const MAX_GAUSSIAN_CHECKPOINT_BYTES = 128 * 1024 * 1024;
 const VERSION_CHECK_TIMEOUT_MS = 8000;
 const PYSCF_INSTALL_TIMEOUT_MS = 1200000;
 const PYSCF_PIP_TIMEOUT_SECONDS = 120;
@@ -981,10 +982,14 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
     emitCalculationProgress(onProgress, engineKind, 'parsing-output', 94, `Parsing ${engineLabel} energy, dipole, and population analysis.`, outputTail(output), startedAt);
     const completedOk = processResult.exitCode === 0 && (engineKind !== 'gaussian' || /Normal termination of Gaussian/iu.test(output));
     const warnings = [];
+    const gaussianFiles = engineKind === 'gaussian' ? await collectGaussianFiles(job, fileOutput || output) : undefined;
 
     if (processResult.timedOut) warnings.push(`${engineLabel} calculation timed out before completion.`);
     if (engineKind === 'gaussian' && processResult.exitCode === 0 && !completedOk) {
       warnings.push('Gaussian did not report normal termination in the output log.');
+    }
+    if (engineKind === 'gaussian' && completedOk && !gaussianFiles?.checkpoint) {
+      warnings.push(gaussianFiles?.checkpointUnavailableReason || 'Gaussian checkpoint file was not generated or could not be attached to the export package.');
     }
     if (energyHartree === null) warnings.push('Total energy was not found in the external engine output.');
     if (!dipoleDebye) warnings.push('Dipole moment was not found in the external engine output.');
@@ -1004,6 +1009,7 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
       warnings,
       outputTail: outputTail(output),
       outputLog: output,
+      gaussianFiles,
       error: completedOk ? undefined : diagnoseExternalEngineFailure(engineKind, processResult, output, config)
     };
     emitCalculationProgress(
@@ -3058,6 +3064,7 @@ async function prepareGaussianJob(workDir, xyz, options) {
   const atoms = parseXyzGeometry(xyz);
   const inputPath = path.join(workDir, 'chemvault.gjf');
   const outputPath = path.join(workDir, 'chemvault.log');
+  const checkpointPath = path.join(workDir, 'chemvault.chk');
   const routeParts = [
     '#p',
     `${options.method}/${options.basisSet}`,
@@ -3077,7 +3084,7 @@ async function prepareGaussianJob(workDir, xyz, options) {
   ].join('\n');
 
   await fs.promises.writeFile(inputPath, content, 'utf8');
-  return { args: [inputPath], inputPath, outputPath };
+  return { args: [inputPath], checkpointPath, inputContent: content, inputPath, outputPath };
 }
 
 async function prepareOrcaJob(workDir, xyz, options) {
@@ -3128,6 +3135,53 @@ async function readOptionalText(filePath) {
   } catch {
     return '';
   }
+}
+
+async function readOptionalBinaryAttachment(filePath, maxBytes) {
+  try {
+    const stat = await fs.promises.stat(filePath);
+    if (!stat.isFile()) return { reason: 'Gaussian checkpoint path was not a file.' };
+    if (stat.size > maxBytes) {
+      return {
+        reason: `Gaussian checkpoint was ${(stat.size / 1024 / 1024).toFixed(1)} MB, above the ChemVault attachment limit of ${(maxBytes / 1024 / 1024).toFixed(0)} MB.`
+      };
+    }
+    const buffer = await fs.promises.readFile(filePath);
+    return {
+      attachment: {
+        fileName: path.basename(filePath),
+        contentBase64: buffer.toString('base64'),
+        byteLength: buffer.length,
+        mimeType: 'application/octet-stream'
+      }
+    };
+  } catch {
+    return { reason: 'Gaussian checkpoint file could not be read.' };
+  }
+}
+
+async function collectGaussianFiles(job, outputText) {
+  const files = {
+    input: {
+      fileName: path.basename(job.inputPath || 'chemvault.gjf'),
+      contentText: job.inputContent || await readOptionalText(job.inputPath),
+      mimeType: 'chemical/x-gaussian-input'
+    },
+    output: {
+      fileName: 'chemvault.txt',
+      contentText: outputText || await readOptionalText(job.outputPath),
+      mimeType: 'text/plain'
+    }
+  };
+
+  const checkpoint = await readOptionalBinaryAttachment(job.checkpointPath, MAX_GAUSSIAN_CHECKPOINT_BYTES);
+  if (checkpoint.attachment) {
+    files.checkpoint = checkpoint.attachment;
+  } else if (checkpoint.reason) {
+    files.checkpointUnavailableReason = checkpoint.reason;
+  }
+
+  return files;
 }
 
 function boundedInteger(value, fallback, min, max) {

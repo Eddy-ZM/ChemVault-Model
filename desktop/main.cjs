@@ -6,9 +6,13 @@ const os = require('node:os');
 const path = require('node:path');
 const { TextDecoder } = require('node:util');
 const gaussianParsers = require('./gaussian-parsers.cjs');
+const { resolveDesktopUpdateStatus } = require('./versioning.cjs');
+const { buildQuantumRunManifest, extractEngineVersion } = require('./quantum/run-manifest.cjs');
+const { readQueueJournal, writeQueueJournal } = require('./quantum/queue-journal.cjs');
 
 const APP_TITLE = 'ChemVault Model';
 const DEFAULT_API_BASE = 'https://model.chemvault.science/api/chem';
+const DEFAULT_MODEL_ORIGIN = 'https://model.chemvault.science';
 const DEFAULT_USER_ORIGIN = 'https://user.chemvault.science';
 const DEFAULT_START_PATH = '/';
 const DEFAULT_VERSION_MANIFEST_URL = 'https://model.chemvault.science/app-version.json';
@@ -104,6 +108,8 @@ const ATOMIC_SYMBOLS = [
 
 let mainWindow = null;
 let staticServer = null;
+let allowWindowClose = false;
+let closePromptOpen = false;
 const userCookieJar = new Map();
 const activeQuantumProcesses = new Map();
 
@@ -116,6 +122,8 @@ ipcMain.handle('quantum:run', async (event, request) => runQuantumCalculation(re
   event.sender.send('quantum:run-progress', progress);
 }));
 ipcMain.handle('quantum:cancel', async (_event, calculationId) => cancelQuantumCalculation(calculationId));
+ipcMain.handle('quantum:queue:get', async () => readQueueJournal(quantumQueueJournalPath()));
+ipcMain.handle('quantum:queue:save', async (_event, items) => writeQueueJournal(quantumQueueJournalPath(), items));
 ipcMain.handle('quantum:external-config:get', async (_event, engine) => getExternalQuantumConfig(engine));
 ipcMain.handle('quantum:external-config:save', async (_event, config) => saveExternalQuantumConfig(config));
 ipcMain.handle('quantum:external-config:discover', async (_event, engine) => discoverAndSaveExternalQuantumConfig(engine));
@@ -158,6 +166,7 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', () => {
+  if (activeQuantumProcesses.size > 0) cancelAllQuantumCalculations();
   if (staticServer) {
     staticServer.close();
     staticServer = null;
@@ -192,6 +201,29 @@ function createMainWindow(baseUrl) {
   mainWindow.setMenuBarVisibility(false);
   mainWindow.once('ready-to-show', () => {
     mainWindow.show();
+  });
+
+  mainWindow.on('close', async (event) => {
+    if (allowWindowClose || activeQuantumProcesses.size === 0) return;
+    event.preventDefault();
+    if (closePromptOpen) return;
+    closePromptOpen = true;
+    const activeCount = activeQuantumProcesses.size;
+    const { response } = await dialog.showMessageBox(mainWindow, {
+      type: 'warning',
+      title: 'Calculations are still running',
+      message: `${activeCount} quantum calculation${activeCount === 1 ? ' is' : 's are'} still running.`,
+      detail: 'Closing ChemVault will stop the engine processes and mark queued work as interrupted.',
+      buttons: ['Keep app open', 'Cancel tasks and exit'],
+      defaultId: 0,
+      cancelId: 0,
+      noLink: true
+    });
+    closePromptOpen = false;
+    if (response !== 1) return;
+    cancelAllQuantumCalculations();
+    allowWindowClose = true;
+    setTimeout(() => mainWindow?.close(), 500);
   });
 
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -242,34 +274,44 @@ async function getAppVersionStatus() {
     const remoteManifest = await fetchVersionManifest(sourceUrl);
     const remoteConfig = platformVersionConfig(remoteManifest, 'windows');
     const latestVersion = String(remoteConfig.latestVersion || remoteConfig.version || currentVersion);
+    const latestBuildId = String(remoteConfig.buildId || '');
+    const latestReleaseId = String(remoteConfig.releaseId || '');
     const minimumSupportedVersion = String(remoteConfig.minimumSupportedVersion || '0.0.0');
-    const updateRequired = compareVersions(currentVersion, minimumSupportedVersion) < 0 || Boolean(remoteConfig.forceUpdate);
-    const updateAvailable = updateRequired || compareVersions(currentVersion, latestVersion) < 0;
-    const canDefer = updateAvailable && !updateRequired;
+    const update = resolveDesktopUpdateStatus({
+      currentVersion,
+      currentBuildId,
+      currentReleaseId,
+      latestVersion,
+      latestBuildId,
+      latestReleaseId,
+      minimumSupportedVersion,
+      forceUpdate: remoteConfig.forceUpdate
+    });
 
     return {
       ok: true,
       appName: APP_TITLE,
       platform: 'windows',
-      status: updateRequired ? 'required' : updateAvailable ? 'available' : 'current',
+      status: update.status,
       currentVersion,
       currentBuildId,
       currentReleaseId,
       latestVersion,
-      latestBuildId: String(remoteConfig.buildId || ''),
+      latestBuildId,
+      latestReleaseId,
       minimumSupportedVersion,
-      updateAvailable,
-      updateRequired,
-      canDefer,
+      updateAvailable: update.updateAvailable,
+      updateRequired: update.updateRequired,
+      canDefer: update.canDefer,
       deferralHours: boundedInteger(remoteConfig.allowDeferralHours, 24, 1, 168),
       checkIntervalSeconds: boundedInteger(remoteConfig.updateCheckIntervalSeconds, 300, 60, 86400),
       checkedAt,
       sourceUrl,
       downloadUrl: validExternalUrl(remoteConfig.downloadUrl) || 'https://github.com/Eddy-ZM/ChemVault-Model/releases/latest',
       releaseNotesUrl: validExternalUrl(remoteConfig.releaseNotesUrl) || '',
-      message: String(remoteConfig.message || (updateRequired
+      message: String(remoteConfig.message || (update.updateRequired
         ? 'This ChemVault Model desktop build must be updated before continuing.'
-        : updateAvailable
+        : update.updateAvailable
           ? 'A newer ChemVault Model desktop build is available.'
           : 'ChemVault Model is current.'))
     };
@@ -284,6 +326,7 @@ async function getAppVersionStatus() {
       currentReleaseId,
       latestVersion: currentVersion,
       latestBuildId: '',
+      latestReleaseId: '',
       minimumSupportedVersion: '0.0.0',
       updateAvailable: false,
       updateRequired: false,
@@ -304,6 +347,17 @@ async function openUpdateUrl(value) {
   const url = validExternalUrl(value) || 'https://github.com/Eddy-ZM/ChemVault-Model/releases/latest';
   await shell.openExternal(url);
   return { ok: true, url };
+}
+
+function currentDesktopBuildIdentity() {
+  const manifest = readLocalVersionManifest();
+  const config = platformVersionConfig(manifest, 'windows');
+  const version = String(app.getVersion() || config.version || '0.0.0');
+  return {
+    version,
+    buildId: String(config.buildId || manifest?.generatedFrom?.commit || version),
+    releaseId: String(config.releaseId || `windows-v${version}`)
+  };
 }
 
 function versionManifestUrl() {
@@ -371,28 +425,6 @@ function platformVersionConfig(manifest, platform) {
   );
 }
 
-function compareVersions(left, right) {
-  const a = versionParts(left);
-  const b = versionParts(right);
-  const length = Math.max(a.length, b.length);
-
-  for (let index = 0; index < length; index += 1) {
-    const leftPart = a[index] || 0;
-    const rightPart = b[index] || 0;
-    if (leftPart > rightPart) return 1;
-    if (leftPart < rightPart) return -1;
-  }
-
-  return 0;
-}
-
-function versionParts(value) {
-  return String(value || '0')
-    .split(/[.+-]/u)
-    .map((part) => Number.parseInt(part, 10))
-    .filter((part) => Number.isFinite(part));
-}
-
 function validExternalUrl(value) {
   try {
     const url = new URL(String(value || '').trim());
@@ -437,6 +469,11 @@ async function handleDesktopRequest(staticRoot, request, response) {
 
   if (requestUrl.pathname.startsWith('/api/chem/')) {
     await proxyChemApi(request, response, requestUrl);
+    return;
+  }
+
+  if (requestUrl.pathname === '/api/product-events') {
+    await proxyProductEvent(request, response, requestUrl);
     return;
   }
 
@@ -489,6 +526,24 @@ async function proxyChemApi(request, response, requestUrl) {
   response.writeHead(upstream.status, responseHeaders);
   const arrayBuffer = await upstream.arrayBuffer();
   response.end(Buffer.from(arrayBuffer));
+}
+
+async function proxyProductEvent(request, response, requestUrl) {
+  const body = await readRequestBody(request);
+  const headers = sanitizeProxyHeaders(request.headers);
+  headers['x-chemvault-client'] = 'desktop-windows';
+  try {
+    const upstream = await fetch(`${DEFAULT_MODEL_ORIGIN}${requestUrl.pathname}`, {
+      method: request.method,
+      headers,
+      body: body.length > 0 && request.method !== 'GET' && request.method !== 'HEAD' ? body : undefined
+    });
+    response.writeHead(upstream.status, { 'Content-Type': upstream.headers.get('content-type') || 'application/json; charset=utf-8' });
+    response.end(Buffer.from(await upstream.arrayBuffer()));
+  } catch {
+    response.writeHead(204);
+    response.end();
+  }
 }
 
 async function proxyUserApi(request, response, requestUrl) {
@@ -848,6 +903,7 @@ async function runQuantumCalculation(request, onProgress = () => {}) {
     if (charges.length === 0) warnings.push('Partial charges file was not produced by xTB.');
 
     const completedAt = Date.now();
+    const engineVersion = extractEngineVersion('xtb', output);
     const result = {
       ok: processResult.exitCode === 0 && !processResult.cancelled,
       cancelled: processResult.cancelled || undefined,
@@ -870,6 +926,28 @@ async function runQuantumCalculation(request, onProgress = () => {}) {
       outputLog: output,
       error: processResult.cancelled ? 'xTB calculation was cancelled by the user.' : processResult.exitCode === 0 ? undefined : `xTB exited with code ${processResult.exitCode}.`
     };
+    const appIdentity = currentDesktopBuildIdentity();
+    result.engineVersion = engineVersion;
+    result.runManifest = buildQuantumRunManifest({
+      result,
+      runId: calculationId,
+      engine: 'xtb',
+      engineLabel: QUANTUM_ENGINE_LABELS.xtb,
+      engineVersion,
+      executablePath: engine.executable,
+      appVersion: appIdentity.version,
+      appBuildId: appIdentity.buildId,
+      appReleaseId: appIdentity.releaseId,
+      xyz,
+      inputText: xyz,
+      outputText: output,
+      charge,
+      multiplicity: unpairedElectrons + 1,
+      method: 'GFN2-xTB',
+      calculationMode,
+      performanceProfile: 'fast-screening',
+      inputFileName: 'input.xyz'
+    });
     emitCalculationProgress(
       onProgress,
       'xtb',
@@ -1100,6 +1178,7 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
     if (charges.length === 0) warnings.push('Mulliken charges were not found in the external engine output.');
 
     const completedAt = Date.now();
+    const engineVersion = extractEngineVersion(engineKind, output);
     const result = {
       ok: completedOk,
       cancelled: processResult.cancelled || undefined,
@@ -1136,6 +1215,35 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
       gaussianFiles: gaussianFiles ? { ...gaussianFiles, reusedCheckpoint: reuseGaussianCheckpoint || undefined } : undefined,
       error: completedOk ? undefined : diagnoseExternalEngineFailure(engineKind, processResult, output, config)
     };
+    const appIdentity = currentDesktopBuildIdentity();
+    result.engineVersion = engineVersion;
+    result.runManifest = buildQuantumRunManifest({
+      result,
+      runId: calculationId,
+      engine: engineKind,
+      engineLabel,
+      engineVersion,
+      executablePath: config.executablePath,
+      appVersion: appIdentity.version,
+      appBuildId: appIdentity.buildId,
+      appReleaseId: appIdentity.releaseId,
+      xyz,
+      inputText: job.inputContent,
+      outputText: output,
+      checkpointBase64: gaussianFiles?.checkpoint?.contentBase64,
+      charge,
+      multiplicity,
+      method: methodLabel,
+      calculationMode,
+      routeOptions,
+      performanceProfile,
+      outputDetail,
+      resourceUsage: result.resourceUsage,
+      checkpointReused: reuseGaussianCheckpoint,
+      inputFileName: path.basename(job.inputPath || ''),
+      outputFileName: path.basename(job.outputPath || ''),
+      checkpointFileName: gaussianFiles?.checkpoint?.fileName
+    });
     emitCalculationProgress(
       onProgress,
       engineKind,
@@ -2228,20 +2336,17 @@ async function runPyscfCalculation(request, onProgress = () => {}) {
   const workDir = await fs.promises.mkdtemp(path.join(app.getPath('temp'), 'chemvault-pyscf-'));
   const inputPath = path.join(workDir, 'input.json');
   const scriptPath = path.join(workDir, 'chemvault_pyscf_job.py');
+  const inputContent = JSON.stringify({
+    atoms: parseXyzGeometry(xyz),
+    charge,
+    spin: unpairedElectrons,
+    method,
+    basisSet
+  });
 
   try {
     emitCalculationProgress(onProgress, 'pyscf', 'writing-input', 20, 'Writing PySCF input payload and runner script.', undefined, startedAt);
-    await fs.promises.writeFile(
-      inputPath,
-      JSON.stringify({
-        atoms: parseXyzGeometry(xyz),
-        charge,
-        spin: unpairedElectrons,
-        method,
-        basisSet
-      }),
-      'utf8'
-    );
+    await fs.promises.writeFile(inputPath, inputContent, 'utf8');
     await fs.promises.writeFile(scriptPath, pyscfJobScript(), 'utf8');
 
     emitCalculationProgress(onProgress, 'pyscf', 'starting-engine', 30, 'Starting PySCF calculation process.', undefined, startedAt);
@@ -2265,6 +2370,7 @@ async function runPyscfCalculation(request, onProgress = () => {}) {
       )
     });
     const output = `${processResult.stdout}\n${processResult.stderr}`.trim();
+    const engineCompletedAt = Date.now();
     emitCalculationProgress(onProgress, 'pyscf', 'parsing-output', 92, 'Parsing PySCF JSON result, dipole, and Mulliken charges.', outputTail(output), startedAt);
     const parsed = parsePyscfResult(output);
     const warnings = [...(parsed?.warnings || [])];
@@ -2276,6 +2382,8 @@ async function runPyscfCalculation(request, onProgress = () => {}) {
     if (parsed && !parsed.dipoleDebye) warnings.push('Dipole moment was not returned by PySCF.');
     if (parsed && parsed.charges.length === 0) warnings.push('Mulliken charges were not returned by PySCF.');
 
+    const completedAt = Date.now();
+    const engineVersion = extractEngineVersion('pyscf', output, pyscfCommand.probe.version);
     const result = {
       ok: processResult.exitCode === 0 && Boolean(parsed) && !processResult.cancelled,
       cancelled: processResult.cancelled || undefined,
@@ -2287,12 +2395,35 @@ async function runPyscfCalculation(request, onProgress = () => {}) {
       dipoleDebye: parsed?.dipoleDebye ?? null,
       charges: parsed?.charges ?? [],
       chargeModel: 'PySCF Mulliken population analysis',
-      elapsedMs: Date.now() - startedAt,
+      elapsedMs: completedAt - startedAt,
+      engineElapsedMs: engineCompletedAt - runStartedAt,
+      postProcessingElapsedMs: completedAt - engineCompletedAt,
       warnings,
       outputTail: outputTail(output),
       outputLog: output,
       error: processResult.cancelled ? 'PySCF calculation was cancelled by the user.' : processResult.exitCode === 0 && parsed ? undefined : `PySCF exited with code ${processResult.exitCode}.`
     };
+    const appIdentity = currentDesktopBuildIdentity();
+    result.engineVersion = engineVersion;
+    result.runManifest = buildQuantumRunManifest({
+      result,
+      runId: calculationId,
+      engine: 'pyscf',
+      engineLabel: QUANTUM_ENGINE_LABELS.pyscf,
+      engineVersion,
+      executablePath: pyscfCommand.executable,
+      appVersion: appIdentity.version,
+      appBuildId: appIdentity.buildId,
+      appReleaseId: appIdentity.releaseId,
+      xyz,
+      inputText: inputContent,
+      outputText: output,
+      charge,
+      multiplicity: unpairedElectrons + 1,
+      method: result.method,
+      calculationMode,
+      inputFileName: 'input.json'
+    });
     emitCalculationProgress(
       onProgress,
       'pyscf',
@@ -3514,6 +3645,20 @@ function cancelQuantumCalculation(calculationId) {
   };
 }
 
+function cancelAllQuantumCalculations() {
+  for (const active of activeQuantumProcesses.values()) {
+    try {
+      active.cancel();
+    } catch {
+      // Process cleanup is best-effort during shutdown.
+    }
+  }
+}
+
+function quantumQueueJournalPath() {
+  return path.join(app.getPath('userData'), 'quantum-queue.json');
+}
+
 function normalizeCalculationId(value) {
   return String(value || '')
     .replace(/[^a-zA-Z0-9_-]/gu, '')
@@ -3672,7 +3817,7 @@ async function prepareOrcaJob(workDir, xyz, options) {
   ].join('\n');
 
   await fs.promises.writeFile(inputPath, content, 'utf8');
-  return { args: [inputPath], outputPath };
+  return { args: [inputPath], inputContent: content, inputPath, outputPath };
 }
 
 function parseXyzGeometry(xyz) {

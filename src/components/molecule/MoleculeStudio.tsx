@@ -20,6 +20,8 @@ import { DisplayControls, Representation } from '@/components/molecule/DisplayCo
 import { ExportNameSource, ExportPanel } from '@/components/molecule/ExportPanel';
 import { AuthButton } from '@/components/auth/AuthButton';
 import { GlobalLoadingOverlay } from '@/components/ui/LoadingState';
+import { DataProcessingNotice } from '@/components/molecule/DataProcessingNotice';
+import { durationBucket, trackProductEvent } from '@/lib/productTelemetry';
 
 type StructureFormat = 'sdf' | 'mol' | 'xyz' | 'pdb' | 'cif';
 type MoleculeSource = 'search' | 'smiles' | 'draw' | 'upload' | 'pdb';
@@ -228,6 +230,7 @@ export function MoleculeStudio() {
 
   const generate3DFromSmiles = useCallback(
     async (rawValue: string, source: MoleculeSource, metadata: Partial<CurrentMolecule> = {}, modeForError: MoleculeMode = 'smiles') => {
+      const operationStartedAt = performance.now();
       const nextSmiles = normalizeSmiles(rawValue);
       if (!nextSmiles) {
         const message = 'SMILES is empty.';
@@ -272,10 +275,20 @@ export function MoleculeStudio() {
         }));
         setPdbMeta(undefined);
         toast(`3D model loaded (${payload.method})`, 'success');
+        void trackProductEvent('structure_generation_completed', {
+          source,
+          status: 'completed',
+          duration: durationBucket(performance.now() - operationStartedAt)
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : '3D generation failed';
         setModeError(modeForError, message);
         toast(message, 'error');
+        void trackProductEvent('structure_generation_failed', {
+          source,
+          status: 'failed',
+          duration: durationBucket(performance.now() - operationStartedAt)
+        });
       } finally {
         setLoading3D(false);
       }
@@ -340,6 +353,7 @@ export function MoleculeStudio() {
 
   const loadByQuery = useCallback(
     async (query: string) => {
+      const operationStartedAt = performance.now();
       const trimmed = query.trim();
       if (!trimmed) {
         const message = 'Enter a molecule name, synonym, fuzzy spelling, or PubChem CID.';
@@ -352,6 +366,7 @@ export function MoleculeStudio() {
       try {
         const cacheKey = searchCacheKey(trimmed);
         let cached = searchResultCache.current.get(cacheKey);
+        const cacheHit = Boolean(cached);
         if (!cached) {
           const response = await fetch(`/api/chem/pubchem/search?query=${encodeURIComponent(trimmed)}&limit=8`);
           const payload = await readApiResponse<SearchCandidate & {
@@ -375,6 +390,12 @@ export function MoleculeStudio() {
         }
 
         const { candidates, needsSelection } = cached;
+        void trackProductEvent('molecule_search_completed', {
+          source: 'pubchem',
+          status: needsSelection || candidates.length > 1 ? 'selection' : 'completed',
+          cached: cacheHit,
+          duration: durationBucket(performance.now() - operationStartedAt)
+        });
         if (candidates.length === 0) {
           throw new Error('PubChem did not return a usable molecule for this query.');
         }
@@ -389,6 +410,11 @@ export function MoleculeStudio() {
         const message = error instanceof Error ? error.message : 'Search failed';
         setModeError('search', message);
         toast(message, 'error');
+        void trackProductEvent('molecule_search_failed', {
+          source: 'pubchem',
+          status: 'failed',
+          duration: durationBucket(performance.now() - operationStartedAt)
+        });
       } finally {
         setLoadingSearch(false);
       }
@@ -651,6 +677,12 @@ export function MoleculeStudio() {
   }, [background, effectiveRepresentation, showAtomLabels, showHydrogens, structure.data, structure.format]);
 
   useEffect(() => {
+    if (new URLSearchParams(window.location.search).get('workflow') === 'quantum') {
+      setDetailsOpen(true);
+    }
+  }, []);
+
+  useEffect(() => {
     if (!allowCartoonRepresentation && representation === 'cartoon') {
       setRepresentation('ball-and-stick');
     }
@@ -746,6 +778,7 @@ export function MoleculeStudio() {
             />
           </div>
         </section>
+        <DataProcessingNotice />
 
         <section className="mt-3 grid min-h-0 flex-1 gap-3 xl:grid-cols-[minmax(430px,0.95fr)_minmax(0,1.05fr)]">
           <div className="min-h-0 animate-fade overflow-auto rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">

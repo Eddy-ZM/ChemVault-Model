@@ -18,7 +18,8 @@ import type {
   QuantumCalculationResult,
   QuantumCancelResult,
   QuantumEngineKind,
-  QuantumEngineStatus
+  QuantumEngineStatus,
+  QuantumQueueItem
 } from '@/lib/chem/quantumTypes';
 
 declare global {
@@ -32,6 +33,7 @@ declare global {
     currentReleaseId: string;
     latestVersion: string;
     latestBuildId: string;
+    latestReleaseId: string;
     minimumSupportedVersion: string;
     updateAvailable: boolean;
     updateRequired: boolean;
@@ -78,6 +80,8 @@ declare global {
       onQuantumCalculationProgress: (handler: (progress: QuantumCalculationProgress) => void) => () => void;
       runQuantumCalculation: (request: QuantumCalculationRequest) => Promise<QuantumCalculationResult>;
       cancelQuantumCalculation: (calculationId: string) => Promise<QuantumCancelResult>;
+      getQuantumQueue: () => Promise<QuantumQueueItem[]>;
+      saveQuantumQueue: (items: QuantumQueueItem[]) => Promise<QuantumQueueItem[]>;
     };
   }
 }

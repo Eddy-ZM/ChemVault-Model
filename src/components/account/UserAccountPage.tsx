@@ -9,6 +9,7 @@ import { UserPortalSection, buildRegisterUrl, buildUserPortalUrl } from '@/lib/a
 import { downloadText } from '@/lib/chem/fileExport';
 import { loadQuantumHistory, type QuantumHistoryEntry } from '@/lib/chem/quantumWorkflow';
 import { loadQuantumProjects, type QuantumProjectRecord } from '@/lib/chem/quantumProjectWorkspace';
+import { isProductTelemetryEnabled, setProductTelemetryEnabled } from '@/lib/productTelemetry';
 
 export type AccountPage = 'profile' | 'molecules' | 'settings';
 
@@ -472,7 +473,7 @@ function MoleculesContent({
                   <Metric label="Atoms" value={String(entry.atomCount)} />
                   <Metric label="Energy" value={entry.energyHartree === null ? 'N/A' : `${entry.energyHartree.toFixed(4)} Eh`} />
                   <Metric label="Dipole" value={entry.dipoleDebye === null ? 'N/A' : `${entry.dipoleDebye.toFixed(4)} D`} />
-                  <Metric label="Quality" value={typeof entry.qualityScore === 'number' ? `${entry.qualityScore}/100` : 'N/A'} />
+                  <Metric label="Completeness" value={typeof entry.completenessScore === 'number' ? `${entry.completenessScore}/100` : 'N/A'} />
                   <Metric label="Charge / spin" value={`${entry.charge} / ${entry.unpairedElectrons}`} />
                 </div>
               </article>
@@ -503,6 +504,12 @@ function SettingsContent({
   settingsUrl: string;
   userOrigin: string;
 }) {
+  const [diagnosticsEnabled, setDiagnosticsEnabled] = useState(false);
+
+  useEffect(() => {
+    setDiagnosticsEnabled(isProductTelemetryEnabled());
+  }, []);
+
   return (
     <section className="grid gap-4 lg:grid-cols-2">
       <Panel title="Managed in ChemVault User" subtitle="Security and account preferences remain centralized in the user system.">
@@ -518,6 +525,26 @@ function SettingsContent({
         <InfoRow label="App source" value="model" />
         <InfoRow label="Primary service" value={services[0] || 'Molecule Studio'} />
         <TagList title="Enabled permissions" values={permissions} empty="No explicit molecule permissions returned" />
+      </Panel>
+
+      <Panel title="Optional product diagnostics" subtitle="Help identify slow or failing workflows without sharing molecular or account data.">
+        <label className="flex items-start justify-between gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <span>
+            <span className="block text-sm font-semibold text-slate-950">Share anonymous workflow events</span>
+            <span className="mt-1 block text-xs leading-5 text-slate-600">
+              Sends operation type, broad duration, engine type, and success state only. Structures, search terms, paths, logs, and identity are excluded.
+            </span>
+          </span>
+          <input
+            type="checkbox"
+            checked={diagnosticsEnabled}
+            onChange={(event) => {
+              setDiagnosticsEnabled(event.target.checked);
+              setProductTelemetryEnabled(event.target.checked);
+            }}
+            className="mt-1 h-5 w-5 shrink-0 rounded border-slate-300 text-sky-700"
+          />
+        </label>
       </Panel>
     </section>
   );

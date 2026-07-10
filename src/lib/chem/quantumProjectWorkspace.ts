@@ -1,4 +1,4 @@
-import type { QuantumCalculationResult, QuantumEngineKind } from '@/lib/chem/quantumTypes';
+import type { QuantumCalculationResult, QuantumEngineKind, QuantumRunManifest } from '@/lib/chem/quantumTypes';
 import type { QuantumHistoryMetadata, QuantumPreflightResult, QuantumResultDiagnosis } from '@/lib/chem/quantumWorkflow';
 
 export type QuantumProjectCalculation = {
@@ -6,6 +6,7 @@ export type QuantumProjectCalculation = {
   createdAt: string;
   engine: QuantumEngineKind;
   engineLabel: string;
+  engineVersion?: string;
   method: string;
   mode: string;
   status: 'completed' | 'failed' | 'needs-review';
@@ -16,7 +17,8 @@ export type QuantumProjectCalculation = {
   unpairedElectrons: number;
   warningsCount: number;
   diagnosisTitle: string;
-  qualityScore?: number;
+  completenessScore?: number;
+  runManifest?: QuantumRunManifest;
 };
 
 export type QuantumProjectRecord = {
@@ -53,7 +55,7 @@ export function loadQuantumProjects(): QuantumProjectRecord[] {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(PROJECTS_KEY) || '[]');
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isProjectRecord).slice(0, PROJECT_LIMIT);
+    return parsed.filter(isProjectRecord).map(normalizeProjectRecord).slice(0, PROJECT_LIMIT);
   } catch {
     return [];
   }
@@ -115,7 +117,7 @@ export function exportQuantumProjectBundle(project: QuantumProjectRecord): strin
     schema: 'chemvault.quantum.project.v1',
     exportedAt: new Date().toISOString(),
     copyright: CHEMVAULT_COPYRIGHT_NOTICE,
-    project
+    project: normalizeProjectRecord(project)
   };
   return JSON.stringify(bundle, null, 2);
 }
@@ -132,7 +134,7 @@ export function importQuantumProjectBundle(content: string): QuantumProjectRecor
     ...project,
     lookupKey: project.lookupKey || projectRecordKey(project),
     updatedAt: new Date().toISOString(),
-    calculations: project.calculations.slice(0, CALCULATIONS_PER_PROJECT_LIMIT),
+    calculations: normalizeProjectRecord(project).calculations.slice(0, CALCULATIONS_PER_PROJECT_LIMIT),
     calculationCount: Math.max(project.calculationCount, project.calculations.length)
   };
   const nextProjects = [normalized, ...projects.filter((item) => item.id !== normalized.id)]
@@ -165,6 +167,7 @@ function projectCalculationFromResult(options: {
     createdAt: new Date().toISOString(),
     engine: result.engine,
     engineLabel: result.engineLabel,
+    engineVersion: result.engineVersion,
     method: result.method,
     mode: result.gaussianTaskLabel || result.calculationMode,
     status: result.ok && diagnosis.severity === 'success' ? 'completed' : result.ok ? 'needs-review' : 'failed',
@@ -175,7 +178,8 @@ function projectCalculationFromResult(options: {
     unpairedElectrons: options.unpairedElectrons,
     warningsCount: result.warnings.length,
     diagnosisTitle: diagnosis.title,
-    qualityScore: diagnosis.qualityScore
+    completenessScore: diagnosis.completenessScore,
+    runManifest: result.runManifest
   };
 }
 
@@ -220,4 +224,18 @@ function isProjectRecord(value: unknown): value is QuantumProjectRecord {
     && typeof record.moleculeName === 'string'
     && Array.isArray(record.calculations)
   );
+}
+
+function normalizeProjectRecord(record: QuantumProjectRecord): QuantumProjectRecord {
+  return {
+    ...record,
+    calculations: record.calculations.map((calculation) => {
+      const legacy = calculation as QuantumProjectCalculation & { qualityScore?: number };
+      const { qualityScore, ...current } = legacy;
+      return {
+        ...current,
+        completenessScore: typeof current.completenessScore === 'number' ? current.completenessScore : qualityScore
+      };
+    })
+  };
 }

@@ -17,36 +17,40 @@
     "build:desktop": "npm run build && node scripts/ensure-electron-binary.cjs && node scripts/patch-nsis-details.cjs && electron-builder --win --x64",
     "dist:win": "npm run build:desktop",
     "release:manifest": "node scripts/write-release-manifest.cjs",
-    "test": "npm run test:quantum && npm run test:workflow && npm run test:exports",
+    "test": "npm run test:desktop && npm run test:quantum && npm run test:workflow && npm run test:exports",
+    "test:desktop": "node scripts/test-versioning.cjs && node scripts/test-run-manifest.cjs && node scripts/test-queue-journal.cjs && node scripts/test-desktop-contract.cjs",
     "test:exports": "node scripts/smoke-quantum-exports.cjs",
     "test:quantum": "node scripts/test-gaussian-parsers.cjs",
     "test:workflow": "node scripts/test-quantum-workflow.cjs",
     "start": "next start",
     "preview": "npm run build && npx --yes wrangler@4 pages dev out --compatibility-date=2026-06-23 --port 8788",
     "deploy": "npm run build && npx --yes wrangler@4 pages deploy out",
-    "lint": "next lint"
+    "lint": "eslint ."
   },
   "dependencies": {
     "3dmol": "^2.5.5",
-    "next": "^14.2.35",
-    "react": "^18.3.1",
-    "react-dom": "^18.3.1"
+    "next": "16.2.10",
+    "react": "19.2.7",
+    "react-dom": "19.2.7"
   },
   "devDependencies": {
     "@types/node": "^22.10.5",
-    "@types/react": "^18.3.18",
-    "@types/react-dom": "^18.3.0",
+    "@types/react": "19.2.14",
+    "@types/react-dom": "19.2.3",
     "autoprefixer": "^10.4.20",
     "electron": "^43.0.0",
     "electron-builder": "^26.15.3",
-    "eslint": "^8.57.0",
-    "eslint-config-next": "^14.2.5",
-    "postcss": "^8.5.3",
+    "eslint": "9.39.2",
+    "eslint-config-next": "16.2.10",
+    "postcss": "8.5.16",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.3"
   },
   "optionalDependencies": {
-    "@next/swc-darwin-arm64": "^14.2.33"
+    "@next/swc-darwin-arm64": "16.2.10"
+  },
+  "overrides": {
+    "postcss": "8.5.16"
   },
   "build": {
     "appId": "science.chemvault.model",

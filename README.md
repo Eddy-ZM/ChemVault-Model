@@ -66,6 +66,7 @@ Professional workflow features:
 - Calculation progress overlay with live stage, elapsed time, progress estimate, and real engine output tail.
 - Cancellable desktop calculations.
 - Local calculation queue for running multiple calculations in sequence.
+- Queue recovery that marks interrupted desktop tasks clearly after restart.
 - Optional xTB screening followed by Gaussian refinement.
 - Local ChemVault project workspace that groups repeated calculations by molecule.
 - Result comparison table across current and recent calculations.
@@ -73,6 +74,8 @@ Professional workflow features:
 - Local history visible in Molecule Studio and My Molecules.
 - Engine diagnostics for configured local and external engines.
 - Error review and repair suggestions for common Gaussian failures.
+- Reproducible run manifests with app build, engine version, calculation settings, resource settings, and SHA-256 provenance values.
+- Result completeness scoring that describes parsed output coverage without presenting it as a scientific accuracy score.
 
 ### Gaussian Bridge
 
@@ -101,8 +104,16 @@ Completed calculation exports include:
 - Optimized XYZ when available.
 - Gaussian suite ZIP for Gaussian-native follow-up work.
 - Local ChemVault project JSON bundle.
+- JSON run manifest for reproducing and auditing each completed desktop calculation.
 
 Report exports include document properties and ChemVault copyright metadata.
+
+### Data Handling
+
+- Desktop quantum calculations run through engines installed on the user's computer.
+- Locally opened structure files remain local unless the user starts a cloud-backed property, 3D-generation, PubChem, or PDB operation.
+- Web search, database lookup, property calculation, and 3D generation use ChemVault web services.
+- Optional product diagnostics are disabled by default and exclude structures, search terms, file paths, logs, and account identity.
 
 ## Apple App
 
@@ -165,7 +176,7 @@ Generate release manifest and checksums for the existing Windows release directo
 npm run release:manifest
 ```
 
-Run parser and export smoke tests:
+Run desktop lifecycle, versioning, queue, parser, workflow, and export regression tests:
 
 ```bash
 npm test

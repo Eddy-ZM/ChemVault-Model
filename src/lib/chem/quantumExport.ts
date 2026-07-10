@@ -672,6 +672,8 @@ function quantumSummaryRows(result: QuantumCalculationResult, context: QuantumEx
     ['Generated', generatedAt.toISOString()],
     ['Molecule', moleculeLabel(context.metadata)],
     ['Engine', result.engineLabel],
+    ['Engine version', result.engineVersion || result.runManifest?.engine.version || 'Not reported'],
+    ['ChemVault build', result.runManifest ? `${result.runManifest.app.version} (${result.runManifest.app.buildId || 'build not reported'})` : 'Not reported'],
     ['Method', result.method],
     ['Calculation mode', result.gaussianTaskLabel || result.calculationMode],
     ['Performance profile', result.performanceProfile ? profileLabel(result.performanceProfile) : 'N/A'],
@@ -681,8 +683,11 @@ function quantumSummaryRows(result: QuantumCalculationResult, context: QuantumEx
     ['Checkpoint reused', result.reusedCheckpoint ? 'Yes' : 'No'],
     ['Total charge', String(context.charge)],
     ['Unpaired electrons', String(context.unpairedElectrons)],
-    ['ChemVault quality score', typeof context.diagnosis?.qualityScore === 'number' ? `${context.diagnosis.qualityScore}/100` : 'N/A'],
-    ['Status', result.ok ? 'Completed' : result.error || 'Not completed']
+    ['Result completeness', typeof context.diagnosis?.completenessScore === 'number' ? `${context.diagnosis.completenessScore}/100` : 'N/A'],
+    ['Status', result.ok ? 'Completed' : result.error || 'Not completed'],
+    ['Structure SHA-256', result.runManifest?.provenance.structureSha256 || 'Not recorded'],
+    ['Input SHA-256', result.runManifest?.provenance.inputSha256 || 'Not recorded'],
+    ['Output SHA-256', result.runManifest?.provenance.outputSha256 || 'Not recorded']
   ];
 }
 
@@ -739,9 +744,9 @@ function reviewRowsForExport(context: QuantumExportDocumentContext) {
   return [
     ['Status', diagnosis.title],
     ['Severity', diagnosis.severity],
-    ['Quality score', typeof diagnosis.qualityScore === 'number' ? `${diagnosis.qualityScore}/100` : 'N/A'],
+    ['Result completeness', typeof diagnosis.completenessScore === 'number' ? `${diagnosis.completenessScore}/100` : 'N/A'],
     ['Summary', diagnosis.summary],
-    ['Quality factors', diagnosis.qualityFactors?.length ? diagnosis.qualityFactors.join(' | ') : 'N/A'],
+    ['Completeness factors', diagnosis.completenessFactors?.length ? diagnosis.completenessFactors.join(' | ') : 'N/A'],
     ['Recommended actions', diagnosis.suggestedActions.length ? diagnosis.suggestedActions.join(' | ') : 'No additional action suggested.']
   ];
 }
@@ -767,7 +772,7 @@ function formatElapsedMs(value: number) {
 
 function profileLabel(value: string) {
   if (value === 'fast-screening') return 'Fast screening';
-  if (value === 'high-accuracy') return 'High accuracy';
+  if (value === 'high-accuracy') return 'Advanced DFT';
   if (value === 'balanced') return 'Balanced';
   return value;
 }

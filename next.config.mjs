@@ -2,9 +2,7 @@
 const nextConfig = {
   output: 'export',
   trailingSlash: true,
-  experimental: {
-    typedRoutes: true
-  }
+  typedRoutes: true
 };
 
 export default nextConfig;

@@ -51,8 +51,8 @@ export type QuantumPreflightResult = {
 };
 
 export type QuantumResultDiagnosis = {
-  qualityFactors?: string[];
-  qualityScore?: number;
+  completenessFactors?: string[];
+  completenessScore?: number;
   routeFixes?: Array<{
     label: string;
     routeOption: string;
@@ -84,7 +84,7 @@ export type QuantumHistoryEntry = {
   atomCount: number;
   warningsCount: number;
   diagnosisTitle: string;
-  qualityScore?: number;
+  completenessScore?: number;
 };
 
 export type QuantumHistoryMetadata = {
@@ -499,35 +499,35 @@ export function diagnoseQuantumCalculation(
   const normalized = text.toLowerCase();
   const highlights = extractLogHighlights(text);
   const suggestedActions: string[] = [];
-  const quality = assessResultQuality(result, preflight);
+  const completeness = assessResultCompleteness(result, preflight);
 
   if (result.ok) {
     if (result.energyHartree !== null && result.dipoleDebye && result.charges.length > 0) {
-      return withQuality({
+      return withCompleteness({
         severity: 'success',
         title: 'Calculation completed and parsed',
         summary: `${result.engineLabel} returned energy, dipole vector, and ${result.charges.length} parsed partial charges.`,
         highlights,
         suggestedActions: ['Export the report or Gaussian suite, or continue with GaussView for post-processing.']
-      }, quality);
+      }, completeness);
     }
 
     if (result.energyHartree !== null) {
       if (!result.dipoleDebye) suggestedActions.push('Check whether the selected route prints dipole moments for this job type.');
       if (result.charges.length === 0) suggestedActions.push('For Gaussian, choose Detailed charges output or add Pop=Regular to the route options.');
-      return withQuality({
+      return withCompleteness({
         severity: 'warning',
         title: 'Calculation completed with limited parsed data',
         summary: `${result.engineLabel} completed, but ChemVault could not parse every requested property.`,
         highlights,
         suggestedActions
-      }, quality);
+      }, completeness);
     }
   }
 
   if (result.cancelled || /calculation was cancelled by the user/iu.test(result.error || '')) {
     suggestedActions.push('Review any partial log output, then run the calculation again when ready.');
-    return failureDiagnosis('Calculation cancelled', 'The engine was stopped before it could return a complete result.', highlights, suggestedActions, quality);
+    return failureDiagnosis('Calculation cancelled', 'The engine was stopped before it could return a complete result.', highlights, suggestedActions, completeness);
   }
 
   if (result.timedOut || /timed out before completion|runtime limit/iu.test(result.error || '')) {
@@ -538,7 +538,7 @@ export function diagnoseQuantumCalculation(
       'Gaussian was stopped before normal termination. Parsed energy or checkpoint data from this run is partial and must not be treated as a completed result.',
       highlights,
       suggestedActions,
-      quality
+      completeness
     );
   }
 
@@ -547,19 +547,19 @@ export function diagnoseQuantumCalculation(
     if (preflight?.totalElectrons !== null) {
       suggestedActions.push(`Current preflight estimate: ${preflight?.totalElectrons ?? 'unknown'} electrons, multiplicity ${preflight?.multiplicity ?? 'unknown'}.`);
     }
-    return failureDiagnosis('Charge or spin setting failed', 'The engine reported a charge, spin, or multiplicity issue.', highlights, suggestedActions, quality);
+    return failureDiagnosis('Charge or spin setting failed', 'The engine reported a charge, spin, or multiplicity issue.', highlights, suggestedActions, completeness);
   }
 
   if (/atoms too close|distance matrix|small interatomic distance|linear bend/iu.test(text)) {
     suggestedActions.push('Regenerate or clean the 3D geometry before running Gaussian again.');
     suggestedActions.push('Run a quick xTB screen or a geometry optimization before higher-level templates.');
-    return failureDiagnosis('Geometry needs cleanup', 'The engine reported overlapping atoms or an invalid distance matrix.', highlights, suggestedActions, quality);
+    return failureDiagnosis('Geometry needs cleanup', 'The engine reported overlapping atoms or an invalid distance matrix.', highlights, suggestedActions, completeness);
   }
 
   if (/convergence failure|scf has not converged|convergence criterion not met|failed to converge/iu.test(text)) {
     suggestedActions.push('Try SCF=XQC or a smaller basis set, then rerun.');
     suggestedActions.push('Use xTB or Opt first to improve the starting geometry.');
-    return failureDiagnosis('SCF convergence failed', 'The electronic structure iteration did not converge cleanly.', highlights, suggestedActions, quality, [
+    return failureDiagnosis('SCF convergence failed', 'The electronic structure iteration did not converge cleanly.', highlights, suggestedActions, completeness, [
       {
         label: 'Add SCF repair',
         routeOption: 'SCF=(XQC,MaxCycle=512)',
@@ -571,7 +571,7 @@ export function diagnoseQuantumCalculation(
   if (/link\s+9999|l9999\.exe|maximum number of optimization cycles|optimization stopped|number of steps exceeded/iu.test(text)) {
     suggestedActions.push('Use a better starting geometry or run a quick xTB optimization before Gaussian refinement.');
     suggestedActions.push('Try Opt=CalcFC or increase optimization cycles if the current structure is chemically reasonable.');
-    return failureDiagnosis('Optimization did not converge', 'Gaussian stopped before reaching a stable optimized geometry.', highlights, suggestedActions, quality, [
+    return failureDiagnosis('Optimization did not converge', 'Gaussian stopped before reaching a stable optimized geometry.', highlights, suggestedActions, completeness, [
       {
         label: 'Add Opt repair',
         routeOption: 'Opt=(CalcFC,MaxCycles=200)',
@@ -583,47 +583,47 @@ export function diagnoseQuantumCalculation(
   if (/basis set data|basis functions|unknown center|atomic number out of range|pseudo|ecp/iu.test(text)) {
     suggestedActions.push('Choose a basis set that supports every element in the structure.');
     suggestedActions.push('For heavy elements, use an appropriate ECP or a basis family available in your Gaussian installation.');
-    return failureDiagnosis('Basis set or element mismatch', 'The selected method or basis set does not match the molecular elements.', highlights, suggestedActions, quality);
+    return failureDiagnosis('Basis set or element mismatch', 'The selected method or basis set does not match the molecular elements.', highlights, suggestedActions, completeness);
   }
 
   if (/qperr|unknown keyword|unrecognized route|end of file in zsymb|symbolic z-matrix/iu.test(text)) {
     suggestedActions.push('Open the Gaussian input preview and simplify custom route options.');
     suggestedActions.push('Export the GJF and verify route syntax in GaussView if the route is specialized.');
-    return failureDiagnosis('Gaussian input syntax issue', 'Gaussian rejected a route keyword or input section.', highlights, suggestedActions, quality);
+    return failureDiagnosis('Gaussian input syntax issue', 'Gaussian rejected a route keyword or input section.', highlights, suggestedActions, completeness);
   }
 
   if (/license|licensed|permission|access denied|denied/iu.test(text)) {
     suggestedActions.push('Confirm the local commercial engine license and Windows permissions.');
-    return failureDiagnosis('Engine license or permission issue', 'The engine started but reported an access or license problem.', highlights, suggestedActions, quality);
+    return failureDiagnosis('Engine license or permission issue', 'The engine started but reported an access or license problem.', highlights, suggestedActions, completeness);
   }
 
   if (/no such file|not found|not recognized|l\d+\.exe|link 0|gauss_exedir|g16root|gauss_scrdir/iu.test(text)) {
     suggestedActions.push('Re-select the real Gaussian executable and save the port again.');
     suggestedActions.push('Check GAUSS_EXEDIR, G16ROOT, and scratch directory access.');
-    return failureDiagnosis('Gaussian runtime path issue', 'Gaussian could not find a required executable, link file, or runtime path.', highlights, suggestedActions, quality);
+    return failureDiagnosis('Gaussian runtime path issue', 'Gaussian could not find a required executable, link file, or runtime path.', highlights, suggestedActions, completeness);
   }
 
   if (/erroneous write|disk|scratch|no space|quota/iu.test(text)) {
     suggestedActions.push('Free disk space or change the Gaussian scratch directory.');
-    return failureDiagnosis('Scratch or disk write issue', 'The engine could not write required temporary or checkpoint data.', highlights, suggestedActions, quality);
+    return failureDiagnosis('Scratch or disk write issue', 'The engine could not write required temporary or checkpoint data.', highlights, suggestedActions, completeness);
   }
 
   if (/checkpoint file|no data on checkpoint|chkbasis|fileio|read-write file/iu.test(text)) {
     suggestedActions.push('Run a fresh calculation to create a new checkpoint, then generate FCHK or CUBE again.');
     suggestedActions.push('Avoid Guess=Read or Geom=Checkpoint unless a matching checkpoint exists.');
-    return failureDiagnosis('Checkpoint file issue', 'Gaussian could not read or write the checkpoint data required by this job.', highlights, suggestedActions, quality);
+    return failureDiagnosis('Checkpoint file issue', 'Gaussian could not read or write the checkpoint data required by this job.', highlights, suggestedActions, completeness);
   }
 
   if (/galloc|malloc|not enough memory|memory allocation|ntrerr/iu.test(text)) {
     suggestedActions.push('Reduce method/basis cost, use a smaller active region, or adjust Gaussian memory settings.');
     suggestedActions.push('Use xTB screening before sending the final structure to Gaussian.');
-    return failureDiagnosis('Memory allocation issue', 'Gaussian likely exceeded available memory or scratch capacity.', highlights, suggestedActions, quality);
+    return failureDiagnosis('Memory allocation issue', 'Gaussian likely exceeded available memory or scratch capacity.', highlights, suggestedActions, completeness);
   }
 
   if (/nbo.*not found|nbo.*unavailable|unknown keyword.*nbo|pop=nbo/iu.test(text)) {
     suggestedActions.push('Confirm that licensed NBO support is installed for this Gaussian setup.');
     suggestedActions.push('Rerun with Detailed charges output or Pop=Regular if NBO is not available.');
-    return failureDiagnosis('NBO support is unavailable', 'The selected local Gaussian/NBO installation could not run the requested NBO analysis.', highlights, suggestedActions, quality, [
+    return failureDiagnosis('NBO support is unavailable', 'The selected local Gaussian/NBO installation could not run the requested NBO analysis.', highlights, suggestedActions, completeness, [
       {
         label: 'Use Mulliken charges',
         routeOption: 'Pop=Regular',
@@ -633,13 +633,13 @@ export function diagnoseQuantumCalculation(
   }
 
   if (/normal termination of gaussian/iu.test(text) && result.energyHartree === null) {
-    return withQuality({
+    return withCompleteness({
       severity: 'warning',
       title: 'Normal termination found, parser needs review',
       summary: 'The log contains a Gaussian normal termination marker, but ChemVault did not find an SCF energy line.',
       highlights,
       suggestedActions: ['Export TXT and inspect the Gaussian route. Some job types may not produce the same parsed sections.']
-    }, quality);
+    }, completeness);
   }
 
   if (result.error || !result.ok) {
@@ -650,17 +650,17 @@ export function diagnoseQuantumCalculation(
       result.error || `${result.engineLabel} did not return a complete result.`,
       highlights,
       suggestedActions,
-      quality
+      completeness
     );
   }
 
-  return withQuality({
+  return withCompleteness({
     severity: 'warning',
     title: 'Result needs review',
     summary: 'ChemVault received a result, but not all expected properties were available.',
     highlights,
     suggestedActions: result.warnings.length ? result.warnings.slice(0, 3) : ['Export the report and review the engine log.']
-  }, quality);
+  }, completeness);
 }
 
 export function createQuantumHistoryEntry(options: {
@@ -691,7 +691,7 @@ export function createQuantumHistoryEntry(options: {
     atomCount: preflight.atomCount,
     warningsCount: result.warnings.length,
     diagnosisTitle: diagnosis.title,
-    qualityScore: diagnosis.qualityScore
+    completenessScore: diagnosis.completenessScore
   };
 }
 
@@ -700,7 +700,10 @@ export function loadQuantumHistory(): QuantumHistoryEntry[] {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(HISTORY_KEY) || '[]');
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(isQuantumHistoryEntry).slice(0, HISTORY_LIMIT);
+    return parsed
+      .filter(isQuantumHistoryEntry)
+      .map((entry) => normalizeQuantumHistoryEntry(entry))
+      .slice(0, HISTORY_LIMIT);
   } catch {
     return [];
   }
@@ -848,28 +851,28 @@ function failureDiagnosis(
   summary: string,
   highlights: string[],
   suggestedActions: string[],
-  quality: { factors: string[]; score: number },
+  completeness: { factors: string[]; score: number },
   routeFixes: QuantumResultDiagnosis['routeFixes'] = []
 ): QuantumResultDiagnosis {
-  return withQuality({
+  return withCompleteness({
     severity: 'error',
     title,
     summary,
     highlights,
     routeFixes,
     suggestedActions: uniqueStrings(suggestedActions).slice(0, 5)
-  }, quality);
+  }, completeness);
 }
 
-function withQuality<T extends QuantumResultDiagnosis>(diagnosis: T, quality: { factors: string[]; score: number }): T {
+function withCompleteness<T extends QuantumResultDiagnosis>(diagnosis: T, completeness: { factors: string[]; score: number }): T {
   return {
     ...diagnosis,
-    qualityFactors: quality.factors,
-    qualityScore: quality.score
+    completenessFactors: completeness.factors,
+    completenessScore: completeness.score
   };
 }
 
-function assessResultQuality(result: QuantumCalculationResult, preflight?: QuantumPreflightResult) {
+function assessResultCompleteness(result: QuantumCalculationResult, preflight?: QuantumPreflightResult) {
   let score = result.ok ? 80 : 35;
   const factors: string[] = [];
 
@@ -988,6 +991,14 @@ function moleculeIdentifier(metadata?: QuantumHistoryMetadata) {
 function isQuantumHistoryEntry(value: unknown): value is QuantumHistoryEntry {
   const entry = value as QuantumHistoryEntry;
   return Boolean(entry && typeof entry.id === 'string' && typeof entry.createdAt === 'string' && typeof entry.engineLabel === 'string');
+}
+
+function normalizeQuantumHistoryEntry(entry: QuantumHistoryEntry & { qualityScore?: number }): QuantumHistoryEntry {
+  const { qualityScore, ...current } = entry;
+  return {
+    ...current,
+    completenessScore: typeof current.completenessScore === 'number' ? current.completenessScore : qualityScore
+  };
 }
 
 function uniqueStrings(values: string[]) {

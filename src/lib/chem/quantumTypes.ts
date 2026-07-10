@@ -145,6 +145,23 @@ export type QuantumCalculationRequest = {
   gaussianCheckpointBase64?: string;
 };
 
+export type QuantumQueueItem = {
+  id: string;
+  createdAt: string;
+  label: string;
+  engine: QuantumEngineKind;
+  engineLabel: string;
+  calculationMode: QuantumCalculationMode;
+  gaussianTask?: GaussianTaskTemplateId;
+  charge: number;
+  unpairedElectrons: number;
+  method: string;
+  basisSet?: string;
+  routeOptions?: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'interrupted';
+  message?: string;
+};
+
 export type QuantumCancelResult = {
   ok: boolean;
   calculationId?: string;
@@ -211,12 +228,71 @@ export type GaussianOpenResult = {
   error?: string;
 };
 
+export type QuantumResourceUsage = {
+  processorCount: number;
+  memoryGb: number;
+  scratchDirectory?: string;
+};
+
+export type QuantumRunManifest = {
+  schema: 'chemvault.quantum.run.v1';
+  runId: string;
+  generatedAt: string;
+  app: {
+    name: string;
+    version: string;
+    buildId: string;
+    releaseId: string;
+  };
+  engine: {
+    kind: string;
+    label: string;
+    version: string;
+    executableName?: string;
+  };
+  calculation: {
+    method: string;
+    mode: string;
+    charge: number;
+    multiplicity: number;
+    routeOptions: string;
+    performanceProfile?: QuantumCalculationProfile;
+    outputDetail?: GaussianOutputDetail;
+    checkpointReused: boolean;
+  };
+  resources?: QuantumResourceUsage;
+  status: {
+    ok: boolean;
+    cancelled: boolean;
+    timedOut: boolean;
+    warningCount: number;
+    error?: string;
+  };
+  timing: {
+    engineMs: number;
+    processingMs: number;
+    totalMs: number;
+  };
+  provenance: {
+    structureSha256: string;
+    inputSha256: string;
+    outputSha256: string;
+    checkpointSha256?: string;
+  };
+  files: {
+    input?: string;
+    output?: string;
+    checkpoint?: string;
+  };
+};
+
 export type QuantumCalculationResult = {
   ok: boolean;
   cancelled?: boolean;
   timedOut?: boolean;
   engine: QuantumEngineKind;
   engineLabel: string;
+  engineVersion?: string;
   method: string;
   calculationMode: QuantumCalculationMode;
   gaussianTask?: GaussianTaskTemplateId;
@@ -269,15 +345,12 @@ export type QuantumCalculationResult = {
   elapsedMs: number;
   engineElapsedMs?: number;
   postProcessingElapsedMs?: number;
-  resourceUsage?: {
-    processorCount: number;
-    memoryGb: number;
-    scratchDirectory?: string;
-  };
+  resourceUsage?: QuantumResourceUsage;
   reusedCheckpoint?: boolean;
   warnings: string[];
   outputTail: string;
   outputLog?: string;
   gaussianFiles?: GaussianCalculationFiles;
+  runManifest?: QuantumRunManifest;
   error?: string;
 };

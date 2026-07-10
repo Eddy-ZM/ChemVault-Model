@@ -25,6 +25,15 @@ jobs:
       - name: Ensure Electron binary
         run: node scripts/ensure-electron-binary.cjs
 
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Run lint checks
+        run: npm run lint
+
+      - name: Run regression tests
+        run: npm test
+
       - name: Build web app
         run: npm run build
 

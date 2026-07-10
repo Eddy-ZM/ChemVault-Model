@@ -78,8 +78,8 @@ const context = {
     summary: 'Gaussian returned expected properties.',
     highlights: ['Normal termination of Gaussian 16'],
     suggestedActions: ['Export the report.'],
-    qualityScore: 96,
-    qualityFactors: ['Preflight checks passed.']
+    completenessScore: 96,
+    completenessFactors: ['Preflight checks passed.']
   },
   includeLog: true,
   metadata: { name: 'Water', smiles: 'O', formula: 'H2O', cid: '962' },

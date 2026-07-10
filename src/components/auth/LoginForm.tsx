@@ -36,6 +36,7 @@ export function LoginForm() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const [oauthOpening, setOauthOpening] = useState<OAuthProvider | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   const callbackUrl = safeCallbackUrl(searchParams.get('callbackUrl'));
@@ -79,8 +80,8 @@ export function LoginForm() {
   };
 
   return (
-    <div className="mx-auto w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
-      <div>
+    <div className="cv-auth-card mx-auto w-full max-w-lg rounded-3xl border border-slate-200 bg-white p-6 shadow-card">
+      <div className="cv-auth-intro">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-sky-700">ChemVault account</p>
         <h1 className="mt-3 text-3xl font-bold tracking-tight text-slate-950">Sign in to ChemVault</h1>
         <p className="mt-3 text-sm leading-6 text-slate-600">
@@ -88,30 +89,32 @@ export function LoginForm() {
         </p>
       </div>
 
-      <div className="mt-6 grid gap-2">
+      <div className="cv-auth-providers mt-6 grid gap-2">
         {oauthLinks.map((provider) => (
           <a
             key={provider.id}
             href={provider.href}
-            className={`flex items-center justify-center gap-3 rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition focus-visible:outline-none focus-visible:ring-4 ${provider.className}`}
+            onClick={() => setOauthOpening(provider.id)}
+            aria-busy={oauthOpening === provider.id}
+            className={`cv-auth-provider flex items-center justify-center gap-3 rounded-xl border px-4 py-3 text-sm font-semibold shadow-sm transition focus-visible:outline-none focus-visible:ring-4 ${provider.className} ${oauthOpening === provider.id ? 'is-opening' : ''}`}
           >
-            <span className={`grid h-7 w-7 place-items-center rounded-lg ${provider.iconWrapClassName}`} aria-hidden="true">
+            <span className={`cv-auth-provider-icon grid h-7 w-7 place-items-center rounded-lg ${provider.iconWrapClassName}`} aria-hidden="true">
               <OAuthProviderIcon provider={provider.id} />
             </span>
-            Continue with {provider.label}
+            {oauthOpening === provider.id ? `Opening ${provider.label}` : `Continue with ${provider.label}`}
           </a>
         ))}
       </div>
 
-      <div className="mt-5 flex items-center gap-3">
+      <div className="cv-auth-divider mt-5 flex items-center gap-3">
         <span className="h-px flex-1 bg-slate-200" />
         <span className="text-xs font-medium uppercase tracking-[0.18em] text-slate-400">or</span>
         <span className="h-px flex-1 bg-slate-200" />
       </div>
 
-      <form onSubmit={onSubmit} className="relative mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-busy={busy}>
+      <form onSubmit={onSubmit} className="cv-auth-form relative mt-6 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 p-4" aria-busy={busy}>
         {busy ? (
-          <div className="pointer-events-none absolute inset-0 z-10 grid place-items-center bg-white/55 backdrop-blur-[1px]">
+          <div className="cv-auth-busy pointer-events-none absolute inset-0 z-10 grid place-items-center bg-white/60 backdrop-blur-[2px]">
             <LoadingState compact tone="overlay" label="Connecting to ChemVault User" />
           </div>
         ) : null}
@@ -122,9 +125,12 @@ export function LoginForm() {
           id="auth-email"
           type="email"
           value={email}
-          onChange={(event) => setEmail(event.target.value)}
+          onChange={(event) => {
+            setEmail(event.target.value);
+            if (error) setError(null);
+          }}
           autoComplete="email"
-          className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+          className="cv-auth-input mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
         />
         <label className="mt-4 block text-sm font-medium text-slate-700" htmlFor="auth-password">
           Password
@@ -133,21 +139,24 @@ export function LoginForm() {
           id="auth-password"
           type="password"
           value={password}
-          onChange={(event) => setPassword(event.target.value)}
+          onChange={(event) => {
+            setPassword(event.target.value);
+            if (error) setError(null);
+          }}
           autoComplete="current-password"
-          className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+          className="cv-auth-input mt-2 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
         />
-        {error ? <p className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{error}</p> : null}
+        {error ? <p className="cv-auth-error mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" role="alert">{error}</p> : null}
         <button
           type="submit"
           disabled={busy}
-          className="mt-4 flex w-full items-center justify-center gap-3 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+          className="cv-auth-submit mt-4 flex w-full items-center justify-center gap-3 rounded-xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
         >
           {busy ? 'Signing in' : 'Sign in'}
         </button>
       </form>
 
-      <div className="mt-6 grid gap-3">
+      <div className="cv-auth-register mt-6 grid gap-3">
         <a
           href={registerUrl}
           className="rounded-xl border border-slate-300 px-4 py-3 text-center text-sm font-semibold text-slate-700 transition hover:border-sky-300"
@@ -156,7 +165,7 @@ export function LoginForm() {
         </a>
       </div>
 
-      <div className="mt-5 flex flex-wrap items-center justify-between gap-3 text-sm">
+      <div className="cv-auth-footer mt-5 flex flex-wrap items-center justify-between gap-3 text-sm">
         <p className="text-slate-500">You can continue using Molecule Studio without signing in.</p>
         <Link href="/molecule" className="font-semibold text-sky-700 hover:text-sky-800">
           Back to Molecule Studio

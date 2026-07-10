@@ -52,6 +52,154 @@ button {
   @apply rounded-lg border px-3 py-2 text-sm shadow-lg bg-white;
 }
 
+.cv-login-launch {
+  position: relative;
+  min-width: 76px;
+  overflow: hidden;
+  text-align: center;
+  isolation: isolate;
+}
+
+.cv-login-launch::after {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 2px;
+  content: '';
+  background: #0284c7;
+  transform: scaleX(0);
+  transform-origin: left;
+}
+
+.cv-login-launch.is-opening {
+  border-color: #7dd3fc;
+  background: #f0f9ff;
+  color: #0369a1;
+  box-shadow: 0 0 0 4px rgba(14, 165, 233, 0.12);
+}
+
+.cv-login-launch.is-opening::after {
+  animation: cvLoginLaunch 160ms ease-out both;
+}
+
+.cv-auth-page {
+  background: #eef4ff;
+}
+
+.cv-auth-card {
+  animation: cvAuthCardIn 360ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  transform-origin: center top;
+}
+
+.cv-auth-intro,
+.cv-auth-divider,
+.cv-auth-form,
+.cv-auth-register,
+.cv-auth-footer {
+  animation: cvAuthReveal 320ms ease-out both;
+}
+
+.cv-auth-intro {
+  animation-delay: 70ms;
+}
+
+.cv-auth-provider {
+  position: relative;
+  overflow: hidden;
+  animation: cvAuthProviderIn 300ms ease-out both;
+  will-change: transform, opacity;
+}
+
+.cv-auth-provider:nth-child(1) {
+  animation-delay: 120ms;
+}
+
+.cv-auth-provider:nth-child(2) {
+  animation-delay: 170ms;
+}
+
+.cv-auth-provider:nth-child(3) {
+  animation-delay: 220ms;
+}
+
+.cv-auth-provider:hover {
+  transform: translateY(-1px);
+}
+
+.cv-auth-provider:active {
+  transform: translateY(0) scale(0.99);
+}
+
+.cv-auth-provider-icon {
+  transition: transform 180ms ease;
+}
+
+.cv-auth-provider:hover .cv-auth-provider-icon {
+  transform: scale(1.06);
+}
+
+.cv-auth-provider.is-opening .cv-auth-provider-icon {
+  animation: cvAuthProviderOpening 520ms ease-in-out infinite;
+}
+
+.cv-auth-divider {
+  animation-delay: 250ms;
+}
+
+.cv-auth-form {
+  animation-delay: 290ms;
+  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+}
+
+.cv-auth-form:focus-within {
+  border-color: #7dd3fc;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.08), 0 0 0 4px rgba(14, 165, 233, 0.1);
+  transform: translateY(-1px);
+}
+
+.cv-auth-input {
+  transition: border-color 160ms ease, box-shadow 160ms ease, background-color 160ms ease;
+}
+
+.cv-auth-input:focus {
+  background: #ffffff;
+}
+
+.cv-auth-error {
+  animation: cvAuthErrorIn 240ms ease-out both;
+}
+
+.cv-auth-submit {
+  transition: background-color 160ms ease, box-shadow 160ms ease, transform 120ms ease, opacity 160ms ease;
+}
+
+.cv-auth-submit:hover:not(:disabled) {
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.18);
+  transform: translateY(-1px);
+}
+
+.cv-auth-submit:active:not(:disabled) {
+  box-shadow: none;
+  transform: translateY(0) scale(0.99);
+}
+
+.cv-auth-busy {
+  animation: cvAuthBusyIn 160ms ease-out both;
+}
+
+.cv-auth-register {
+  animation-delay: 330ms;
+}
+
+.cv-auth-footer {
+  animation-delay: 370ms;
+}
+
+.cv-auth-skeleton {
+  min-height: 280px;
+}
+
 .skeleton {
   position: relative;
   overflow: hidden;
@@ -238,6 +386,81 @@ button {
   }
 }
 
+@keyframes cvLoginLaunch {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@keyframes cvAuthCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes cvAuthReveal {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes cvAuthProviderIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes cvAuthProviderOpening {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.9);
+  }
+}
+
+@keyframes cvAuthErrorIn {
+  0% {
+    opacity: 0;
+    transform: translateX(-5px);
+  }
+  55% {
+    transform: translateX(3px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes cvAuthBusyIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 @keyframes cvPanelIn {
   from {
     opacity: 0;
@@ -286,5 +509,24 @@ button {
   }
   50% {
     transform: translateY(5px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cv-login-launch,
+  .cv-auth-card,
+  .cv-auth-intro,
+  .cv-auth-provider,
+  .cv-auth-provider-icon,
+  .cv-auth-divider,
+  .cv-auth-form,
+  .cv-auth-error,
+  .cv-auth-submit,
+  .cv-auth-busy,
+  .cv-auth-register,
+  .cv-auth-footer {
+    animation: none !important;
+    transition: none !important;
+    transform: none !important;
   }
 }

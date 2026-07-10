@@ -701,7 +701,7 @@ export function MoleculeStudio() {
       <header className="sticky top-0 z-30 border-b border-slate-200 bg-white/95 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1800px] flex-col gap-3 px-3 py-3 md:flex-row md:items-center md:justify-between md:px-4">
           <div className="flex items-center gap-3">
-            <a href="/" className="flex items-center gap-2 text-base font-bold tracking-tight text-slate-950">
+            <div className="flex items-center gap-2 text-base font-bold tracking-tight text-slate-950" aria-label="ChemVault Molecule Studio">
               <Image
                 src="/brand/chemvault-logo.png"
                 alt="ChemVault logo"
@@ -712,7 +712,7 @@ export function MoleculeStudio() {
                 className="h-8 w-8 rounded-md object-contain"
               />
               <span>ChemVault</span>
-            </a>
+            </div>
             <span className="h-5 w-px bg-slate-200" />
             <span className="text-sm font-medium text-slate-600">Molecule Studio</span>
           </div>

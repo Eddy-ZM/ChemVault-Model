@@ -197,6 +197,7 @@ export type GaussianOpenResult = {
 export type QuantumCalculationResult = {
   ok: boolean;
   cancelled?: boolean;
+  timedOut?: boolean;
   engine: QuantumEngineKind;
   engineLabel: string;
   method: string;
@@ -247,6 +248,8 @@ export type QuantumCalculationResult = {
     isotropicPpm: number;
   }> | null;
   elapsedMs: number;
+  engineElapsedMs?: number;
+  postProcessingElapsedMs?: number;
   warnings: string[];
   outputTail: string;
   outputLog?: string;

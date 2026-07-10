@@ -535,7 +535,24 @@ export function diagnoseQuantumCalculation(
     }
   }
 
-  if (/charge and multiplicity|multiplicity|impossible charge|spin/iu.test(text)) {
+  if (result.cancelled || /calculation was cancelled by the user/iu.test(result.error || '')) {
+    suggestedActions.push('Review any partial log output, then run the calculation again when ready.');
+    return failureDiagnosis('Calculation cancelled', 'The engine was stopped before it could return a complete result.', highlights, suggestedActions, quality);
+  }
+
+  if (result.timedOut || /timed out before completion|runtime limit/iu.test(result.error || '')) {
+    suggestedActions.push('Retry the job with the updated task-aware runtime limit.');
+    suggestedActions.push('For larger structures, run an xTB geometry screen before the final Gaussian calculation.');
+    return failureDiagnosis(
+      'Runtime limit reached',
+      'Gaussian was stopped before normal termination. Parsed energy or checkpoint data from this run is partial and must not be treated as a completed result.',
+      highlights,
+      suggestedActions,
+      quality
+    );
+  }
+
+  if (/charge and multiplicity|combination of multiplicity|impossible\s+(?:charge|multiplicity)|(?:charge|multiplicity)\s+is\s+impossible|wrong multiplicity|inconsistent\s+(?:charge|spin)/iu.test(text)) {
     suggestedActions.push('Review total charge and unpaired electrons. The ChemVault preflight panel shows the electron-count check.');
     if (preflight?.totalElectrons !== null) {
       suggestedActions.push(`Current preflight estimate: ${preflight?.totalElectrons ?? 'unknown'} electrons, multiplicity ${preflight?.multiplicity ?? 'unknown'}.`);
@@ -869,6 +886,11 @@ function assessResultQuality(result: QuantumCalculationResult, preflight?: Quant
   if (result.cancelled) {
     score = 20;
     factors.push('Calculation was cancelled before normal completion.');
+  }
+
+  if (result.timedOut) {
+    score = 15;
+    factors.push('Calculation reached its runtime limit before normal completion.');
   }
 
   if (preflight) {

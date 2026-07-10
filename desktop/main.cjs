@@ -2,6 +2,7 @@ const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const { spawn } = require('node:child_process');
 const fs = require('node:fs');
 const http = require('node:http');
+const os = require('node:os');
 const path = require('node:path');
 const { TextDecoder } = require('node:util');
 const gaussianParsers = require('./gaussian-parsers.cjs');
@@ -12,6 +13,9 @@ const DEFAULT_USER_ORIGIN = 'https://user.chemvault.science';
 const DEFAULT_START_PATH = '/';
 const DEFAULT_VERSION_MANIFEST_URL = 'https://model.chemvault.science/app-version.json';
 const QUANTUM_TIMEOUT_MS = 180000;
+const MAX_GAUSSIAN_TIMEOUT_MS = 12 * 60 * 60 * 1000;
+const GAUSSIAN_LOG_POLL_INTERVAL_MS = 1500;
+const GAUSSIAN_LOG_PROGRESS_CHUNK_BYTES = 256 * 1024;
 const MAX_QUANTUM_INPUT_BYTES = 2 * 1024 * 1024;
 const MAX_GAUSSIAN_CHECKPOINT_BYTES = 128 * 1024 * 1024;
 const MAX_GAUSSIAN_BRIDGE_ATTACHMENT_BYTES = 128 * 1024 * 1024;
@@ -973,7 +977,12 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
   const charge = boundedInteger(request?.charge, 0, -20, 20);
   const unpairedElectrons = boundedInteger(request?.unpairedElectrons, 0, 0, 20);
   const multiplicity = unpairedElectrons + 1;
-  const timeoutMs = boundedInteger(request?.timeoutMs, calculationMode === 'geometry-optimization' ? 900000 : 300000, 30000, 3600000);
+  const timeoutMs = boundedInteger(
+    request?.timeoutMs,
+    calculationMode === 'geometry-optimization' ? 4 * 60 * 60 * 1000 : 30 * 60 * 1000,
+    30000,
+    engineKind === 'gaussian' ? MAX_GAUSSIAN_TIMEOUT_MS : 3600000
+  );
   const workDir = await fs.promises.mkdtemp(path.join(app.getPath('temp'), `chemvault-${engineKind}-`));
 
   try {
@@ -1008,6 +1017,7 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
           startedAt
         )
       });
+    const engineCompletedAt = Date.now();
     const fileOutput = await readOptionalText(job.outputPath);
     const output = [processResult.stdout, processResult.stderr, fileOutput].filter(Boolean).join('\n').trim();
     emitCalculationProgress(onProgress, engineKind, 'reading-output', 86, `Reading ${engineLabel} output files.`, outputTail(output), startedAt);
@@ -1038,9 +1048,11 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
     if (!dipoleDebye) warnings.push('Dipole moment was not found in the external engine output.');
     if (charges.length === 0) warnings.push('Mulliken charges were not found in the external engine output.');
 
+    const completedAt = Date.now();
     const result = {
       ok: completedOk,
       cancelled: processResult.cancelled || undefined,
+      timedOut: processResult.timedOut || undefined,
       engine: engineKind,
       engineLabel,
       method: methodLabel,
@@ -1056,7 +1068,9 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
       optimizedXyz,
       excitedStates,
       nmrShielding,
-      elapsedMs: Date.now() - startedAt,
+      elapsedMs: completedAt - startedAt,
+      engineElapsedMs: engineCompletedAt - runStartedAt,
+      postProcessingElapsedMs: completedAt - engineCompletedAt,
       warnings,
       outputTail: outputTail(output),
       outputLog: output,
@@ -1885,10 +1899,18 @@ function replacementCount(value) {
 
 async function runGaussianJob(executablePath, job, workDir, timeoutMs, onOutput = () => {}, jobId = '') {
   const env = buildExternalEngineEnv('gaussian', executablePath, workDir);
+  const readProgress = createIncrementalFileReader(job.outputPath, GAUSSIAN_LOG_PROGRESS_CHUNK_BYTES);
+  let pollInFlight = false;
   const pollOutput = setInterval(async () => {
-    const fileOutput = await readOptionalText(job.outputPath);
-    if (fileOutput) onOutput(outputTail(fileOutput));
-  }, 1000);
+    if (pollInFlight) return;
+    pollInFlight = true;
+    try {
+      const fileOutput = await readProgress();
+      if (fileOutput) onOutput(outputTail(fileOutput));
+    } finally {
+      pollInFlight = false;
+    }
+  }, GAUSSIAN_LOG_POLL_INTERVAL_MS);
 
   if (process.platform === 'win32') {
     try {
@@ -1901,7 +1923,7 @@ async function runGaussianJob(executablePath, job, workDir, timeoutMs, onOutput 
       });
     } finally {
       clearInterval(pollOutput);
-      const fileOutput = await readOptionalText(job.outputPath);
+      const fileOutput = await readProgress();
       if (fileOutput) onOutput(outputTail(fileOutput));
     }
   }
@@ -1916,9 +1938,38 @@ async function runGaussianJob(executablePath, job, workDir, timeoutMs, onOutput 
     });
   } finally {
     clearInterval(pollOutput);
-    const fileOutput = await readOptionalText(job.outputPath);
+    const fileOutput = await readProgress();
     if (fileOutput) onOutput(outputTail(fileOutput));
   }
+}
+
+function createIncrementalFileReader(filePath, maxChunkBytes) {
+  let position = 0;
+  const chunkLimit = Math.max(4096, Number(maxChunkBytes) || GAUSSIAN_LOG_PROGRESS_CHUNK_BYTES);
+
+  return async () => {
+    try {
+      const stat = await fs.promises.stat(filePath);
+      if (!stat.isFile() || stat.size <= 0) return '';
+      if (stat.size < position) position = 0;
+      const unreadBytes = stat.size - position;
+      if (unreadBytes <= 0) return '';
+
+      const bytesToRead = Math.min(unreadBytes, chunkLimit);
+      const start = unreadBytes > chunkLimit ? stat.size - chunkLimit : position;
+      const handle = await fs.promises.open(filePath, 'r');
+      try {
+        const buffer = Buffer.alloc(bytesToRead);
+        const { bytesRead } = await handle.read(buffer, 0, bytesToRead, start);
+        position = start + bytesRead;
+        return bytesRead > 0 ? decodeTextBuffer(buffer.subarray(0, bytesRead)) : '';
+      } finally {
+        await handle.close();
+      }
+    } catch {
+      return '';
+    }
+  };
 }
 
 function buildExternalEngineEnv(engineKind, executablePath, workDir) {
@@ -1988,7 +2039,7 @@ function diagnoseExternalEngineFailure(engineKind, processResult, output, config
   }
 
   if (processResult.timedOut) {
-    return `${engineLabel} timed out before completion. Increase timeout or run a smaller structure first.`;
+    return `${engineLabel} reached the configured runtime limit before normal termination. Partial output is available; retry the task or screen a smaller structure first.`;
   }
 
   if (engineKind === 'gaussian') {
@@ -3230,7 +3281,7 @@ function runProcess(executable, args, options = {}) {
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGTERM');
+      terminateChildProcess(child, true);
     }, options.timeoutMs || QUANTUM_TIMEOUT_MS);
 
     child.stdout.on('data', (chunk) => stdout.push(Buffer.from(chunk)));
@@ -3267,16 +3318,13 @@ function runProcessWithProgress(executable, args, options = {}) {
     const jobId = normalizeCalculationId(options.jobId);
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill('SIGTERM');
+      terminateChildProcess(child, true);
     }, options.timeoutMs || QUANTUM_TIMEOUT_MS);
     if (jobId) {
       activeQuantumProcesses.set(jobId, {
         cancel: () => {
           cancelled = true;
-          child.kill('SIGTERM');
-          setTimeout(() => {
-            if (!child.killed) child.kill('SIGKILL');
-          }, 5000);
+          terminateChildProcess(child, true);
         }
       });
     }
@@ -3320,6 +3368,30 @@ function runProcessWithProgress(executable, args, options = {}) {
       resolve(result);
     });
   });
+}
+
+function terminateChildProcess(child, force = false) {
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
+  if (process.platform === 'win32' && child.pid) {
+    const killer = spawn('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+      windowsHide: true,
+      stdio: 'ignore'
+    });
+    killer.on('error', () => {
+      try {
+        child.kill();
+      } catch {
+        // The process may already have stopped between the status check and fallback.
+      }
+    });
+    return;
+  }
+
+  try {
+    child.kill(force ? 'SIGKILL' : 'SIGTERM');
+  } catch {
+    // The process may already have stopped between the status check and signal.
+  }
 }
 
 function processEnvWithEnglishOutput(env) {
@@ -3412,6 +3484,7 @@ function normalizeQuantumInput(value) {
 
 async function prepareGaussianJob(workDir, xyz, options) {
   const atoms = parseXyzGeometry(xyz);
+  const resources = gaussianResourceDefaults();
   const inputPath = path.join(workDir, 'chemvault.gjf');
   const outputPath = path.join(workDir, 'chemvault.log');
   const checkpointPath = path.join(workDir, 'chemvault.chk');
@@ -3422,6 +3495,8 @@ async function prepareGaussianJob(workDir, xyz, options) {
     options.routeOptions
   ].filter(Boolean);
   const content = [
+    `%NProcShared=${resources.processors}`,
+    `%Mem=${resources.memoryGb}GB`,
     '%chk=chemvault.chk',
     routeParts.join(' '),
     '',
@@ -3435,6 +3510,21 @@ async function prepareGaussianJob(workDir, xyz, options) {
 
   await fs.promises.writeFile(inputPath, content, 'utf8');
   return { args: [inputPath], checkpointPath, inputContent: content, inputPath, outputPath };
+}
+
+function gaussianResourceDefaults() {
+  const availableProcessors = typeof os.availableParallelism === 'function'
+    ? os.availableParallelism()
+    : os.cpus().length;
+  const automaticProcessors = Math.max(1, Math.min(8, availableProcessors - 1));
+  const totalMemoryGb = Math.max(1, Math.floor(os.totalmem() / (1024 ** 3)));
+  const memoryCapGb = Math.max(1, totalMemoryGb - 1);
+  const automaticMemoryGb = Math.max(1, Math.min(16, Math.floor(totalMemoryGb * 0.5), memoryCapGb));
+
+  return {
+    processors: boundedInteger(process.env.CHEMVAULT_GAUSSIAN_NPROC, automaticProcessors, 1, Math.max(1, availableProcessors)),
+    memoryGb: boundedInteger(process.env.CHEMVAULT_GAUSSIAN_MEMORY_GB, automaticMemoryGb, 1, memoryCapGb)
+  };
 }
 
 async function prepareOrcaJob(workDir, xyz, options) {

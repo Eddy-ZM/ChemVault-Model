@@ -1032,7 +1032,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         calculationMode: runMode,
         gaussianTask: runGaussianTask,
         timeoutMs: runEngine === 'gaussian'
-          ? gaussianTaskTimeout(runGaussianTask || 'single-point')
+          ? gaussianTaskTimeout(runGaussianTask || 'single-point', activeXyz)
           : runEngine === 'pyscf'
             ? 600000
             : runMode === 'geometry-optimization'
@@ -3357,11 +3357,27 @@ function gaussianTaskLabel(task: GaussianTaskTemplateId) {
   return gaussianTaskTemplates.find((template) => template.id === task)?.label || task;
 }
 
-function gaussianTaskTimeout(task: GaussianTaskTemplateId) {
-  if (task === 'single-point') return 180000;
-  if (task === 'td-dft' || task === 'nmr' || task === 'frequency' || task === 'solvent-model' || task === 'stability' || task === 'frontier-orbitals' || task === 'nbo') return 600000;
-  if (task === 'irc' || task === 'transition-state') return 1200000;
-  return 900000;
+function gaussianTaskTimeout(task: GaussianTaskTemplateId, xyz?: string | null) {
+  const atomCount = xyzAtomCount(xyz);
+  const sizeMultiplier = atomCount > 150 ? 2 : atomCount > 80 ? 1.5 : 1;
+  const hour = 60 * 60 * 1000;
+  let baseTimeout = 30 * 60 * 1000;
+
+  if (task === 'td-dft' || task === 'nmr' || task === 'frequency' || task === 'solvent-model' || task === 'stability' || task === 'frontier-orbitals' || task === 'nbo') {
+    baseTimeout = 2 * hour;
+  } else if (task === 'irc' || task === 'transition-state') {
+    baseTimeout = 8 * hour;
+  } else if (task !== 'single-point') {
+    baseTimeout = 4 * hour;
+  }
+
+  return Math.min(12 * hour, Math.round(baseTimeout * sizeMultiplier));
+}
+
+function xyzAtomCount(xyz?: string | null) {
+  const firstLine = String(xyz || '').trim().split(/\r?\n/u)[0];
+  const count = Number.parseInt(firstLine, 10);
+  return Number.isFinite(count) && count > 0 ? count : 0;
 }
 
 function projectMatchesMetadata(project: QuantumProjectRecord, metadata?: Metadata) {

@@ -11,6 +11,7 @@ export type QuantumExportMetadata = {
 };
 
 export type QuantumExportDocumentContext = {
+  brandLogoPng?: Uint8Array;
   charge: number;
   diagnosis?: QuantumResultDiagnosis | null;
   includeLog?: boolean;
@@ -44,6 +45,7 @@ export type ZipEntry = {
 export function createQuantumExcelWorkbook(result: QuantumCalculationResult, context: QuantumExportDocumentContext) {
   const generatedAt = new Date();
   const includeLog = Boolean(context.includeLog);
+  const hasBrandLogo = Boolean(context.brandLogoPng?.length);
   const summaryRows = quantumSummaryRows(result, context, generatedAt);
   const warnings = result.warnings.length ? result.warnings : ['No warnings returned.'];
   const chargeRows = result.charges.map((atom) => [String(atom.index), atom.element, `${formatSigned(atom.charge)} e`]);
@@ -80,15 +82,24 @@ export function createQuantumExcelWorkbook(result: QuantumCalculationResult, con
   ];
 
   const entries: ZipEntry[] = [
-    { path: '[Content_Types].xml', content: xlsxContentTypes(includeLog) },
+    { path: '[Content_Types].xml', content: xlsxContentTypes(includeLog, hasBrandLogo) },
     { path: '_rels/.rels', content: packageRelationships('xlsx') },
     { path: 'docProps/core.xml', content: coreProperties(generatedAt) },
     { path: 'docProps/app.xml', content: appProperties('Microsoft Excel') },
     { path: 'docProps/custom.xml', content: customProperties() },
     { path: 'xl/workbook.xml', content: workbook },
     { path: 'xl/_rels/workbook.xml.rels', content: workbookRelationships(includeLog) },
-    { path: 'xl/worksheets/sheet1.xml', content: worksheetXml(summarySheetRows) },
+    { path: 'xl/worksheets/sheet1.xml', content: worksheetXml(summarySheetRows, hasBrandLogo) },
   ];
+
+  if (hasBrandLogo && context.brandLogoPng) {
+    entries.push(
+      { path: 'xl/worksheets/_rels/sheet1.xml.rels', content: worksheetRelationships() },
+      { path: 'xl/drawings/drawing1.xml', content: spreadsheetLogoDrawing() },
+      { path: 'xl/drawings/_rels/drawing1.xml.rels', content: spreadsheetLogoRelationships() },
+      { path: 'xl/media/chemvault-logo.png', content: context.brandLogoPng }
+    );
+  }
 
   if (includeLog) {
     const logLines = boundedLogLines(logText(result));
@@ -108,6 +119,7 @@ export function createQuantumExcelWorkbook(result: QuantumCalculationResult, con
 export function createQuantumWordDocument(result: QuantumCalculationResult, context: QuantumExportDocumentContext) {
   const generatedAt = new Date();
   const includeLog = Boolean(context.includeLog);
+  const hasBrandLogo = Boolean(context.brandLogoPng?.length);
   const warnings = result.warnings.length ? result.warnings : ['No warnings returned.'];
   const body = [
     docParagraph(CHEMVAULT_TITLE, true),
@@ -144,23 +156,33 @@ export function createQuantumWordDocument(result: QuantumCalculationResult, cont
   <w:body>${body}</w:body>
 </w:document>`;
 
-  return createZip([
-    { path: '[Content_Types].xml', content: docxContentTypes() },
+  const entries: ZipEntry[] = [
+    { path: '[Content_Types].xml', content: docxContentTypes(hasBrandLogo) },
     { path: '_rels/.rels', content: packageRelationships('docx') },
     { path: 'docProps/core.xml', content: coreProperties(generatedAt) },
     { path: 'docProps/app.xml', content: appProperties('Microsoft Word') },
     { path: 'docProps/custom.xml', content: customProperties() },
     { path: 'word/document.xml', content: documentXml },
     { path: 'word/_rels/document.xml.rels', content: documentRelationships() },
-    { path: 'word/footer1.xml', content: wordFooter() },
+    { path: 'word/footer1.xml', content: wordFooter(hasBrandLogo) },
     { path: 'word/settings.xml', content: wordSettings() },
     { path: 'word/styles.xml', content: wordStyles() }
-  ]);
+  ];
+
+  if (hasBrandLogo && context.brandLogoPng) {
+    entries.push(
+      { path: 'word/_rels/footer1.xml.rels', content: wordFooterRelationships() },
+      { path: 'word/media/chemvault-logo.png', content: context.brandLogoPng }
+    );
+  }
+
+  return createZip(entries);
 }
 
 export function createQuantumPdfDocument(result: QuantumCalculationResult, context: QuantumExportDocumentContext) {
   const generatedAt = new Date();
   const includeLog = Boolean(context.includeLog);
+  const brandLogo = context.brandLogoPng ? parsePdfPng(context.brandLogoPng) : null;
   const layout = createPdfLayout();
   drawPdfHero(layout, result, context, generatedAt);
   drawPdfMetricGrid(layout, [
@@ -176,9 +198,9 @@ export function createQuantumPdfDocument(result: QuantumCalculationResult, conte
   if (result.warnings.length > 0) drawPdfWarnings(layout, result.warnings);
   drawPdfReview(layout, context);
   if (includeLog) drawPdfEngineLog(layout, result);
-  const pageContents = finishPdfLayout(layout);
+  const pageContents = finishPdfLayout(layout, Boolean(brandLogo));
 
-  const objects: string[] = [
+  const objects: PdfObject[] = [
     '<< /Type /Catalog /Pages 2 0 R >>',
     '',
     '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
@@ -186,12 +208,19 @@ export function createQuantumPdfDocument(result: QuantumCalculationResult, conte
     '<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>'
   ];
 
+  let logoObjectId: number | null = null;
+  if (brandLogo) {
+    logoObjectId = objects.length + 1;
+    objects.push(pdfPngImageObject(brandLogo));
+  }
+
   const pageRefs: string[] = [];
   pageContents.forEach((content) => {
     const pageObjectId = objects.length + 1;
     const contentObjectId = pageObjectId + 1;
     pageRefs.push(`${pageObjectId} 0 R`);
-    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_PAGE_WIDTH} ${PDF_PAGE_HEIGHT}] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >> >> /Contents ${contentObjectId} 0 R >>`);
+    const logoResource = logoObjectId ? ` /XObject << /ImLogo ${logoObjectId} 0 R >>` : '';
+    objects.push(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${PDF_PAGE_WIDTH} ${PDF_PAGE_HEIGHT}] /Resources << /Font << /F1 3 0 R /F2 4 0 R /F3 5 0 R >>${logoResource} >> /Contents ${contentObjectId} 0 R >>`);
     objects.push(`<< /Length ${byteLength(content)} >>\nstream\n${content}\nendstream`);
   });
 
@@ -203,6 +232,14 @@ export function createQuantumPdfDocument(result: QuantumCalculationResult, conte
 }
 
 type PdfFont = 'F1' | 'F2' | 'F3';
+
+type PdfObject = string | Uint8Array;
+
+type PdfPngImage = {
+  compressedData: Uint8Array;
+  height: number;
+  width: number;
+};
 
 type PdfLayout = {
   commands: string[];
@@ -230,10 +267,10 @@ function createPdfLayout(): PdfLayout {
   return layout;
 }
 
-function finishPdfLayout(layout: PdfLayout) {
+function finishPdfLayout(layout: PdfLayout, hasBrandLogo = false) {
   if (layout.commands.length > 0) layout.pages.push(layout.commands.join('\n'));
   const totalPages = layout.pages.length;
-  return layout.pages.map((content, index) => [content, pdfFooterCommands(index + 1, totalPages)].join('\n'));
+  return layout.pages.map((content, index) => [content, pdfFooterCommands(index + 1, totalPages, hasBrandLogo)].join('\n'));
 }
 
 function startPdfPage(layout: PdfLayout) {
@@ -516,7 +553,7 @@ function drawPdfPill(layout: PdfLayout, label: string, x: number, y: number, fil
   drawPdfText(layout, label, x + 11, y - 11, { color, font: 'F2', size: 8.5 });
 }
 
-function pdfFooterCommands(pageNumber: number, totalPages: number) {
+function pdfFooterCommands(pageNumber: number, totalPages: number, hasBrandLogo = false) {
   const footerLayout: PdfLayout = {
     commands: [],
     pages: [],
@@ -524,7 +561,10 @@ function pdfFooterCommands(pageNumber: number, totalPages: number) {
     y: 0
   };
   drawPdfLine(footerLayout, PDF_MARGIN, 42, PDF_PAGE_WIDTH - PDF_MARGIN, 42, '#cbd5e1');
-  drawPdfText(footerLayout, CHEMVAULT_COPYRIGHT_NOTICE, PDF_MARGIN, 26, { color: '#64748b', size: 7.5 });
+  if (hasBrandLogo) {
+    footerLayout.commands.push(`q\n18 0 0 18 ${PDF_MARGIN} 15 cm\n/ImLogo Do\nQ`);
+  }
+  drawPdfText(footerLayout, CHEMVAULT_COPYRIGHT_NOTICE, PDF_MARGIN + (hasBrandLogo ? 24 : 0), 26, { color: '#64748b', size: 7.5 });
   drawPdfText(footerLayout, `Page ${pageNumber} of ${totalPages}`, PDF_PAGE_WIDTH - PDF_MARGIN - 62, 26, { color: '#64748b', size: 7.5 });
   return footerLayout.commands.join('\n');
 }
@@ -722,12 +762,13 @@ function formatSigned(value: number) {
   return `${value >= 0 ? '+' : ''}${value.toFixed(4)}`;
 }
 
-function worksheetXml(rows: string[][]) {
+function worksheetXml(rows: string[][], hasBrandLogo = false) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
   <sheetData>
     ${rows.map((row, rowIndex) => xlsxRow(rowIndex + 1, row)).join('\n')}
   </sheetData>
+  ${hasBrandLogo ? '<drawing r:id="rIdLogo"/>' : ''}
 </worksheet>`;
 }
 
@@ -762,25 +803,28 @@ function docTable(rows: string[][]) {
     .join('')}</w:tbl>`;
 }
 
-function xlsxContentTypes(includeLog = true) {
+function xlsxContentTypes(includeLog = true, hasBrandLogo = false) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
+  ${hasBrandLogo ? '<Default Extension="png" ContentType="image/png"/>' : ''}
   <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
   <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
   ${includeLog ? '<Override PartName="/xl/worksheets/sheet2.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' : ''}
+  ${hasBrandLogo ? '<Override PartName="/xl/drawings/drawing1.xml" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>' : ''}
   <Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/>
   <Override PartName="/docProps/app.xml" ContentType="application/vnd.openxmlformats-officedocument.extended-properties+xml"/>
   <Override PartName="/docProps/custom.xml" ContentType="application/vnd.openxmlformats-officedocument.custom-properties+xml"/>
 </Types>`;
 }
 
-function docxContentTypes() {
+function docxContentTypes(hasBrandLogo = false) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
   <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
   <Default Extension="xml" ContentType="application/xml"/>
+  ${hasBrandLogo ? '<Default Extension="png" ContentType="image/png"/>' : ''}
   <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
   <Override PartName="/word/footer1.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footer+xml"/>
   <Override PartName="/word/settings.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.settings+xml"/>
@@ -812,12 +856,49 @@ function documentRelationships() {
 </Relationships>`;
 }
 
+function wordFooterRelationships() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdLogo" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/chemvault-logo.png"/>
+</Relationships>`;
+}
+
 function workbookRelationships(includeLog = true) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
   <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
   ${includeLog ? '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet2.xml"/>' : ''}
 </Relationships>`;
+}
+
+function worksheetRelationships() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdLogo" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/drawing1.xml"/>
+</Relationships>`;
+}
+
+function spreadsheetLogoRelationships() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdLogo" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="../media/chemvault-logo.png"/>
+</Relationships>`;
+}
+
+function spreadsheetLogoDrawing() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <xdr:twoCellAnchor editAs="oneCell">
+    <xdr:from><xdr:col>3</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>0</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>
+    <xdr:to><xdr:col>5</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>5</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>
+    <xdr:pic>
+      <xdr:nvPicPr><xdr:cNvPr id="2" name="ChemVault logo" descr="ChemVault"/><xdr:cNvPicPr><a:picLocks noChangeAspect="1"/></xdr:cNvPicPr></xdr:nvPicPr>
+      <xdr:blipFill><a:blip r:embed="rIdLogo"/><a:stretch><a:fillRect/></a:stretch></xdr:blipFill>
+      <xdr:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="1219200" cy="1219200"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></xdr:spPr>
+    </xdr:pic>
+    <xdr:clientData/>
+  </xdr:twoCellAnchor>
+</xdr:wsDr>`;
 }
 
 function coreProperties(generatedAt: Date) {
@@ -868,15 +949,16 @@ function wordStyles() {
 </w:styles>`;
 }
 
-function wordFooter() {
+function wordFooter(hasBrandLogo = false) {
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+<w:ftr xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture">
   <w:p>
     <w:pPr>
       <w:pStyle w:val="Footer"/>
       <w:tabs><w:tab w:val="right" w:pos="9360"/></w:tabs>
       <w:pBdr><w:top w:val="single" w:sz="4" w:space="8" w:color="CBD5E1"/></w:pBdr>
     </w:pPr>
+    ${hasBrandLogo ? wordLogoRun() : ''}
     <w:r><w:rPr><w:color w:val="64748B"/><w:sz w:val="16"/></w:rPr><w:t>${escapeXml(CHEMVAULT_COPYRIGHT_NOTICE)}</w:t></w:r>
     <w:r><w:tab/></w:r>
     <w:r><w:rPr><w:color w:val="64748B"/><w:sz w:val="16"/></w:rPr><w:t>Page </w:t></w:r>
@@ -885,6 +967,21 @@ function wordFooter() {
     ${wordField('NUMPAGES', '1')}
   </w:p>
 </w:ftr>`;
+}
+
+function wordLogoRun() {
+  return `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">
+    <wp:extent cx="182880" cy="182880"/><wp:effectExtent l="0" t="0" r="0" b="0"/>
+    <wp:docPr id="1" name="ChemVault logo" descr="ChemVault"/>
+    <wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>
+    <a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture">
+      <pic:pic>
+        <pic:nvPicPr><pic:cNvPr id="1" name="ChemVault logo"/><pic:cNvPicPr/></pic:nvPicPr>
+        <pic:blipFill><a:blip r:embed="rIdLogo"/><a:stretch><a:fillRect/></a:stretch></pic:blipFill>
+        <pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="182880" cy="182880"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr>
+      </pic:pic>
+    </a:graphicData></a:graphic>
+  </wp:inline></w:drawing></w:r><w:r><w:t xml:space="preserve">  </w:t></w:r>`;
 }
 
 function wordField(instruction: string, fallback: string) {
@@ -988,20 +1085,62 @@ function crc32(data: Uint8Array) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-function buildPdf(objects: string[], infoObjectId: number) {
-  const parts: string[] = ['%PDF-1.4\n%\u00e2\u00e3\u00cf\u00d3\n'];
+function parsePdfPng(bytes: Uint8Array): PdfPngImage | null {
+  const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+  if (bytes.length < 33 || signature.some((value, index) => bytes[index] !== value)) return null;
+
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const width = view.getUint32(16, false);
+  const height = view.getUint32(20, false);
+  const bitDepth = bytes[24];
+  const colorType = bytes[25];
+  const interlace = bytes[28];
+  if (!width || !height || bitDepth !== 8 || colorType !== 2 || interlace !== 0) return null;
+
+  const idatChunks: Uint8Array[] = [];
+  let offset = 8;
+  while (offset + 12 <= bytes.length) {
+    const length = view.getUint32(offset, false);
+    const typeOffset = offset + 4;
+    const dataOffset = offset + 8;
+    const nextOffset = dataOffset + length + 4;
+    if (nextOffset > bytes.length) return null;
+    const type = String.fromCharCode(bytes[typeOffset], bytes[typeOffset + 1], bytes[typeOffset + 2], bytes[typeOffset + 3]);
+    if (type === 'IDAT') idatChunks.push(bytes.slice(dataOffset, dataOffset + length));
+    if (type === 'IEND') break;
+    offset = nextOffset;
+  }
+
+  if (!idatChunks.length) return null;
+  return { compressedData: concatBytes(idatChunks), height, width };
+}
+
+function pdfPngImageObject(image: PdfPngImage) {
+  const header = TEXT_ENCODER.encode(
+    `<< /Type /XObject /Subtype /Image /Width ${image.width} /Height ${image.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /FlateDecode /DecodeParms << /Predictor 15 /Colors 3 /BitsPerComponent 8 /Columns ${image.width} >> /Length ${image.compressedData.length} >>\nstream\n`
+  );
+  return concatBytes([header, image.compressedData, TEXT_ENCODER.encode('\nendstream')]);
+}
+
+function buildPdf(objects: PdfObject[], infoObjectId: number) {
+  const parts: Uint8Array[] = [TEXT_ENCODER.encode('%PDF-1.4\n%\u00e2\u00e3\u00cf\u00d3\n')];
   const offsets = [0];
+  let currentOffset = parts[0].length;
   objects.forEach((object, index) => {
-    offsets.push(byteLength(parts.join('')));
-    parts.push(`${index + 1} 0 obj\n${object}\nendobj\n`);
+    offsets.push(currentOffset);
+    const prefix = TEXT_ENCODER.encode(`${index + 1} 0 obj\n`);
+    const body = typeof object === 'string' ? TEXT_ENCODER.encode(object) : object;
+    const suffix = TEXT_ENCODER.encode('\nendobj\n');
+    parts.push(prefix, body, suffix);
+    currentOffset += prefix.length + body.length + suffix.length;
   });
-  const xrefOffset = byteLength(parts.join(''));
-  parts.push(`xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`);
+  const xrefOffset = currentOffset;
+  parts.push(TEXT_ENCODER.encode(`xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`));
   offsets.slice(1).forEach((offset) => {
-    parts.push(`${String(offset).padStart(10, '0')} 00000 n \n`);
+    parts.push(TEXT_ENCODER.encode(`${String(offset).padStart(10, '0')} 00000 n \n`));
   });
-  parts.push(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info ${infoObjectId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
-  return TEXT_ENCODER.encode(parts.join(''));
+  parts.push(TEXT_ENCODER.encode(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R /Info ${infoObjectId} 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`));
+  return concatBytes(parts);
 }
 
 function pdfDate(value: Date) {

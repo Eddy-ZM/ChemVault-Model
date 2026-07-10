@@ -4,6 +4,7 @@ import Image from 'next/image';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { MoleculeApiPayload, MoleculeGenerationResponse, MoleculeProperties, PdbRecord } from '@/lib/chem/types';
 import { downloadText, fileNameForFormat, safeFileBaseName } from '@/lib/chem/fileExport';
+import { createBrandedPngDataUrl } from '@/lib/chem/exportBranding';
 import { emptyProperties } from '@/lib/chem/moleculeUtils';
 import { normalizeSmiles } from '@/lib/chem/smiles';
 import { MoleculeViewerHandle } from '@/components/molecule/MoleculeViewer3D';
@@ -599,7 +600,8 @@ export function MoleculeStudio() {
       if (!uri) {
         toast('3D viewer has no image yet.', 'error');
       } else {
-        const response = await fetch(uri);
+        const brandedUri = await createBrandedPngDataUrl(uri);
+        const response = await fetch(brandedUri);
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
         const link = document.createElement('a');

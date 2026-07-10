@@ -20,6 +20,7 @@ import type {
   QuantumEngineStatus
 } from '@/lib/chem/quantumTypes';
 import { downloadBinary, downloadText, safeFileBaseName } from '@/lib/chem/fileExport';
+import { loadChemVaultExportBranding } from '@/lib/chem/exportBranding';
 import {
   consumeQuantumEnginePreferenceNotice,
   loadQuantumEnginePreference,
@@ -81,6 +82,7 @@ type Props = {
 };
 
 type QuantumExportContext = {
+  brandLogoDataUrl?: string;
   charge: number;
   diagnosis?: QuantumResultDiagnosis | null;
   includeLog?: boolean;
@@ -1129,11 +1131,13 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     ? 'Setup is required before this engine can calculate.'
     : `${selectedEngineOption.label} is configured. Local engines and port settings are folded.`;
 
-  function exportQuantumReport() {
+  async function exportQuantumReport() {
     if (!result) return;
+    const branding = await loadChemVaultExportBranding();
     downloadText(
       `${exportBaseName}_${exportTimestamp()}_report.html`,
       buildQuantumReportHtml(result, {
+        brandLogoDataUrl: branding?.dataUrl,
         charge,
         diagnosis: resultDiagnosis,
         includeLog: exportIncludeLog,
@@ -1160,11 +1164,13 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     );
   }
 
-  function exportQuantumExcel() {
+  async function exportQuantumExcel() {
     if (!result) return;
+    const branding = await loadChemVaultExportBranding();
     downloadBinary(
       `${exportBaseName}_${exportTimestamp()}_data.xlsx`,
       createQuantumExcelWorkbook(result, {
+        brandLogoPng: branding?.pngBytes,
         charge,
         diagnosis: resultDiagnosis,
         includeLog: exportIncludeLog,
@@ -1176,11 +1182,13 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     );
   }
 
-  function exportQuantumWord() {
+  async function exportQuantumWord() {
     if (!result) return;
+    const branding = await loadChemVaultExportBranding();
     downloadBinary(
       `${exportBaseName}_${exportTimestamp()}_report.docx`,
       createQuantumWordDocument(result, {
+        brandLogoPng: branding?.pngBytes,
         charge,
         diagnosis: resultDiagnosis,
         includeLog: exportIncludeLog,
@@ -1192,11 +1200,13 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     );
   }
 
-  function exportQuantumPdf() {
+  async function exportQuantumPdf() {
     if (!result) return;
+    const branding = await loadChemVaultExportBranding();
     downloadBinary(
       `${exportBaseName}_${exportTimestamp()}_report.pdf`,
       createQuantumPdfDocument(result, {
+        brandLogoPng: branding?.pngBytes,
         charge,
         diagnosis: resultDiagnosis,
         includeLog: exportIncludeLog,
@@ -1248,12 +1258,19 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     downloadText(`${exportBaseName}_${exportTimestamp()}_optimized.xyz`, result.optimizedXyz, 'chemical/x-xyz');
   }
 
-  function exportGaussianSuite() {
+  async function exportGaussianSuite() {
     if (!result || result.engine !== 'gaussian') return;
 
     const timestamp = exportTimestamp();
     const fileBase = `${exportBaseName}_${timestamp}_gaussian`;
-    const entries = gaussianSuiteEntries(result, fileBase, gaussianFchk || undefined, gaussianCube || undefined);
+    const branding = await loadChemVaultExportBranding();
+    const entries = gaussianSuiteEntries(
+      result,
+      fileBase,
+      gaussianFchk || undefined,
+      gaussianCube || undefined,
+      branding?.pngBytes
+    );
     if (!entries.length) return;
 
     downloadBinary(`${fileBase}_suite.zip`, createZip(entries), 'application/zip');
@@ -3221,7 +3238,8 @@ function gaussianSuiteEntries(
   result: QuantumCalculationResult,
   fileBase: string,
   formattedCheckpoint?: QuantumCalculationFileAttachment,
-  cube?: QuantumCalculationFileAttachment
+  cube?: QuantumCalculationFileAttachment,
+  brandLogoPng?: Uint8Array
 ): ZipEntry[] {
   const entries: ZipEntry[] = [];
   const input = result.gaussianFiles?.input;
@@ -3254,6 +3272,19 @@ function gaussianSuiteEntries(
   if (result.optimizedXyz) {
     entries.push({ path: `${fileBase}_optimized.xyz`, content: result.optimizedXyz });
   }
+
+  if (brandLogoPng?.length) {
+    entries.push({ path: 'ChemVault/chemvault-logo.png', content: brandLogoPng });
+  }
+  entries.push({
+    path: 'ChemVault/NOTICE.txt',
+    content: [
+      'ChemVault Gaussian Export Suite',
+      '',
+      'Calculation files are provided in their original engine-compatible formats.',
+      CHEMVAULT_COPYRIGHT_NOTICE
+    ].join('\n')
+  });
 
   return entries;
 }
@@ -3506,14 +3537,21 @@ function buildQuantumReportHtml(result: QuantumCalculationResult, context: Quant
     .review.success { border-color: #bbf7d0; background: #f0fdf4; color: #047857; }
     .review.warning { border-color: #fed7aa; background: #fff7ed; color: #9a3412; }
     .review.error { border-color: #fecdd3; background: #fff1f2; color: #be123c; }
+    .report-header { display: flex; align-items: center; gap: 14px; }
+    .report-logo { width: 52px; height: 52px; flex: 0 0 52px; border: 1px solid #e2e8f0; border-radius: 8px; background: #fff; object-fit: contain; }
     .watermark { margin-top: 36px; border-top: 1px solid #cbd5e1; padding-top: 16px; text-align: center; color: #64748b; font-size: 12px; letter-spacing: .08em; text-transform: uppercase; }
     @media print { body { background: #fff; } main { padding: 24px; } .panel, .metric { break-inside: avoid; } }
   </style>
 </head>
 <body>
   <main>
-    <h1>ChemVault Quantum Calculation Report</h1>
-    <p class="subtle">Generated ${escapeHtml(generatedAt)}</p>
+    <header class="report-header">
+      ${context.brandLogoDataUrl ? `<img class="report-logo" src="${escapeHtml(context.brandLogoDataUrl)}" alt="ChemVault" />` : ''}
+      <div>
+        <h1>ChemVault Quantum Calculation Report</h1>
+        <p class="subtle">Generated ${escapeHtml(generatedAt)}</p>
+      </div>
+    </header>
 
     <section class="panel">
       <h2>Calculation summary</h2>

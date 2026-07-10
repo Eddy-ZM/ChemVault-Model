@@ -64,6 +64,7 @@ const sampleResult = {
 };
 
 const context = {
+  brandLogoPng: new Uint8Array(fs.readFileSync(path.join(__dirname, '..', 'public', 'brand', 'chemvault-logo.png'))),
   charge: 0,
   diagnosis: {
     severity: 'success',
@@ -91,21 +92,36 @@ assert.ok(xlsxEntries['docProps/custom.xml']);
 assert.ok(xlsxEntries['xl/workbook.xml']);
 assert.ok(xlsxEntries['xl/worksheets/sheet1.xml']);
 assert.ok(xlsxEntries['xl/worksheets/sheet2.xml']);
+assert.ok(xlsxEntries['xl/drawings/drawing1.xml']);
+assert.ok(xlsxEntries['xl/media/chemvault-logo.png']);
+assert.match(xlsxEntries['xl/worksheets/sheet1.xml'].toString('utf8'), /drawing r:id="rIdLogo"/u);
 assert.match(xlsxEntries['docProps/core.xml'].toString('utf8'), /ChemVault Quantum Calculation Report/u);
 assert.match(xlsxEntries['docProps/custom.xml'].toString('utf8'), /Copyright/u);
 
 const docxEntries = readZipEntries(docx);
 assert.ok(docxEntries['word/document.xml']);
 assert.ok(docxEntries['word/footer1.xml']);
+assert.ok(docxEntries['word/media/chemvault-logo.png']);
+assert.ok(docxEntries['word/_rels/footer1.xml.rels']);
 assert.match(docxEntries['word/footer1.xml'].toString('utf8'), /Page/u);
 assert.match(docxEntries['word/footer1.xml'].toString('utf8'), /Copyright \(c\) ChemVault/u);
+assert.match(docxEntries['word/footer1.xml'].toString('utf8'), /r:embed="rIdLogo"/u);
 
 const pdfText = Buffer.from(pdf).toString('latin1');
 assert.ok(pdfText.startsWith('%PDF-1.4'));
 assert.match(pdfText, /ChemVault Quantum Calculation Report/u);
 assert.match(pdfText, /Copyright \\\(c\\\) ChemVault/u);
 assert.match(pdfText, /Page 1 of/u);
+assert.match(pdfText, /\/ImLogo Do/u);
+assert.match(pdfText, /\/Subtype \/Image/u);
 assert.equal(CHEMVAULT_COPYRIGHT_NOTICE, 'Copyright (c) ChemVault. All rights reserved.');
+
+if (process.env.CHEMVAULT_EXPORT_SMOKE_DIR) {
+  fs.mkdirSync(process.env.CHEMVAULT_EXPORT_SMOKE_DIR, { recursive: true });
+  fs.writeFileSync(path.join(process.env.CHEMVAULT_EXPORT_SMOKE_DIR, 'chemvault-export-smoke.xlsx'), xlsx);
+  fs.writeFileSync(path.join(process.env.CHEMVAULT_EXPORT_SMOKE_DIR, 'chemvault-export-smoke.docx'), docx);
+  fs.writeFileSync(path.join(process.env.CHEMVAULT_EXPORT_SMOKE_DIR, 'chemvault-export-smoke.pdf'), pdf);
+}
 
 console.log('Quantum export smoke files passed.');
 

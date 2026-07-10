@@ -42,14 +42,24 @@ const commercialDefaults: Record<CommercialQuantumEngineKind, ExternalQuantumEng
     executablePath: '',
     method: 'B3LYP',
     basisSet: '6-31G(d)',
-    routeOptions: 'Pop=Full'
+    routeOptions: '',
+    processorCount: 4,
+    memoryGb: 4,
+    scratchDirectory: '',
+    outputDetail: 'standard',
+    performanceProfile: 'balanced'
   },
   orca: {
     engine: 'orca',
     executablePath: '',
     method: 'B3LYP',
     basisSet: 'def2-SVP',
-    routeOptions: 'TightSCF'
+    routeOptions: 'TightSCF',
+    processorCount: 4,
+    memoryGb: 4,
+    scratchDirectory: '',
+    outputDetail: 'standard',
+    performanceProfile: 'balanced'
   }
 };
 

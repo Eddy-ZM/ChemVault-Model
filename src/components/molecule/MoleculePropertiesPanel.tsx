@@ -8,12 +8,14 @@ import { analyzeElectrostatics, structureToXyz } from '@/lib/chem/electrostaticA
 import type {
   CommercialQuantumEngineKind,
   ExternalQuantumEngineConfig,
+  GaussianOutputDetail,
   GaussianBridgeTools,
   GaussianTaskTemplateId,
   LocalEngineStatus,
   LocalOpenSourceEngineKind,
   QuantumCalculationFileAttachment,
   QuantumCalculationProgress,
+  QuantumCalculationProfile,
   QuantumCalculationMode,
   QuantumCalculationResult,
   QuantumEngineKind,
@@ -140,77 +142,77 @@ const gaussianTaskTemplates: Array<{
     label: 'SP',
     description: 'Single-point energy, dipole, and population analysis.',
     calculationMode: 'single-point',
-    routeOptions: 'Pop=Full'
+    routeOptions: ''
   },
   {
     id: 'geometry-optimization',
     label: 'Opt',
     description: 'Geometry optimization before result parsing.',
     calculationMode: 'geometry-optimization',
-    routeOptions: 'Pop=Full'
+    routeOptions: ''
   },
   {
     id: 'frequency',
     label: 'Freq',
     description: 'Frequency analysis from the current geometry.',
     calculationMode: 'single-point',
-    routeOptions: 'Pop=Full'
+    routeOptions: ''
   },
   {
     id: 'optimization-frequency',
     label: 'Opt + Freq',
     description: 'Optimize geometry and then run frequency analysis.',
     calculationMode: 'geometry-optimization',
-    routeOptions: 'Pop=Full'
+    routeOptions: ''
   },
   {
     id: 'td-dft',
     label: 'TD-DFT',
     description: 'Excited-state bridge template with ten states.',
     calculationMode: 'single-point',
-    routeOptions: 'Pop=Full'
+    routeOptions: ''
   },
   {
     id: 'nmr',
     label: 'NMR',
     description: 'NMR shielding bridge template.',
     calculationMode: 'single-point',
-    routeOptions: 'Pop=Full'
+    routeOptions: ''
   },
   {
     id: 'solvent-model',
     label: 'Solvent',
     description: 'SMD water single-point bridge.',
     calculationMode: 'single-point',
-    routeOptions: 'Pop=Full'
+    routeOptions: ''
   },
   {
     id: 'transition-state',
     label: 'TS',
     description: 'Transition-state search from a prepared guess.',
     calculationMode: 'geometry-optimization',
-    routeOptions: 'Pop=Full'
+    routeOptions: ''
   },
   {
     id: 'irc',
     label: 'IRC',
     description: 'Reaction-path bridge from a TS geometry.',
     calculationMode: 'single-point',
-    routeOptions: 'Pop=Full'
+    routeOptions: ''
   },
   {
     id: 'stability',
     label: 'Stable',
     description: 'Wavefunction stability check.',
     calculationMode: 'single-point',
-    routeOptions: 'Pop=Full'
+    routeOptions: ''
   },
   {
     id: 'frontier-orbitals',
     label: 'HOMO/LUMO',
     description: 'Frontier orbital output bridge.',
     calculationMode: 'single-point',
-    routeOptions: 'Pop=Full GFInput GFPrint'
+    routeOptions: ''
   },
   {
     id: 'nbo',
@@ -227,16 +229,55 @@ const defaultExternalConfigs: Record<CommercialQuantumEngineKind, ExternalQuantu
     executablePath: '',
     method: 'B3LYP',
     basisSet: '6-31G(d)',
-    routeOptions: 'Pop=Full'
+    routeOptions: '',
+    processorCount: 4,
+    memoryGb: 4,
+    scratchDirectory: '',
+    outputDetail: 'standard',
+    performanceProfile: 'balanced'
   },
   orca: {
     engine: 'orca',
     executablePath: '',
     method: 'B3LYP',
     basisSet: 'def2-SVP',
-    routeOptions: 'TightSCF'
+    routeOptions: 'TightSCF',
+    processorCount: 4,
+    memoryGb: 4,
+    scratchDirectory: '',
+    outputDetail: 'standard',
+    performanceProfile: 'balanced'
   }
 };
+
+type GaussianContinuationSource = {
+  checkpointBase64: string;
+  charge: number;
+  method: string;
+  unpairedElectrons: number;
+};
+
+const calculationProfiles: Array<{
+  id: QuantumCalculationProfile;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: 'fast-screening',
+    label: 'Fast screening',
+    description: 'Optimize quickly with local GFN2-xTB before Gaussian refinement.'
+  },
+  {
+    id: 'balanced',
+    label: 'Balanced',
+    description: 'B3LYP/6-31G(d) with standard Gaussian output.'
+  },
+  {
+    id: 'high-accuracy',
+    label: 'High accuracy',
+    description: 'B3LYP/def2-TZVP with tight SCF and ultrafine integration.'
+  }
+];
 
 export function MoleculePropertiesPanel({ metadata, properties, loading, onCopy }: Props) {
   const smiles = metadata?.smiles?.trim() || 'N/A';
@@ -372,6 +413,10 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   const [workflowMessage, setWorkflowMessage] = useState('');
   const [activeCalculationId, setActiveCalculationId] = useState('');
   const [preparedStructure, setPreparedStructure] = useState<QuantumStructurePreparationResult | null>(null);
+  const [calculationProfile, setCalculationProfile] = useState<QuantumCalculationProfile>('balanced');
+  const [continuationSource, setContinuationSource] = useState<GaussianContinuationSource | null>(null);
+  const [reuseGaussianCheckpoint, setReuseGaussianCheckpoint] = useState(false);
+  const pendingGaussianProfile = useRef<Exclude<QuantumCalculationProfile, 'fast-screening'> | null>(null);
 
   useEffect(() => {
     const preference = loadQuantumEnginePreference();
@@ -393,6 +438,8 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   useEffect(() => {
     setPreparedStructure(null);
     setProjectMessage('');
+    setContinuationSource(null);
+    setReuseGaussianCheckpoint(false);
   }, [xyz]);
 
   useEffect(() => {
@@ -441,7 +488,13 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     setConfigMessage('');
     api.getExternalQuantumConfig(selectedEngine)
       .then((config) => {
-        if (!cancelled) setExternalConfig(config);
+        if (!cancelled) {
+          const pendingProfile = pendingGaussianProfile.current;
+          const nextConfig = pendingProfile ? gaussianConfigForProfile(pendingProfile, config) : config;
+          setExternalConfig(nextConfig);
+          setCalculationProfile(nextConfig.performanceProfile);
+          pendingGaussianProfile.current = null;
+        }
       })
       .catch((configError) => {
         if (!cancelled) {
@@ -497,6 +550,10 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     externalConfig.method,
     externalConfig.basisSet,
     externalConfig.routeOptions,
+    externalConfig.outputDetail,
+    externalConfig.processorCount,
+    externalConfig.memoryGb,
+    externalConfig.scratchDirectory,
     pyscfMethod,
     pyscfBasisSet
   ]);
@@ -533,6 +590,17 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     [preflight, result]
   );
   const calculationXyz = preparedStructure?.ok && preparedStructure.xyz ? preparedStructure.xyz : xyz;
+  const continuationCompatible = Boolean(
+    continuationSource &&
+    continuationSource.method === externalMethodLabel(externalConfig) &&
+    continuationSource.charge === charge &&
+    continuationSource.unpairedElectrons === unpairedElectrons
+  );
+
+  useEffect(() => {
+    if (!continuationCompatible) setReuseGaussianCheckpoint(false);
+  }, [continuationCompatible]);
+
   const xtbEngineStatus = localEngines.find((engine) => engine.engine === 'xtb');
   const quickScreenReady = Boolean(calculationXyz && !running && !queueRunning && xtbEngineStatus?.available);
   const quickScreenIssue = quickScreenReady
@@ -599,6 +667,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     try {
       const saved = await api.saveExternalQuantumConfig({ ...nextConfig, engine: selectedEngine });
       setExternalConfig(saved);
+      if (saved.engine === 'gaussian') setCalculationProfile(saved.performanceProfile);
       setConfigMessage('External engine settings saved.');
       setConfigRevision((value) => value + 1);
     } catch (saveError) {
@@ -610,7 +679,35 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
 
   function selectEngine(engine: QuantumEngineKind, label = engineLabel(engine)) {
     setSelectedEngine(engine);
+    if (engine === 'xtb') {
+      setCalculationProfile('fast-screening');
+    } else if (engine === 'gaussian' && !pendingGaussianProfile.current) {
+      setCalculationProfile(externalConfig.performanceProfile);
+    }
     saveQuantumEnginePreference(engine, label, { source: 'studio' });
+  }
+
+  function applyCalculationProfile(profile: QuantumCalculationProfile) {
+    setCalculationProfile(profile);
+    setResult(null);
+    setError('');
+    if (profile === 'fast-screening') {
+      selectEngine('xtb', 'xTB GFN2');
+      setCalculationMode('geometry-optimization');
+      setReuseGaussianCheckpoint(false);
+      setWorkflowMessage('Fast screening selected. ChemVault will optimize the current structure with GFN2-xTB before Gaussian refinement.');
+      return;
+    }
+
+    if (selectedEngine !== 'gaussian') {
+      pendingGaussianProfile.current = profile;
+      selectEngine('gaussian', 'Gaussian');
+    } else {
+      setExternalConfig((config) => gaussianConfigForProfile(profile, config));
+    }
+    setWorkflowMessage(profile === 'high-accuracy'
+      ? 'High accuracy selected. Review the larger basis and resource settings before running.'
+      : 'Balanced Gaussian settings selected for routine molecular calculations.');
   }
 
   async function chooseExternalExecutable() {
@@ -623,6 +720,13 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     const nextConfig = { ...externalConfig, engine: selectedEngine, executablePath: selectedPath };
     setExternalConfig(nextConfig);
     await saveExternalConfig(nextConfig);
+  }
+
+  async function chooseGaussianScratchDirectory() {
+    const selectedPath = await window.chemVaultDesktop?.selectGaussianScratchDirectory?.();
+    if (!selectedPath) return;
+    setExternalConfig((config) => ({ ...config, scratchDirectory: selectedPath }));
+    setConfigMessage('Gaussian scratch directory selected. Save settings to keep it for later calculations.');
   }
 
   async function discoverExternalExecutable() {
@@ -666,7 +770,8 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     setExternalConfig((config) => ({
       ...config,
       engine: 'gaussian',
-      routeOptions: template.routeOptions
+      routeOptions: template.routeOptions,
+      outputDetail: template.id === 'frontier-orbitals' ? 'orbitals' : config.outputDetail
     }));
     setGaussianBridgeMessage(`${template.label} template applied. Review the Gaussian input preview before running if needed.`);
   }
@@ -770,15 +875,30 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     }
 
     const screenResult = await executeCalculation({
-      calculationMode: 'single-point',
+      calculationMode: 'geometry-optimization',
       engine: 'xtb',
-      startMessage: 'Running a quick xTB screen before Gaussian refinement.'
+      startMessage: 'Optimizing with xTB before Gaussian refinement.'
     });
     if (screenResult?.ok) {
+      if (screenResult.optimizedXyz) {
+        setContinuationSource(null);
+        setReuseGaussianCheckpoint(false);
+        setPreparedStructure({
+          ok: true,
+          xyz: screenResult.optimizedXyz,
+          summary: 'The current Gaussian follow-up will use the xTB-optimized geometry.',
+          changes: ['Optimized the molecular geometry with GFN2-xTB before Gaussian refinement.'],
+          warnings: []
+        });
+      }
+      pendingGaussianProfile.current = 'balanced';
+      setCalculationProfile('balanced');
       selectEngine('gaussian', 'Gaussian');
       setCalculationMode('single-point');
       setGaussianTask('single-point');
-      setWorkflowMessage('Quick xTB screen completed. Gaussian is now selected for high-precision follow-up with the same structure, charge, and spin settings.');
+      setWorkflowMessage(screenResult.optimizedXyz
+        ? 'xTB optimization completed. Gaussian is selected and will use the optimized geometry.'
+        : 'xTB screening completed. Gaussian is selected for follow-up with the current geometry.');
     }
   }
 
@@ -799,8 +919,8 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   function addScreenAndGaussianToQueue() {
     const screenItem = queueItemFromCurrentSetup({
       engine: 'xtb',
-      calculationMode: 'single-point',
-      label: 'xTB screening'
+      calculationMode: 'geometry-optimization',
+      label: 'xTB geometry screening'
     });
     const gaussianItem = queueItemFromCurrentSetup({
       engine: 'gaussian',
@@ -845,6 +965,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     if (!pending.length || queueRunning) return;
 
     setQueueRunning(true);
+    let queuedXyz = calculationXyz || undefined;
     setWorkflowMessage(`Running ${pending.length} queued calculation${pending.length === 1 ? '' : 's'} in sequence.`);
     for (const item of pending) {
       setQueueItems((items) => items.map((entry) => entry.id === item.id ? { ...entry, status: 'running', message: 'Running now' } : entry));
@@ -857,8 +978,21 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         method: item.method,
         routeOptions: item.routeOptions,
         startMessage: `Queue item: ${item.label}`,
-        unpairedElectrons: item.unpairedElectrons
+        unpairedElectrons: item.unpairedElectrons,
+        xyz: queuedXyz
       });
+      if (nextResult?.ok && nextResult.engine === 'xtb' && nextResult.optimizedXyz) {
+        queuedXyz = nextResult.optimizedXyz;
+        setContinuationSource(null);
+        setReuseGaussianCheckpoint(false);
+        setPreparedStructure({
+          ok: true,
+          xyz: nextResult.optimizedXyz,
+          summary: 'Queued Gaussian calculations will use the xTB-optimized geometry.',
+          changes: ['Optimized the molecular geometry with GFN2-xTB in the calculation queue.'],
+          warnings: []
+        });
+      }
       setQueueItems((items) => items.map((entry) => entry.id === item.id
         ? {
             ...entry,
@@ -880,6 +1014,8 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
 
   function prepareCurrentStructure() {
     const prepared = prepareQuantumStructure(xyz);
+    setContinuationSource(null);
+    setReuseGaussianCheckpoint(false);
     setPreparedStructure(prepared);
     if (prepared.ok) {
       setError('');
@@ -891,6 +1027,8 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   }
 
   function resetPreparedStructure() {
+    setContinuationSource(null);
+    setReuseGaussianCheckpoint(false);
     setPreparedStructure(null);
     setWorkflowMessage('Loaded structure restored. Calculations will use the original 3D coordinates.');
   }
@@ -967,9 +1105,10 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     routeOptions?: string;
     startMessage?: string;
     unpairedElectrons?: number;
+    xyz?: string;
   } = {}) {
     const api = window.chemVaultDesktop;
-    const activeXyz = preparedStructure?.ok && preparedStructure.xyz ? preparedStructure.xyz : xyz;
+    const activeXyz = options.xyz || (preparedStructure?.ok && preparedStructure.xyz ? preparedStructure.xyz : xyz);
     if (!api?.runQuantumCalculation || !activeXyz) return null;
 
     const runEngine = options.engine || selectedEngine;
@@ -981,6 +1120,15 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     const runMethod = options.method || (commercialEngine ? externalConfig.method : runEngine === 'pyscf' ? pyscfMethod : 'gfn2');
     const runBasisSet = options.basisSet ?? (commercialEngine ? externalConfig.basisSet : runEngine === 'pyscf' ? pyscfBasisSet : undefined);
     const runRouteOptions = options.routeOptions ?? (commercialEngine ? externalConfig.routeOptions : undefined);
+    const runMethodLabel = runBasisSet ? `${runMethod}/${runBasisSet}` : runMethod;
+    const canReuseCheckpointForRun = Boolean(
+      runEngine === 'gaussian' &&
+      reuseGaussianCheckpoint &&
+      continuationSource &&
+      continuationSource.method === runMethodLabel &&
+      continuationSource.charge === runCharge &&
+      continuationSource.unpairedElectrons === runUnpairedElectrons
+    );
     const validation = validateQuantumPreflight({
       basisSet: runBasisSet,
       calculationMode: runMode,
@@ -1031,6 +1179,13 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         routeOptions: runRouteOptions,
         calculationMode: runMode,
         gaussianTask: runGaussianTask,
+        processorCount: runEngine === 'gaussian' ? externalConfig.processorCount : undefined,
+        memoryGb: runEngine === 'gaussian' ? externalConfig.memoryGb : undefined,
+        scratchDirectory: runEngine === 'gaussian' ? externalConfig.scratchDirectory : undefined,
+        outputDetail: runEngine === 'gaussian' ? externalConfig.outputDetail : undefined,
+        performanceProfile: runEngine === 'xtb' ? 'fast-screening' : runEngine === 'gaussian' ? calculationProfile : undefined,
+        reuseGaussianCheckpoint: canReuseCheckpointForRun,
+        gaussianCheckpointBase64: canReuseCheckpointForRun ? continuationSource?.checkpointBase64 : undefined,
         timeoutMs: runEngine === 'gaussian'
           ? gaussianTaskTimeout(runGaussianTask || 'single-point', activeXyz)
           : runEngine === 'pyscf'
@@ -1040,6 +1195,15 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
               : 180000
       });
       setResult(nextResult);
+      if (nextResult.ok && nextResult.engine === 'gaussian' && nextResult.gaussianFiles?.checkpoint?.contentBase64) {
+        setContinuationSource({
+          checkpointBase64: nextResult.gaussianFiles.checkpoint.contentBase64,
+          charge: runCharge,
+          method: nextResult.method,
+          unpairedElectrons: runUnpairedElectrons
+        });
+        setReuseGaussianCheckpoint(false);
+      }
       const diagnosis = diagnoseQuantumCalculation(nextResult, validation);
       const historyEntry = createQuantumHistoryEntry({
         charge: runCharge,
@@ -1289,12 +1453,16 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
           calculationMode,
           charge,
           gaussianTask,
+          memoryGb: externalConfig.memoryGb,
           method: externalConfig.method,
+          outputDetail: externalConfig.outputDetail,
+          processorCount: externalConfig.processorCount,
+          reuseCheckpoint: reuseGaussianCheckpoint && continuationCompatible,
           routeOptions: externalConfig.routeOptions || '',
           unpairedElectrons
         })
       : '',
-    [calculationMode, calculationXyz, charge, externalConfig.basisSet, externalConfig.method, externalConfig.routeOptions, gaussianTask, selectedEngine, unpairedElectrons]
+    [calculationMode, calculationXyz, charge, continuationCompatible, externalConfig.basisSet, externalConfig.memoryGb, externalConfig.method, externalConfig.outputDetail, externalConfig.processorCount, externalConfig.routeOptions, gaussianTask, reuseGaussianCheckpoint, selectedEngine, unpairedElectrons]
   );
 
   return (
@@ -1363,6 +1531,54 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
           </p>
         </div>
       </div>
+
+      <section className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Calculation profile</p>
+            <h4 className="mt-1 text-sm font-bold text-slate-950">Choose speed and precision</h4>
+          </div>
+          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
+            {calculationProfiles.find((profile) => profile.id === calculationProfile)?.label}
+          </span>
+        </div>
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          {calculationProfiles.map((profile) => (
+            <button
+              key={profile.id}
+              type="button"
+              onClick={() => applyCalculationProfile(profile.id)}
+              className={`min-h-[92px] rounded-xl border px-4 py-3 text-left transition ${
+                calculationProfile === profile.id
+                  ? 'border-sky-400 bg-white text-sky-950 shadow-sm'
+                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
+              }`}
+            >
+              <span className="block text-sm font-bold">{profile.label}</span>
+              <span className="mt-1 block text-xs leading-5 text-slate-500">{profile.description}</span>
+            </button>
+          ))}
+        </div>
+        {continuationSource ? (
+          <label className={`mt-3 flex items-start gap-3 rounded-xl border px-3 py-3 ${continuationCompatible && selectedEngine === 'gaussian' ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
+            <input
+              type="checkbox"
+              checked={reuseGaussianCheckpoint}
+              disabled={!continuationCompatible || selectedEngine !== 'gaussian'}
+              onChange={(event) => setReuseGaussianCheckpoint(event.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-sky-700"
+            />
+            <span className="min-w-0">
+              <span className="block text-xs font-bold text-slate-900">Reuse the last compatible Gaussian checkpoint</span>
+              <span className="mt-1 block text-xs leading-5 text-slate-600">
+                {continuationCompatible
+                  ? 'The next Gaussian task can reuse geometry and the converged wavefunction with Geom=AllCheck and Guess=Read.'
+                  : 'Match the previous method, basis set, charge, and spin before reusing this checkpoint.'}
+              </span>
+            </span>
+          </label>
+        ) : null}
+      </section>
 
       <div className="mt-4 grid gap-3 md:grid-cols-3">
         <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
@@ -1661,7 +1877,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
                 type="text"
                 value={externalConfig.routeOptions || ''}
                 onChange={(event) => setExternalConfig((config) => ({ ...config, engine: selectedEngine, routeOptions: event.target.value }))}
-                placeholder={selectedEngine === 'gaussian' ? 'Pop=Full SCF=Tight' : 'TightSCF'}
+                placeholder={selectedEngine === 'gaussian' ? 'Optional: SCF=Tight' : 'TightSCF'}
                 className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-400"
               />
             </label>
@@ -1674,6 +1890,70 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
               Save Port
             </button>
           </div>
+
+          {selectedEngine === 'gaussian' ? (
+            <div className="mt-4 border-t border-slate-200 pt-4">
+              <div>
+                <p className="text-xs font-bold uppercase tracking-[0.14em] text-slate-500">Performance and output</p>
+                <p className="mt-1 text-xs leading-5 text-slate-600">These values are written into the Gaussian Link 0 section and saved with the engine port.</p>
+              </div>
+              <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                <label className="min-w-0">
+                  <span className="block text-xs font-medium text-slate-500">Shared processors</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={64}
+                    value={externalConfig.processorCount}
+                    onChange={(event) => setExternalConfig((config) => ({ ...config, processorCount: Math.max(1, Number(event.target.value) || 1) }))}
+                    className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-400"
+                  />
+                </label>
+                <label className="min-w-0">
+                  <span className="block text-xs font-medium text-slate-500">Memory (GB)</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={256}
+                    value={externalConfig.memoryGb}
+                    onChange={(event) => setExternalConfig((config) => ({ ...config, memoryGb: Math.max(1, Number(event.target.value) || 1) }))}
+                    className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-400"
+                  />
+                </label>
+                <label className="min-w-0">
+                  <span className="block text-xs font-medium text-slate-500">Output detail</span>
+                  <select
+                    value={externalConfig.outputDetail}
+                    onChange={(event) => setExternalConfig((config) => ({ ...config, outputDetail: event.target.value as GaussianOutputDetail }))}
+                    className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-400"
+                  >
+                    <option value="standard">Standard</option>
+                    <option value="charges">Detailed charges</option>
+                    <option value="orbitals">Orbitals and full population</option>
+                  </select>
+                </label>
+              </div>
+              <div className="mt-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto]">
+                <label className="min-w-0">
+                  <span className="block text-xs font-medium text-slate-500">Scratch directory</span>
+                  <input
+                    type="text"
+                    value={externalConfig.scratchDirectory || ''}
+                    onChange={(event) => setExternalConfig((config) => ({ ...config, scratchDirectory: event.target.value }))}
+                    placeholder="Automatic temporary directory"
+                    className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-sky-400"
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={chooseGaussianScratchDirectory}
+                  className="self-end rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                >
+                  Browse folder
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {configMessage ? <p className="mt-3 text-xs leading-5 text-slate-600">{configMessage}</p> : null}
         </div>
@@ -1924,8 +2204,9 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
             <Metric label="Dipole magnitude" value={result.dipoleDebye ? `${formatNumber(result.dipoleDebye.total)} D` : 'N/A'} />
             <Metric label="Partial charges" value={String(result.charges.length)} />
             <Metric label="Run mode" value={result.gaussianTaskLabel || (result.calculationMode === 'geometry-optimization' ? 'Optimized' : 'Single point')} />
-            <Metric label="Elapsed time" value={`${(result.elapsedMs / 1000).toFixed(1)} s`} />
           </div>
+
+          <TimingBreakdown result={result} />
 
           {resultDiagnosis ? (
             <ResultDiagnosisPanel
@@ -3156,6 +3437,37 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function TimingBreakdown({ result }: { result: QuantumCalculationResult }) {
+  const engineMs = result.engineElapsedMs ?? result.elapsedMs;
+  const processingMs = result.postProcessingElapsedMs ?? Math.max(0, result.elapsedMs - engineMs);
+  const resourceLabel = result.resourceUsage
+    ? `${result.resourceUsage.processorCount} CPU / ${result.resourceUsage.memoryGb} GB`
+    : 'Engine managed';
+
+  return (
+    <section className="mt-3 rounded-2xl border border-slate-200 bg-slate-50 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Performance</p>
+          <p className="mt-1 text-sm font-bold text-slate-950">Calculation timing breakdown</p>
+        </div>
+        <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">{resourceLabel}</span>
+      </div>
+      <div className="mt-3 grid gap-2 sm:grid-cols-3">
+        <MetricCompact label={`${result.engineLabel} engine`} value={formatElapsedMs(engineMs)} />
+        <MetricCompact label="ChemVault processing" value={formatElapsedMs(processingMs)} />
+        <MetricCompact label="Total elapsed" value={formatElapsedMs(result.elapsedMs)} />
+      </div>
+      {(result.performanceProfile || result.reusedCheckpoint) ? (
+        <p className="mt-3 text-xs leading-5 text-slate-600">
+          {result.performanceProfile ? `Profile: ${calculationProfileLabel(result.performanceProfile)}.` : ''}
+          {result.reusedCheckpoint ? ' Compatible Gaussian checkpoint reused.' : ''}
+        </p>
+      ) : null}
+    </section>
+  );
+}
+
 function ReadinessItem({ label, ready, value }: { label: string; ready: boolean; value: string }) {
   return (
     <p className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
@@ -3296,31 +3608,57 @@ function buildGaussianInputPreview(
     calculationMode: QuantumCalculationMode;
     charge: number;
     gaussianTask: GaussianTaskTemplateId;
+    memoryGb: number;
     method: string;
+    outputDetail: GaussianOutputDetail;
+    processorCount: number;
+    reuseCheckpoint: boolean;
     routeOptions: string;
     unpairedElectrons: number;
   }
 ) {
   const atoms = parseXyzPreviewAtoms(xyz);
   if (!atoms.length) return '';
+  const outputKeywords = gaussianPreviewOutputKeywords(options.outputDetail, options.routeOptions);
   const routeParts = [
-    '#p',
+    options.outputDetail === 'orbitals' ? '#p' : '#',
     `${options.method || 'B3LYP'}/${options.basisSet || '6-31G(d)'}`,
     gaussianRouteKeywords(options.gaussianTask, options.calculationMode),
+    outputKeywords,
+    options.reuseCheckpoint ? 'Geom=AllCheck Guess=Read' : '',
     options.routeOptions
   ].filter(Boolean);
 
-  return [
+  const link0 = [
+    `%NProcShared=${Math.max(1, options.processorCount || 1)}`,
+    `%Mem=${Math.max(1, options.memoryGb || 1)}GB`,
+    options.reuseCheckpoint ? '%OldChk=chemvault-old.chk' : '',
     '%chk=chemvault.chk',
-    routeParts.join(' '),
-    '',
-    'ChemVault Model external Gaussian job',
-    '',
-    `${Number.isFinite(options.charge) ? options.charge : 0} ${(Number.isFinite(options.unpairedElectrons) ? options.unpairedElectrons : 0) + 1}`,
-    ...atoms.map((atom) => `${atom.element} ${formatGaussianCoordinate(atom.x)} ${formatGaussianCoordinate(atom.y)} ${formatGaussianCoordinate(atom.z)}`),
-    '',
-    ''
-  ].join('\n');
+  ].filter(Boolean);
+  return options.reuseCheckpoint
+    ? [...link0, routeParts.join(' '), '', ''].join('\n')
+    : [
+        ...link0,
+        routeParts.join(' '),
+        '',
+        'ChemVault Model external Gaussian job',
+        '',
+        `${Number.isFinite(options.charge) ? options.charge : 0} ${(Number.isFinite(options.unpairedElectrons) ? options.unpairedElectrons : 0) + 1}`,
+        ...atoms.map((atom) => `${atom.element} ${formatGaussianCoordinate(atom.x)} ${formatGaussianCoordinate(atom.y)} ${formatGaussianCoordinate(atom.z)}`),
+        '',
+        ''
+      ].join('\n');
+}
+
+function gaussianPreviewOutputKeywords(detail: GaussianOutputDetail, routeOptions: string) {
+  const keywords: string[] = [];
+  if (!/\bpop\s*=/iu.test(routeOptions)) {
+    if (detail === 'charges') keywords.push('Pop=Regular');
+    if (detail === 'orbitals') keywords.push('Pop=Full');
+  }
+  if (detail === 'orbitals' && !/\bgfinput\b/iu.test(routeOptions)) keywords.push('GFInput');
+  if (detail === 'orbitals' && !/\bgfprint\b/iu.test(routeOptions)) keywords.push('GFPrint');
+  return keywords.join(' ');
 }
 
 function parseXyzPreviewAtoms(xyz: string) {
@@ -3575,7 +3913,11 @@ function buildQuantumReportHtml(result: QuantumCalculationResult, context: Quant
         <div class="metric"><div class="label">Engine</div><div class="value">${escapeHtml(result.engineLabel)}</div></div>
         <div class="metric"><div class="label">Method</div><div class="value">${escapeHtml(result.method)}</div></div>
         <div class="metric"><div class="label">Mode</div><div class="value">${escapeHtml(result.gaussianTaskLabel || result.calculationMode)}</div></div>
-        <div class="metric"><div class="label">Elapsed</div><div class="value">${(result.elapsedMs / 1000).toFixed(1)} s</div></div>
+        <div class="metric"><div class="label">Profile</div><div class="value">${escapeHtml(result.performanceProfile ? calculationProfileLabel(result.performanceProfile) : 'N/A')}</div></div>
+        <div class="metric"><div class="label">Engine time</div><div class="value">${formatElapsedMs(result.engineElapsedMs ?? result.elapsedMs)}</div></div>
+        <div class="metric"><div class="label">ChemVault processing</div><div class="value">${formatElapsedMs(result.postProcessingElapsedMs ?? Math.max(0, result.elapsedMs - (result.engineElapsedMs ?? result.elapsedMs)))}</div></div>
+        <div class="metric"><div class="label">Total elapsed</div><div class="value">${formatElapsedMs(result.elapsedMs)}</div></div>
+        <div class="metric"><div class="label">Resources</div><div class="value">${result.resourceUsage ? `${result.resourceUsage.processorCount} CPU / ${result.resourceUsage.memoryGb} GB` : 'Engine managed'}</div></div>
       </div>
       <p><strong>Molecule:</strong> ${escapeHtml(exportMoleculeLabel(context.metadata))}</p>
       <p><strong>Total charge:</strong> ${context.charge}</p>
@@ -3683,6 +4025,10 @@ function buildQuantumLogText(result: QuantumCalculationResult, context: QuantumE
     `Engine: ${result.engineLabel}`,
     `Method: ${result.method}`,
     `Calculation mode: ${result.gaussianTaskLabel || result.calculationMode}`,
+    `Performance profile: ${result.performanceProfile ? calculationProfileLabel(result.performanceProfile) : 'N/A'}`,
+    `Output detail: ${result.outputDetail || 'standard'}`,
+    `Resources: ${result.resourceUsage ? `${result.resourceUsage.processorCount} processors, ${result.resourceUsage.memoryGb} GB memory` : 'Engine managed'}`,
+    `Checkpoint reused: ${result.reusedCheckpoint ? 'Yes' : 'No'}`,
     `Total charge: ${context.charge}`,
     `Unpaired electrons: ${context.unpairedElectrons}`,
     `ChemVault quality score: ${typeof context.diagnosis?.qualityScore === 'number' ? `${context.diagnosis.qualityScore}/100` : 'N/A'}`,
@@ -3692,6 +4038,9 @@ function buildQuantumLogText(result: QuantumCalculationResult, context: QuantumE
     `Total energy: ${result.energyHartree === null ? 'N/A' : `${formatNumber(result.energyHartree)} Eh`}`,
     `Dipole magnitude: ${result.dipoleDebye ? `${formatNumber(result.dipoleDebye.total)} D` : 'N/A'}`,
     `Partial charges: ${result.charges.length}`,
+    `Engine time: ${formatElapsedMs(result.engineElapsedMs ?? result.elapsedMs)}`,
+    `ChemVault processing time: ${formatElapsedMs(result.postProcessingElapsedMs ?? Math.max(0, result.elapsedMs - (result.engineElapsedMs ?? result.elapsedMs)))}`,
+    `Total elapsed time: ${formatElapsedMs(result.elapsedMs)}`,
     '',
     ...(advancedLines.length ? ['Advanced parsed results', ...advancedLines, ''] : []),
     ...diagnosisLines,
@@ -3740,6 +4089,14 @@ function formatNumber(value: number) {
   return Number.isFinite(value) ? value.toFixed(4) : 'N/A';
 }
 
+function formatElapsedMs(value: number) {
+  return `${(Math.max(0, value) / 1000).toFixed(1)} s`;
+}
+
+function calculationProfileLabel(profile: QuantumCalculationProfile) {
+  return calculationProfiles.find((entry) => entry.id === profile)?.label || profile;
+}
+
 function formatSigned(value: number) {
   if (!Number.isFinite(value)) return 'N/A';
   return `${value >= 0 ? '+' : ''}${value.toFixed(4)}`;
@@ -3758,4 +4115,30 @@ function isCommercialEngine(engine: QuantumEngineKind): engine is CommercialQuan
 
 function externalMethodLabel(config: ExternalQuantumEngineConfig) {
   return config.basisSet ? `${config.method}/${config.basisSet}` : config.method;
+}
+
+function gaussianConfigForProfile(
+  profile: Exclude<QuantumCalculationProfile, 'fast-screening'>,
+  config: ExternalQuantumEngineConfig
+): ExternalQuantumEngineConfig {
+  if (profile === 'high-accuracy') {
+    return {
+      ...config,
+      engine: 'gaussian',
+      method: 'B3LYP',
+      basisSet: 'def2-TZVP',
+      routeOptions: 'SCF=Tight Integral=UltraFine',
+      outputDetail: 'charges',
+      performanceProfile: 'high-accuracy'
+    };
+  }
+  return {
+    ...config,
+    engine: 'gaussian',
+    method: 'B3LYP',
+    basisSet: '6-31G(d)',
+    routeOptions: '',
+    outputDetail: 'standard',
+    performanceProfile: 'balanced'
+  };
 }

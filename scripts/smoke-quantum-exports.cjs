@@ -57,7 +57,13 @@ const sampleResult = {
   excitedStates: [{ state: 1, label: 'Singlet-A', energyEv: 4.1123, wavelengthNm: 301.49, oscillatorStrength: 0.0214 }],
   nmrShielding: [{ index: 1, element: 'O', isotropicPpm: 220.125 }],
   optimizedXyz: '3\nOptimized geometry parsed by ChemVault Model\nO 0 0 0\nH 0 1 0\nH 0 -1 0\n',
+  performanceProfile: 'balanced',
+  outputDetail: 'charges',
+  resourceUsage: { processorCount: 8, memoryGb: 12, scratchDirectory: 'C:\\GaussianScratch' },
+  reusedCheckpoint: true,
   elapsedMs: 42000,
+  engineElapsedMs: 40000,
+  postProcessingElapsedMs: 2000,
   warnings: [],
   outputTail: 'SCF Done: E(RB3LYP) = -76.4089507708\nNormal termination of Gaussian 16',
   outputLog: 'SCF Done: E(RB3LYP) = -76.4089507708\nNormal termination of Gaussian 16'
@@ -95,6 +101,8 @@ assert.ok(xlsxEntries['xl/worksheets/sheet2.xml']);
 assert.ok(xlsxEntries['xl/drawings/drawing1.xml']);
 assert.ok(xlsxEntries['xl/media/chemvault-logo.png']);
 assert.match(xlsxEntries['xl/worksheets/sheet1.xml'].toString('utf8'), /drawing r:id="rIdLogo"/u);
+assert.match(xlsxEntries['xl/worksheets/sheet1.xml'].toString('utf8'), /Performance profile/u);
+assert.match(xlsxEntries['xl/worksheets/sheet1.xml'].toString('utf8'), /Engine time/u);
 assert.match(xlsxEntries['docProps/core.xml'].toString('utf8'), /ChemVault Quantum Calculation Report/u);
 assert.match(xlsxEntries['docProps/custom.xml'].toString('utf8'), /Copyright/u);
 
@@ -106,6 +114,7 @@ assert.ok(docxEntries['word/_rels/footer1.xml.rels']);
 assert.match(docxEntries['word/footer1.xml'].toString('utf8'), /Page/u);
 assert.match(docxEntries['word/footer1.xml'].toString('utf8'), /Copyright \(c\) ChemVault/u);
 assert.match(docxEntries['word/footer1.xml'].toString('utf8'), /r:embed="rIdLogo"/u);
+assert.match(docxEntries['word/document.xml'].toString('utf8'), /ChemVault processing time/u);
 
 const pdfText = Buffer.from(pdf).toString('latin1');
 assert.ok(pdfText.startsWith('%PDF-1.4'));
@@ -114,6 +123,8 @@ assert.match(pdfText, /Copyright \\\(c\\\) ChemVault/u);
 assert.match(pdfText, /Page 1 of/u);
 assert.match(pdfText, /\/ImLogo Do/u);
 assert.match(pdfText, /\/Subtype \/Image/u);
+assert.match(pdfText, /ChemVault processing/u);
+assert.match(pdfText, /Engine time/u);
 assert.equal(CHEMVAULT_COPYRIGHT_NOTICE, 'Copyright (c) ChemVault. All rights reserved.');
 
 if (process.env.CHEMVAULT_EXPORT_SMOKE_DIR) {

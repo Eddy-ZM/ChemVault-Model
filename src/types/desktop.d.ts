@@ -70,6 +70,7 @@ declare global {
       }>;
       saveExternalQuantumConfig: (config: ExternalQuantumEngineConfig) => Promise<ExternalQuantumEngineConfig>;
       selectQuantumEngineExecutable: (engine: CommercialQuantumEngineKind) => Promise<string | null>;
+      selectGaussianScratchDirectory: () => Promise<string | null>;
       getGaussianBridgeTools: () => Promise<GaussianBridgeTools>;
       runGaussianFormchk: (request: GaussianBridgeRequest) => Promise<GaussianBridgeResult>;
       runGaussianCubegen: (request: GaussianBridgeRequest) => Promise<GaussianBridgeResult>;

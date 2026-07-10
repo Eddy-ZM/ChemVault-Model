@@ -6,6 +6,10 @@ export type LocalOpenSourceEngineKind = 'xtb' | 'pyscf' | 'psi4';
 
 export type QuantumCalculationMode = 'single-point' | 'geometry-optimization';
 
+export type QuantumCalculationProfile = 'fast-screening' | 'balanced' | 'high-accuracy';
+
+export type GaussianOutputDetail = 'standard' | 'charges' | 'orbitals';
+
 export type GaussianTaskTemplateId =
   | 'single-point'
   | 'geometry-optimization'
@@ -113,6 +117,11 @@ export type ExternalQuantumEngineConfig = {
   method: string;
   basisSet: string;
   routeOptions?: string;
+  processorCount: number;
+  memoryGb: number;
+  scratchDirectory?: string;
+  outputDetail: GaussianOutputDetail;
+  performanceProfile: Exclude<QuantumCalculationProfile, 'fast-screening'>;
 };
 
 export type QuantumCalculationRequest = {
@@ -127,6 +136,13 @@ export type QuantumCalculationRequest = {
   calculationMode?: QuantumCalculationMode;
   gaussianTask?: GaussianTaskTemplateId;
   timeoutMs?: number;
+  processorCount?: number;
+  memoryGb?: number;
+  scratchDirectory?: string;
+  outputDetail?: GaussianOutputDetail;
+  performanceProfile?: QuantumCalculationProfile;
+  reuseGaussianCheckpoint?: boolean;
+  gaussianCheckpointBase64?: string;
 };
 
 export type QuantumCancelResult = {
@@ -154,6 +170,7 @@ export type GaussianCalculationFiles = {
   output?: QuantumCalculationFileAttachment;
   checkpoint?: QuantumCalculationFileAttachment;
   checkpointUnavailableReason?: string;
+  reusedCheckpoint?: boolean;
 };
 
 export type GaussianBridgeToolStatus = {
@@ -204,6 +221,8 @@ export type QuantumCalculationResult = {
   calculationMode: QuantumCalculationMode;
   gaussianTask?: GaussianTaskTemplateId;
   gaussianTaskLabel?: string;
+  performanceProfile?: QuantumCalculationProfile;
+  outputDetail?: GaussianOutputDetail;
   energyHartree: number | null;
   dipoleDebye: {
     x: number;
@@ -250,6 +269,12 @@ export type QuantumCalculationResult = {
   elapsedMs: number;
   engineElapsedMs?: number;
   postProcessingElapsedMs?: number;
+  resourceUsage?: {
+    processorCount: number;
+    memoryGb: number;
+    scratchDirectory?: string;
+  };
+  reusedCheckpoint?: boolean;
   warnings: string[];
   outputTail: string;
   outputLog?: string;

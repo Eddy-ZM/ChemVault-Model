@@ -23,7 +23,7 @@ new Function('exports', 'require', 'module', '__filename', '__dirname', compiled
   path.dirname(sourcePath)
 );
 
-const { diagnoseQuantumCalculation } = localModule.exports;
+const { diagnoseQuantumCalculation, validateQuantumPreflight } = localModule.exports;
 
 const baseResult = {
   ok: false,
@@ -57,5 +57,28 @@ const chargeDiagnosis = diagnoseQuantumCalculation({
   error: 'Gaussian stopped before completion.'
 });
 assert.equal(chargeDiagnosis.title, 'Charge or spin setting failed');
+
+const standardOutputPreflight = validateQuantumPreflight({
+  basisSet: '6-31G(d)',
+  calculationMode: 'single-point',
+  charge: 0,
+  engine: 'gaussian',
+  gaussianTask: 'single-point',
+  method: 'B3LYP',
+  routeOptions: '',
+  unpairedElectrons: 0,
+  xyz: '3\nwater\nO 0 0 0\nH 0 1 0\nH 0 -1 0\n'
+});
+assert.equal(standardOutputPreflight.canRun, true);
+assert.equal(standardOutputPreflight.issues.some((issue) => /population analysis not requested/iu.test(issue.title)), false);
+
+const missingChargeDiagnosis = diagnoseQuantumCalculation({
+  ...baseResult,
+  ok: true,
+  warnings: [],
+  outputTail: 'Normal termination of Gaussian 16'
+});
+assert.match(missingChargeDiagnosis.suggestedActions.join(' '), /Detailed charges|Pop=Regular/iu);
+assert.doesNotMatch(missingChargeDiagnosis.suggestedActions.join(' '), /Pop=Full/iu);
 
 console.log('Quantum workflow diagnosis samples passed.');

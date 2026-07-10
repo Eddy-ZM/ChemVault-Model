@@ -381,16 +381,6 @@ export function validateQuantumPreflight(options: {
   }
 
   if (options.engine === 'gaussian') {
-    const routeOptions = String(options.routeOptions || '');
-    if (!/pop\s*=/iu.test(routeOptions)) {
-      issues.push({
-        severity: 'info',
-        title: 'Population analysis not requested',
-        detail: 'Gaussian may not return Mulliken charges unless the route includes a population analysis keyword.',
-        action: 'Keep Pop=Full when you want ChemVault to parse partial charges.'
-      });
-    }
-
     if (options.gaussianTask === 'frequency' && options.calculationMode === 'single-point') {
       issues.push({
         severity: 'info',
@@ -524,7 +514,7 @@ export function diagnoseQuantumCalculation(
 
     if (result.energyHartree !== null) {
       if (!result.dipoleDebye) suggestedActions.push('Check whether the selected route prints dipole moments for this job type.');
-      if (result.charges.length === 0) suggestedActions.push('For Gaussian, keep Pop=Full or another population analysis keyword in route options.');
+      if (result.charges.length === 0) suggestedActions.push('For Gaussian, choose Detailed charges output or add Pop=Regular to the route options.');
       return withQuality({
         severity: 'warning',
         title: 'Calculation completed with limited parsed data',
@@ -632,12 +622,12 @@ export function diagnoseQuantumCalculation(
 
   if (/nbo.*not found|nbo.*unavailable|unknown keyword.*nbo|pop=nbo/iu.test(text)) {
     suggestedActions.push('Confirm that licensed NBO support is installed for this Gaussian setup.');
-    suggestedActions.push('Rerun with Pop=Full or another standard population route if NBO is not available.');
+    suggestedActions.push('Rerun with Detailed charges output or Pop=Regular if NBO is not available.');
     return failureDiagnosis('NBO support is unavailable', 'The selected local Gaussian/NBO installation could not run the requested NBO analysis.', highlights, suggestedActions, quality, [
       {
-        label: 'Use Mulliken route',
-        routeOption: 'Pop=Full',
-        detail: 'Falls back to a standard Gaussian population analysis that ChemVault can parse.'
+        label: 'Use Mulliken charges',
+        routeOption: 'Pop=Regular',
+        detail: 'Falls back to Gaussian Mulliken population analysis without full orbital printing.'
       }
     ]);
   }

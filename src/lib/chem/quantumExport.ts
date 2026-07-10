@@ -65,6 +65,9 @@ export function createQuantumExcelWorkbook(result: QuantumCalculationResult, con
     ['ChemVault Quantum Calculation Report'],
     ...summaryRows,
     [],
+    ['Computed Properties'],
+    ...computedPropertyRows(result),
+    [],
     ['Warnings'],
     ...warnings.map((warning) => [warning]),
     [],
@@ -190,7 +193,9 @@ export function createQuantumPdfDocument(result: QuantumCalculationResult, conte
     ['Dipole magnitude', result.dipoleDebye ? `${formatNumber(result.dipoleDebye.total)} D` : 'N/A'],
     ['Partial charges', String(result.charges.length)],
     ['Run mode', result.gaussianTaskLabel || (result.calculationMode === 'geometry-optimization' ? 'Optimized' : 'Single point')],
-    ['Elapsed time', `${(result.elapsedMs / 1000).toFixed(1)} s`]
+    ['Engine time', formatElapsedMs(result.engineElapsedMs ?? result.elapsedMs)],
+    ['ChemVault processing', formatElapsedMs(result.postProcessingElapsedMs ?? Math.max(0, result.elapsedMs - (result.engineElapsedMs ?? result.elapsedMs)))],
+    ['Total elapsed', formatElapsedMs(result.elapsedMs)]
   ]);
   if (result.dipoleDebye) drawPdfDipoleCard(layout, result);
   drawPdfAdvancedResults(layout, result);
@@ -669,6 +674,11 @@ function quantumSummaryRows(result: QuantumCalculationResult, context: QuantumEx
     ['Engine', result.engineLabel],
     ['Method', result.method],
     ['Calculation mode', result.gaussianTaskLabel || result.calculationMode],
+    ['Performance profile', result.performanceProfile ? profileLabel(result.performanceProfile) : 'N/A'],
+    ['Output detail', result.outputDetail || 'standard'],
+    ['Processors', result.resourceUsage ? String(result.resourceUsage.processorCount) : 'Engine managed'],
+    ['Memory', result.resourceUsage ? `${result.resourceUsage.memoryGb} GB` : 'Engine managed'],
+    ['Checkpoint reused', result.reusedCheckpoint ? 'Yes' : 'No'],
     ['Total charge', String(context.charge)],
     ['Unpaired electrons', String(context.unpairedElectrons)],
     ['ChemVault quality score', typeof context.diagnosis?.qualityScore === 'number' ? `${context.diagnosis.qualityScore}/100` : 'N/A'],
@@ -685,7 +695,9 @@ function computedPropertyRows(result: QuantumCalculationResult) {
     ['Dipole Z', result.dipoleDebye ? `${formatSigned(result.dipoleDebye.z)} D` : 'N/A'],
     ['Partial charges', String(result.charges.length)],
     ['Charge model', result.chargeModel],
-    ['Elapsed time', `${(result.elapsedMs / 1000).toFixed(1)} s`]
+    ['Engine time', formatElapsedMs(result.engineElapsedMs ?? result.elapsedMs)],
+    ['ChemVault processing time', formatElapsedMs(result.postProcessingElapsedMs ?? Math.max(0, result.elapsedMs - (result.engineElapsedMs ?? result.elapsedMs)))],
+    ['Total elapsed time', formatElapsedMs(result.elapsedMs)]
   ];
   if (result.frontierOrbitals) {
     rows.push(
@@ -747,6 +759,17 @@ function preflightRowsForExport(context: QuantumExportDocumentContext) {
 
 function moleculeLabel(metadata?: QuantumExportMetadata) {
   return metadata?.name || metadata?.pdbId || metadata?.cid || metadata?.fileName || metadata?.smiles || 'Unnamed molecule';
+}
+
+function formatElapsedMs(value: number) {
+  return `${(Math.max(0, value) / 1000).toFixed(1)} s`;
+}
+
+function profileLabel(value: string) {
+  if (value === 'fast-screening') return 'Fast screening';
+  if (value === 'high-accuracy') return 'High accuracy';
+  if (value === 'balanced') return 'Balanced';
+  return value;
 }
 
 function logText(result: QuantumCalculationResult) {

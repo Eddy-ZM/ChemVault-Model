@@ -63,14 +63,24 @@ const DEFAULT_EXTERNAL_ENGINE_CONFIG = {
     executablePath: '',
     method: 'B3LYP',
     basisSet: '6-31G(d)',
-    routeOptions: 'Pop=Full'
+    routeOptions: '',
+    processorCount: 0,
+    memoryGb: 0,
+    scratchDirectory: '',
+    outputDetail: 'standard',
+    performanceProfile: 'balanced'
   },
   orca: {
     engine: 'orca',
     executablePath: '',
     method: 'B3LYP',
     basisSet: 'def2-SVP',
-    routeOptions: 'TightSCF'
+    routeOptions: 'TightSCF',
+    processorCount: 4,
+    memoryGb: 4,
+    scratchDirectory: '',
+    outputDetail: 'standard',
+    performanceProfile: 'balanced'
   }
 };
 const ATOMIC_SYMBOLS = [
@@ -110,6 +120,7 @@ ipcMain.handle('quantum:external-config:get', async (_event, engine) => getExter
 ipcMain.handle('quantum:external-config:save', async (_event, config) => saveExternalQuantumConfig(config));
 ipcMain.handle('quantum:external-config:discover', async (_event, engine) => discoverAndSaveExternalQuantumConfig(engine));
 ipcMain.handle('quantum:select-executable', async (_event, engine) => selectQuantumEngineExecutable(engine));
+ipcMain.handle('quantum:select-scratch-directory', async () => selectGaussianScratchDirectory());
 ipcMain.handle('quantum:gaussian-tools', async () => getGaussianBridgeTools());
 ipcMain.handle('quantum:gaussian-formchk', async (_event, request) => runGaussianFormchk(request));
 ipcMain.handle('quantum:gaussian-cubegen', async (_event, request) => runGaussianCubegen(request));
@@ -818,9 +829,13 @@ async function runQuantumCalculation(request, onProgress = () => {}) {
         )
       }
     );
+    const engineCompletedAt = Date.now();
     const output = `${processResult.stdout}\n${processResult.stderr}`.trim();
     emitCalculationProgress(onProgress, 'xtb', 'reading-output', 86, 'Reading xTB result files.', outputTail(output), startedAt);
     const charges = await readCharges(workDir, xyz);
+    const optimizedXyz = calculationMode === 'geometry-optimization'
+      ? normalizeQuantumInput(await readOptionalText(path.join(workDir, 'xtbopt.xyz')))
+      : null;
     emitCalculationProgress(onProgress, 'xtb', 'parsing-output', 94, 'Parsing xTB energy, dipole, and charge output.', outputTail(output), startedAt);
     const energyHartree = parseEnergy(output);
     const dipoleDebye = parseDipole(output);
@@ -832,18 +847,24 @@ async function runQuantumCalculation(request, onProgress = () => {}) {
     if (!dipoleDebye) warnings.push('Dipole moment was not found in xTB output.');
     if (charges.length === 0) warnings.push('Partial charges file was not produced by xTB.');
 
+    const completedAt = Date.now();
     const result = {
       ok: processResult.exitCode === 0 && !processResult.cancelled,
       cancelled: processResult.cancelled || undefined,
+      timedOut: processResult.timedOut || undefined,
       engine: 'xtb',
       engineLabel: QUANTUM_ENGINE_LABELS.xtb,
       method: 'GFN2-xTB',
       calculationMode,
+      performanceProfile: 'fast-screening',
       energyHartree,
       dipoleDebye,
       charges,
       chargeModel: 'xTB population analysis',
-      elapsedMs: Date.now() - startedAt,
+      optimizedXyz,
+      elapsedMs: completedAt - startedAt,
+      engineElapsedMs: engineCompletedAt - runStartedAt,
+      postProcessingElapsedMs: completedAt - engineCompletedAt,
       warnings,
       outputTail: outputTail(output),
       outputLog: output,
@@ -936,6 +957,15 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
   const method = sanitizeQuantumToken(request?.method) || config.method;
   const basisSet = sanitizeQuantumToken(request?.basisSet) || config.basisSet;
   const routeOptions = sanitizeRouteOptions(request?.routeOptions || config.routeOptions || '');
+  const outputDetail = normalizeGaussianOutputDetail(request?.outputDetail || config.outputDetail);
+  const performanceProfile = request?.performanceProfile === 'fast-screening'
+    ? 'fast-screening'
+    : normalizeGaussianPerformanceProfile(request?.performanceProfile || config.performanceProfile);
+  const resourceDefaults = gaussianResourceDefaults();
+  const processorCount = boundedInteger(request?.processorCount, config.processorCount || resourceDefaults.processors, 1, resourceDefaults.availableProcessors);
+  const memoryGb = boundedInteger(request?.memoryGb, config.memoryGb || resourceDefaults.memoryGb, 1, resourceDefaults.memoryCapGb);
+  const scratchDirectory = String(request?.scratchDirectory || config.scratchDirectory || '').trim();
+  const reuseGaussianCheckpoint = engineKind === 'gaussian' && Boolean(request?.reuseGaussianCheckpoint && request?.gaussianCheckpointBase64);
   const calculationId = normalizeCalculationId(request?.calculationId);
   const methodLabel = externalMethodLabel({ ...config, method, basisSet });
   const baseResult = {
@@ -945,6 +975,14 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
     method: methodLabel,
     calculationMode,
     ...(gaussianTask ? { gaussianTask, gaussianTaskLabel } : {}),
+    performanceProfile,
+    outputDetail,
+    resourceUsage: {
+      processorCount,
+      memoryGb,
+      ...(scratchDirectory ? { scratchDirectory } : {})
+    },
+    reusedCheckpoint: reuseGaussianCheckpoint || undefined,
     energyHartree: null,
     dipoleDebye: null,
     charges: [],
@@ -988,8 +1026,21 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
   try {
     emitCalculationProgress(onProgress, engineKind, 'writing-input', 18, `Writing ${engineLabel} input files.`, undefined, startedAt);
     const job = engineKind === 'gaussian'
-      ? await prepareGaussianJob(workDir, xyz, { charge, multiplicity, method, basisSet, routeOptions, calculationMode, gaussianTask })
-      : await prepareOrcaJob(workDir, xyz, { charge, multiplicity, method, basisSet, routeOptions, calculationMode });
+      ? await prepareGaussianJob(workDir, xyz, {
+          charge,
+          multiplicity,
+          method,
+          basisSet,
+          routeOptions,
+          calculationMode,
+          gaussianTask,
+          processorCount,
+          memoryGb,
+          outputDetail,
+          reuseCheckpoint: reuseGaussianCheckpoint,
+          checkpointBase64: request?.gaussianCheckpointBase64
+        })
+      : await prepareOrcaJob(workDir, xyz, { charge, multiplicity, method, basisSet, routeOptions, calculationMode, processorCount, memoryGb });
     emitCalculationProgress(onProgress, engineKind, 'starting-engine', 28, `Starting ${engineLabel} calculation process.`, undefined, startedAt);
     const runStartedAt = Date.now();
     const processResult = engineKind === 'gaussian'
@@ -1001,7 +1052,7 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
         `${engineLabel} is running the quantum calculation.`,
         output,
         startedAt
-      ), calculationId)
+      ), calculationId, { scratchDirectory })
       : await runProcessWithProgress(config.executablePath, job.args, {
         cwd: workDir,
         timeoutMs,
@@ -1058,6 +1109,8 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
       method: methodLabel,
       calculationMode,
       ...(gaussianTask ? { gaussianTask, gaussianTaskLabel } : {}),
+      performanceProfile,
+      outputDetail,
       energyHartree,
       dipoleDebye,
       charges,
@@ -1071,10 +1124,16 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
       elapsedMs: completedAt - startedAt,
       engineElapsedMs: engineCompletedAt - runStartedAt,
       postProcessingElapsedMs: completedAt - engineCompletedAt,
+      resourceUsage: {
+        processorCount,
+        memoryGb,
+        ...(scratchDirectory ? { scratchDirectory } : {})
+      },
+      reusedCheckpoint: reuseGaussianCheckpoint || undefined,
       warnings,
       outputTail: outputTail(output),
       outputLog: output,
-      gaussianFiles,
+      gaussianFiles: gaussianFiles ? { ...gaussianFiles, reusedCheckpoint: reuseGaussianCheckpoint || undefined } : undefined,
       error: completedOk ? undefined : diagnoseExternalEngineFailure(engineKind, processResult, output, config)
     };
     emitCalculationProgress(
@@ -1088,6 +1147,7 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
     );
     return result;
   } catch (error) {
+    const completedAt = Date.now();
     emitCalculationProgress(
       onProgress,
       engineKind,
@@ -1099,7 +1159,9 @@ async function runExternalQuantumCalculation(engineKind, request, onProgress = (
     );
     return {
       ...baseResult,
-      elapsedMs: Date.now() - startedAt,
+      elapsedMs: completedAt - startedAt,
+      engineElapsedMs: 0,
+      postProcessingElapsedMs: completedAt - startedAt,
       error: error instanceof Error ? error.message : `${engineLabel} calculation failed.`
     };
   } finally {
@@ -1897,8 +1959,8 @@ function replacementCount(value) {
   return (String(value).match(/\uFFFD/gu) || []).length;
 }
 
-async function runGaussianJob(executablePath, job, workDir, timeoutMs, onOutput = () => {}, jobId = '') {
-  const env = buildExternalEngineEnv('gaussian', executablePath, workDir);
+async function runGaussianJob(executablePath, job, workDir, timeoutMs, onOutput = () => {}, jobId = '', runtime = {}) {
+  const env = buildGaussianEnv(executablePath, workDir, runtime.scratchDirectory);
   const readProgress = createIncrementalFileReader(job.outputPath, GAUSSIAN_LOG_PROGRESS_CHUNK_BYTES);
   let pollInFlight = false;
   const pollOutput = setInterval(async () => {
@@ -1980,10 +2042,10 @@ function buildExternalEngineEnv(engineKind, executablePath, workDir) {
   };
 }
 
-function buildGaussianEnv(executablePath, workDir) {
+function buildGaussianEnv(executablePath, workDir, requestedScratchDirectory = '') {
   const executableDir = path.dirname(executablePath);
   const installRoot = gaussianInstallRoot(executableDir);
-  const scratchDir = path.join(workDir, 'gaussian-scratch');
+  const scratchDir = String(requestedScratchDirectory || '').trim() || path.join(workDir, 'gaussian-scratch');
   fs.mkdirSync(scratchDir, { recursive: true });
 
   const pathEntries = [
@@ -2406,6 +2468,15 @@ async function selectQuantumEngineExecutable(engineValue) {
   return result.filePaths[0];
 }
 
+async function selectGaussianScratchDirectory() {
+  const result = await dialog.showOpenDialog(mainWindow, {
+    title: 'Select Gaussian scratch directory',
+    properties: ['openDirectory', 'createDirectory']
+  });
+  if (result.canceled || result.filePaths.length === 0) return null;
+  return result.filePaths[0];
+}
+
 async function getGaussianBridgeTools() {
   const config = await getExternalQuantumConfig('gaussian');
   const formchkPath = resolveGaussianTool('formchk', config.executablePath);
@@ -2688,13 +2759,30 @@ function configuredLocalEngineExecutable(engine) {
 function normalizeExternalEngineConfig(value) {
   const engine = normalizeExternalEngineKind(value?.engine);
   const defaults = DEFAULT_EXTERNAL_ENGINE_CONFIG[engine];
+  const resources = gaussianResourceDefaults();
+  const processorFallback = defaults.processorCount || resources.processors;
+  const memoryFallback = defaults.memoryGb || resources.memoryGb;
   return {
     engine,
     executablePath: String(value?.executablePath || '').trim(),
     method: sanitizeQuantumToken(value?.method) || defaults.method,
     basisSet: sanitizeQuantumToken(value?.basisSet) || defaults.basisSet,
-    routeOptions: sanitizeRouteOptions(value?.routeOptions || defaults.routeOptions || '')
+    routeOptions: sanitizeRouteOptions(value?.routeOptions || defaults.routeOptions || ''),
+    processorCount: boundedInteger(value?.processorCount, processorFallback, 1, Math.max(1, resources.availableProcessors)),
+    memoryGb: boundedInteger(value?.memoryGb, memoryFallback, 1, Math.max(1, resources.memoryCapGb)),
+    scratchDirectory: String(value?.scratchDirectory || defaults.scratchDirectory || '').trim(),
+    outputDetail: normalizeGaussianOutputDetail(value?.outputDetail || defaults.outputDetail),
+    performanceProfile: normalizeGaussianPerformanceProfile(value?.performanceProfile || defaults.performanceProfile)
   };
+}
+
+function normalizeGaussianOutputDetail(value) {
+  if (value === 'charges' || value === 'orbitals') return value;
+  return 'standard';
+}
+
+function normalizeGaussianPerformanceProfile(value) {
+  return value === 'high-accuracy' ? 'high-accuracy' : 'balanced';
 }
 
 function normalizeEngineKind(value) {
@@ -3485,31 +3573,62 @@ function normalizeQuantumInput(value) {
 async function prepareGaussianJob(workDir, xyz, options) {
   const atoms = parseXyzGeometry(xyz);
   const resources = gaussianResourceDefaults();
+  const processorCount = boundedInteger(options.processorCount, resources.processors, 1, resources.availableProcessors);
+  const memoryGb = boundedInteger(options.memoryGb, resources.memoryGb, 1, resources.memoryCapGb);
   const inputPath = path.join(workDir, 'chemvault.gjf');
   const outputPath = path.join(workDir, 'chemvault.log');
   const checkpointPath = path.join(workDir, 'chemvault.chk');
+  const oldCheckpointPath = path.join(workDir, 'chemvault-old.chk');
+  if (options.reuseCheckpoint) {
+    await writeBase64File(oldCheckpointPath, options.checkpointBase64, 'A Gaussian checkpoint is required for continuation.');
+    const checkpointStat = await fs.promises.stat(oldCheckpointPath);
+    if (checkpointStat.size > MAX_GAUSSIAN_CHECKPOINT_BYTES) {
+      throw new Error('The Gaussian continuation checkpoint exceeds the supported size limit.');
+    }
+  }
+  const outputKeywords = gaussianOutputKeywords(options.outputDetail, options.routeOptions);
   const routeParts = [
-    '#p',
+    options.outputDetail === 'orbitals' ? '#p' : '#',
     `${options.method}/${options.basisSet}`,
     gaussianRouteKeywords(options.gaussianTask, options.calculationMode),
+    outputKeywords,
+    options.reuseCheckpoint ? 'Geom=AllCheck Guess=Read' : '',
     options.routeOptions
   ].filter(Boolean);
-  const content = [
-    `%NProcShared=${resources.processors}`,
-    `%Mem=${resources.memoryGb}GB`,
+  const link0 = [
+    `%NProcShared=${processorCount}`,
+    `%Mem=${memoryGb}GB`,
+    options.reuseCheckpoint ? '%OldChk=chemvault-old.chk' : '',
     '%chk=chemvault.chk',
-    routeParts.join(' '),
-    '',
-    'ChemVault Model external Gaussian job',
-    '',
-    `${options.charge} ${options.multiplicity}`,
-    ...atoms.map((atom) => `${atom.element} ${formatCoordinate(atom.x)} ${formatCoordinate(atom.y)} ${formatCoordinate(atom.z)}`),
-    '',
-    ''
-  ].join('\n');
+  ].filter(Boolean);
+  const content = options.reuseCheckpoint
+    ? [...link0, routeParts.join(' '), '', ''].join('\n')
+    : [
+        ...link0,
+        routeParts.join(' '),
+        '',
+        'ChemVault Model external Gaussian job',
+        '',
+        `${options.charge} ${options.multiplicity}`,
+        ...atoms.map((atom) => `${atom.element} ${formatCoordinate(atom.x)} ${formatCoordinate(atom.y)} ${formatCoordinate(atom.z)}`),
+        '',
+        ''
+      ].join('\n');
 
   await fs.promises.writeFile(inputPath, content, 'utf8');
-  return { args: [inputPath], checkpointPath, inputContent: content, inputPath, outputPath };
+  return { args: [inputPath], checkpointPath, inputContent: content, inputPath, oldCheckpointPath, outputPath };
+}
+
+function gaussianOutputKeywords(detail, routeOptions) {
+  const route = String(routeOptions || '');
+  const keywords = [];
+  if (!/\bpop\s*=/iu.test(route)) {
+    if (detail === 'charges') keywords.push('Pop=Regular');
+    if (detail === 'orbitals') keywords.push('Pop=Full');
+  }
+  if (detail === 'orbitals' && !/\bgfinput\b/iu.test(route)) keywords.push('GFInput');
+  if (detail === 'orbitals' && !/\bgfprint\b/iu.test(route)) keywords.push('GFPrint');
+  return keywords.join(' ');
 }
 
 function gaussianResourceDefaults() {
@@ -3522,6 +3641,8 @@ function gaussianResourceDefaults() {
   const automaticMemoryGb = Math.max(1, Math.min(16, Math.floor(totalMemoryGb * 0.5), memoryCapGb));
 
   return {
+    availableProcessors,
+    memoryCapGb,
     processors: boundedInteger(process.env.CHEMVAULT_GAUSSIAN_NPROC, automaticProcessors, 1, Math.max(1, availableProcessors)),
     memoryGb: boundedInteger(process.env.CHEMVAULT_GAUSSIAN_MEMORY_GB, automaticMemoryGb, 1, memoryCapGb)
   };
@@ -3538,9 +3659,12 @@ async function prepareOrcaJob(workDir, xyz, options) {
     options.calculationMode === 'geometry-optimization' ? 'Opt' : 'SP',
     options.routeOptions
   ].filter(Boolean);
+  const processorCount = Math.max(1, Number(options.processorCount) || 1);
+  const maxCoreMb = Math.max(256, Math.floor((Math.max(1, Number(options.memoryGb) || 1) * 1024) / processorCount));
   const content = [
     commandParts.join(' '),
-    '%pal nprocs 4 end',
+    `%pal nprocs ${processorCount} end`,
+    `%maxcore ${maxCoreMb}`,
     `* xyz ${options.charge} ${options.multiplicity}`,
     ...atoms.map((atom) => `${atom.element} ${formatCoordinate(atom.x)} ${formatCoordinate(atom.y)} ${formatCoordinate(atom.z)}`),
     '*',

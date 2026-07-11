@@ -9,16 +9,11 @@ export type CloudflareChemEnv = {
   CHEMVAULT_USER_ORIGIN?: string;
   CHEMVAULT_ALLOWED_ORIGINS?: string;
   RATE_LIMIT_KV?: CloudflareKvNamespace;
-  PRODUCT_ANALYTICS?: CloudflareAnalyticsEngine;
 };
 
 export type CloudflareKvNamespace = {
   get(key: string): Promise<string | null>;
   put(key: string, value: string, options?: { expirationTtl?: number }): Promise<void>;
-};
-
-export type CloudflareAnalyticsEngine = {
-  writeDataPoint(event: { blobs?: string[]; doubles?: number[]; indexes?: string[] }): void;
 };
 
 export type CloudflarePagesContext<Params extends Record<string, string | string[] | undefined> = Record<string, string | string[] | undefined>> = {
@@ -83,5 +78,24 @@ export async function consumeRateLimit(env: CloudflareChemEnv, key: string, limi
     return { configured: true as const, success: true as const, unavailable: false as const };
   } catch {
     return { configured: true as const, success: false as const, unavailable: true as const };
+  }
+}
+
+export async function recordProductEvent(env: CloudflareChemEnv, name: string, attributes: Record<string, string>) {
+  if (!env.RATE_LIMIT_KV) return false;
+  try {
+    const dimensions = JSON.stringify(Object.fromEntries(Object.entries(attributes).sort(([left], [right]) => left.localeCompare(right))));
+    const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(dimensions));
+    const dimensionHash = [...new Uint8Array(digest)].slice(0, 8).map((value) => value.toString(16).padStart(2, '0')).join('');
+    const day = new Date().toISOString().slice(0, 10);
+    const key = `event:${day}:${name}:${dimensionHash}`;
+    const previous = await env.RATE_LIMIT_KV.get(key);
+    const current = previous ? JSON.parse(previous) as { count?: number } : {};
+    await env.RATE_LIMIT_KV.put(key, JSON.stringify({ count: Number(current.count || 0) + 1, attributes }), {
+      expirationTtl: 90 * 24 * 60 * 60
+    });
+    return true;
+  } catch {
+    return false;
   }
 }

@@ -12,11 +12,5 @@
       "binding": "RATE_LIMIT_KV",
       "id": "712dd52f9ea345a695441a2fa873b0fa"
     }
-  ],
-  "analytics_engine_datasets": [
-    {
-      "binding": "PRODUCT_ANALYTICS",
-      "dataset": "chemvault_model_product_events"
-    }
   ]
 }

@@ -18,7 +18,7 @@ export const onRequestPost = async ({ request, env }: RequestContext) => {
     if (origin && !isAllowedOrigin(origin, env)) return Response.json({ error: 'Origin is not allowed.' }, { status: 403 });
     const contentLength = Number(request.headers.get('content-length') || 0);
     if (contentLength > 4096) return Response.json({ error: 'Product event payload is too large.' }, { status: 413 });
-    if (!env.RATE_LIMIT_KV || !env.PRODUCT_ANALYTICS) {
+    if (!env.RATE_LIMIT_KV) {
       return Response.json({ error: 'Product diagnostics are not configured.' }, { status: 503 });
     }
     const clientAddress = request.headers.get('cf-connecting-ip') || 'unknown';
@@ -34,11 +34,9 @@ export const onRequestPost = async ({ request, env }: RequestContext) => {
         .filter(([key, value]) => ATTRIBUTE_KEYS.has(key) && ['string', 'number', 'boolean'].includes(typeof value))
         .map(([key, value]) => [key, String(value).slice(0, 60)])
     );
-    env.PRODUCT_ANALYTICS.writeDataPoint({
-      indexes: [name],
-      blobs: ATTRIBUTE_KEYS.size > 0 ? [...ATTRIBUTE_KEYS].map((key) => attributes[key] || '') : [],
-      doubles: [1]
-    });
+    if (!(await recordProductEvent(env, name, attributes))) {
+      return Response.json({ error: 'Product diagnostics are temporarily unavailable.' }, { status: 503 });
+    }
     return new Response(null, { status: 204 });
   } catch {
     return Response.json({ error: 'Invalid product event.' }, { status: 400 });
@@ -50,5 +48,5 @@ export const onRequestOptions = async ({ request, env }: RequestContext) => {
   if (origin && !isAllowedOrigin(origin, env)) return new Response(null, { status: 403 });
   return new Response(null, { status: 204 });
 };
-import { consumeRateLimit, type CloudflareChemEnv } from '../../src/lib/cloudflare/functions';
+import { consumeRateLimit, recordProductEvent, type CloudflareChemEnv } from '../../src/lib/cloudflare/functions';
 import { isAllowedOrigin } from '../../src/lib/cloudflare/quantumSecurity';

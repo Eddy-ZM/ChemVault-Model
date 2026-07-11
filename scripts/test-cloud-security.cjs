@@ -21,6 +21,7 @@ require.extensions['.ts'] = (module, fileName) => {
 
 const security = require(path.join(root, 'src', 'lib', 'cloudflare', 'quantumSecurity.ts'));
 const publicSecurity = require(path.join(root, 'src', 'lib', 'cloudflare', 'chemApiSecurity.ts'));
+const cloudflareFunctions = require(path.join(root, 'src', 'lib', 'cloudflare', 'functions.ts'));
 const quantumRoute = require(path.join(root, 'functions', 'api', 'chem', 'quantum', 'calculate.ts'));
 if (previousTsLoader) require.extensions['.ts'] = previousTsLoader;
 else delete require.extensions['.ts'];
@@ -88,6 +89,12 @@ assert.equal(validateQuantumGatewayConfig({ QUANTUM_API_URL: 'https://quantum.ex
       body: JSON.stringify({ smiles: 'C'.repeat(70000) })
     }));
     assert.equal(oversized.status, 413);
+
+    const eventStore = memoryKv();
+    assert.equal(await cloudflareFunctions.recordProductEvent({ RATE_LIMIT_KV: eventStore.binding }, 'export_completed', { format: 'pdf' }), true);
+    assert.equal(await cloudflareFunctions.recordProductEvent({ RATE_LIMIT_KV: eventStore.binding }, 'export_completed', { format: 'pdf' }), true);
+    const eventRecord = [...eventStore.values.entries()].find(([key]) => key.startsWith('event:'))?.[1];
+    assert.equal(JSON.parse(eventRecord).count, 2);
   } finally {
     global.fetch = originalFetch;
   }
@@ -101,6 +108,17 @@ function rateLimitKv(success) {
   return {
     get: async () => success ? null : '999',
     put: async () => undefined
+  };
+}
+
+function memoryKv() {
+  const values = new Map();
+  return {
+    values,
+    binding: {
+      get: async (key) => values.get(key) ?? null,
+      put: async (key, value) => { values.set(key, value); }
+    }
   };
 }
 

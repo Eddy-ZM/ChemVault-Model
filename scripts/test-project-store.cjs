@@ -29,6 +29,11 @@ assert.deepEqual(normalizeProjectRecords([{ invalid: true }]), []);
   await writeProjectStore(filePath, [{ ...sample, moleculeName: 'Water updated' }]);
   assert.equal((await readProjectStore(filePath))[0].moleculeName, 'Water updated');
   assert.equal(fs.existsSync(`${filePath}.backup`), true);
+  const oversized = {
+    ...sample,
+    calculations: Array.from({ length: 40 }, (_, index) => ({ id: `run-${index}`, output: 'x'.repeat(150000) }))
+  };
+  await assert.rejects(() => writeProjectStore(filePath, [oversized]), /5 MB local storage limit/u);
   await fs.promises.rm(directory, { recursive: true, force: true });
   console.log('Quantum project store tests passed.');
 })().catch((error) => {

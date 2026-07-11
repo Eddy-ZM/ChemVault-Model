@@ -1,15 +1,14 @@
 # Permissions And Trust Boundaries
 
-## Cloud quantum
+| Resource | Operation | Anonymous | Signed-in user | Required enforcement |
+| --- | --- | ---: | ---: | --- |
+| Public molecule data | Search/load/generate | Allowed | Allowed | Allowed origin, bounded input, per-IP quota |
+| Cloud quantum capacity | Submit calculation | Denied | Conditional | Valid session, `chemvault_molecule`, valid payload, per-user quota, private backend token |
+| Local engines | Configure/run | Local device only | Local device only | Electron preload boundary and explicit executable selection |
+| Local projects | Read/write/export/delete | Local device only | Local device only | Electron `userData` store; write confirmation before success UI |
+| Product diagnostics | Send aggregate event | Opt-in only | Opt-in only | Local opt-in, client/server allowlists, per-IP quota |
+| GitHub release | Publish assets | Denied | Maintainer CI only | Tagged workflow with repository `contents: write` |
 
-Cloud quantum requests require a valid ChemVault session and an allowed result from `GET /api/access/check?service=chemvault_molecule`. Anonymous requests, disabled users, denied service access, disallowed origins, unsupported methods, oversized structures, and exhausted quotas are rejected before backend invocation.
+Cloud quantum authorization is derived from ChemVault User on every request rather than trusted from client UI state. The backend token authorizes only gateway-to-engine traffic and missing configuration fails closed.
 
-The Cloudflare backend token authorizes only the gateway-to-engine request. It is never sent to browsers or native clients. Missing authorization or rate-limiter configuration fails closed.
-
-## Desktop engines
-
-The user explicitly selects or installs an engine. ChemVault stores executable paths locally and invokes only the selected executable. Gaussian and ORCA require the user's own valid license. Engine processes receive bounded input, timeout, memory, processor, scratch, and file-size settings.
-
-## Diagnostics
-
-Diagnostics are disabled by default. Enabling them permits only event name, source, engine category, task category, status, duration bucket, atom-count band, export format, cache flag, application version, and platform. Client IP is used only as a rate-limit key and is not written to Analytics Engine.
+Desktop engine paths and results are not account-scoped or uploaded automatically. Gaussian and ORCA require the user's valid local license. No database or row-level security rules exist in this repository because it does not own a multi-tenant database.

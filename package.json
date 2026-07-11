@@ -23,6 +23,7 @@
     "test:exports": "node scripts/smoke-quantum-exports.cjs",
     "test:quantum": "node scripts/test-gaussian-inputs.cjs && node scripts/test-gaussian-parsers.cjs && node scripts/test-engine-parsers.cjs",
     "test:gaussian-live": "node scripts/test-gaussian-live.cjs",
+    "test:engines-live": "node scripts/test-engines-live.cjs",
     "test:workflow": "node scripts/test-quantum-workflow.cjs",
     "start": "next start",
     "preview": "npm run build && npx --yes wrangler@4 pages dev out --compatibility-date=2026-06-23 --port 8788",

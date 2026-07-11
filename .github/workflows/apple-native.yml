@@ -41,6 +41,14 @@ jobs:
           -scheme ChemVaultMolecule-macOS
           -destination 'platform=macOS'
           CODE_SIGNING_ALLOWED=NO
+      - name: Run native parser and model tests
+        working-directory: ChemVault-Molecule-Apple
+        run: >-
+          xcodebuild test
+          -project ChemVaultMolecule.xcodeproj
+          -scheme ChemVaultMolecule-macOS
+          -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO
       - name: Preserve generated wrapper for Xcode Cloud bootstrap
         uses: actions/upload-artifact@v4
         with:

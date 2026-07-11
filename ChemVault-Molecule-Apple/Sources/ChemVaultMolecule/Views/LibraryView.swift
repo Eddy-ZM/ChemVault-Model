@@ -73,7 +73,9 @@ struct LibraryView: View {
     }
 
     private var supportedImportTypes: [UTType] {
-        [.plainText, .data] + ["mol", "sdf", "xyz", "pdb", "smi", "smiles"].compactMap(UTType.init(filenameExtension:))
+        [.plainText, .data] + ["mol", "sdf", "xyz", "pdb", "smi", "smiles"].compactMap {
+            UTType(filenameExtension: $0)
+        }
     }
 
     private func handleImport(_ result: Result<[URL], Error>) {

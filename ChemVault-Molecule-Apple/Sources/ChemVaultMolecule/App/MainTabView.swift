@@ -117,10 +117,7 @@ private struct SidebarMainView: View {
                 .padding(.horizontal, 16)
                 .padding(.top, 16)
 
-                List(sections, selection: $selection) { section in
-                    NavigationRow(section: section)
-                        .tag(section)
-                }
+                sectionList
                 .listStyle(.sidebar)
             }
             .background(AppTheme.workspaceBackground)
@@ -130,6 +127,29 @@ private struct SidebarMainView: View {
                     .navigationTitle(selection.rawValue)
             }
         }
+    }
+
+    @ViewBuilder
+    private var sectionList: some View {
+#if os(macOS)
+        List(sections, selection: $selection) { section in
+            NavigationRow(section: section)
+                .tag(section)
+        }
+#else
+        List(sections) { section in
+            Button {
+                selection = section
+            } label: {
+                NavigationRow(section: section)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .buttonStyle(.plain)
+            .listRowBackground(
+                selection == section ? Color.accentColor.opacity(0.12) : Color.clear
+            )
+        }
+#endif
     }
 }
 

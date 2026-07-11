@@ -37,7 +37,9 @@ function buildQuantumRunManifest(options) {
   const inputText = String(options.inputText || options.xyz || '');
   const outputText = String(options.outputText || result.outputLog || result.outputTail || '');
   const checkpointBase64 = String(options.checkpointBase64 || '');
-  const executableName = options.executablePath ? path.basename(String(options.executablePath)) : undefined;
+  const executableName = options.executablePath
+    ? path.win32.basename(String(options.executablePath))
+    : undefined;
 
   return {
     schema: 'chemvault.quantum.run.v1',

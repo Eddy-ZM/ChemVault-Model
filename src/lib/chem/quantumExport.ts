@@ -567,9 +567,9 @@ function pdfFooterCommands(pageNumber: number, totalPages: number, hasBrandLogo 
   };
   drawPdfLine(footerLayout, PDF_MARGIN, 42, PDF_PAGE_WIDTH - PDF_MARGIN, 42, '#cbd5e1');
   if (hasBrandLogo) {
-    footerLayout.commands.push(`q\n18 0 0 18 ${PDF_MARGIN} 15 cm\n/ImLogo Do\nQ`);
+    footerLayout.commands.push(`q\n16 0 0 16 ${PDF_MARGIN} 20 cm\n/ImLogo Do\nQ`);
   }
-  drawPdfText(footerLayout, CHEMVAULT_COPYRIGHT_NOTICE, PDF_MARGIN + (hasBrandLogo ? 24 : 0), 26, { color: '#64748b', size: 7.5 });
+  drawPdfText(footerLayout, CHEMVAULT_COPYRIGHT_NOTICE, PDF_MARGIN + (hasBrandLogo ? 22 : 0), 26, { color: '#64748b', size: 7.5 });
   drawPdfText(footerLayout, `Page ${pageNumber} of ${totalPages}`, PDF_PAGE_WIDTH - PDF_MARGIN - 62, 26, { color: '#64748b', size: 7.5 });
   return footerLayout.commands.join('\n');
 }
@@ -998,7 +998,7 @@ function wordFooter(hasBrandLogo = false) {
 }
 
 function wordLogoRun() {
-  return `<w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">
+  return `<w:r><w:rPr><w:position w:val="6"/></w:rPr><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0">
     <wp:extent cx="182880" cy="182880"/><wp:effectExtent l="0" t="0" r="0" b="0"/>
     <wp:docPr id="1" name="ChemVault logo" descr="ChemVault"/>
     <wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr>

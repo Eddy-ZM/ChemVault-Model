@@ -7,8 +7,10 @@ import {
   moleculeBackendUrl,
   optionsResponse
 } from '../../../src/lib/cloudflare/functions';
+import { authorizePublicChemRequest, publicChemOptionsAllowed, readBoundedJson } from '../../../src/lib/cloudflare/chemApiSecurity';
 
-export function onRequestOptions() {
+export function onRequestOptions(context: CloudflarePagesContext) {
+  if (!publicChemOptionsAllowed(context.request, context.env)) return new Response(null, { status: 403 });
   return optionsResponse();
 }
 
@@ -31,11 +33,16 @@ async function safeFetchBackend(smiles: string, backendUrl: string) {
 }
 
 export async function onRequestPost(context: CloudflarePagesContext) {
-  const body = await context.request.json().catch(() => null);
+  const access = await authorizePublicChemRequest(context.request, context.env);
+  if (!access.ok) return jsonResponse({ error: access.error }, access.status, access.status === 429 ? { 'Retry-After': '60' } : {});
+  const parsed = await readBoundedJson(context.request);
+  if (!parsed.ok) return jsonResponse({ error: parsed.error }, parsed.status);
+  const body = parsed.value as { smiles?: unknown } | null;
   const smiles = typeof body?.smiles === 'string' ? body.smiles.trim() : '';
   if (!smiles) {
     return jsonResponse({ error: 'smiles is required' }, 400);
   }
+  if (smiles.length > 4096) return jsonResponse({ error: 'smiles is too long' }, 413);
 
   const backend = await safeFetchBackend(smiles, moleculeBackendUrl(context.env));
   if (backend) {

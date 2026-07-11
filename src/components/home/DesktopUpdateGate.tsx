@@ -220,5 +220,5 @@ function isDeferred(status: DesktopVersionStatus) {
 }
 
 function updatePair(status: DesktopVersionStatus) {
-  return `${status.currentVersion}->${status.latestVersion}`;
+  return `${status.currentVersion}:${status.currentBuildNumber}->${status.latestVersion}:${status.latestBuildNumber}:${status.latestReleaseId}`;
 }

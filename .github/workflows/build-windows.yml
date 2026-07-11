@@ -2,7 +2,15 @@ name: Build Windows Installer
 
 on:
   push:
+    branches:
+      - main
+      - test
+    tags:
+      - "v*"
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-windows:
@@ -37,14 +45,77 @@ jobs:
       - name: Build web app
         run: npm run build
 
+      - name: Run Electron UI smoke test
+        run: npm run test:electron-smoke
+
       - name: Build Windows installer
         run: npm run build:desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Create checksum and release record
+        shell: pwsh
+        id: release_files
+        run: |
+          $version = (Get-Content -Raw package.json | ConvertFrom-Json).version
+          $expectedTag = "v$version"
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and $env:GITHUB_REF_NAME -ne $expectedTag) {
+            throw "Tag $env:GITHUB_REF_NAME does not match package version $expectedTag."
+          }
+          $tag = if ($env:GITHUB_REF_TYPE -eq 'tag') { $env:GITHUB_REF_NAME } else { $expectedTag }
+          $releaseDirectory = Join-Path 'release/windows' "v$version"
+          $setup = Get-ChildItem -LiteralPath $releaseDirectory -File -Filter 'ChemVault-Model-Setup-*.exe' | Select-Object -First 1
+          $portable = Get-ChildItem -LiteralPath $releaseDirectory -File -Filter 'ChemVault-Model-Portable-*.exe' | Select-Object -First 1
+          if (-not $setup) { throw 'Windows Setup executable was not produced.' }
+          if (-not $portable) { throw 'Windows Portable executable was not produced.' }
+          $baseUrl = "https://github.com/$env:GITHUB_REPOSITORY/releases/download/$tag"
+          node scripts/create-release-record.mjs --file $setup.FullName --file $portable.FullName --app chemvault-molecular-model --platform Windows --version $version --base-url $baseUrl --output release/distribution-manifest.json
+          npm run release:manifest
+          "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "release_directory=$releaseDirectory" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "setup=$($setup.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "portable=$($portable.FullName)" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
         with:
           name: ChemVault-Model-Windows
-          path: release/**/*.exe
+          path: |
+            release/**/*.exe
+            release/**/*.sha256
+            release/**/*.json
+            release/**/*.md
           if-no-files-found: error
+
+      - name: Publish GitHub Release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release_files.outputs.tag }}
+          RELEASE_DIRECTORY: ${{ steps.release_files.outputs.release_directory }}
+        run: |
+          $assets = @(
+            Get-ChildItem -LiteralPath $env:RELEASE_DIRECTORY -File | Where-Object { $_.Extension -in @('.exe', '.sha256', '.json', '.md') }
+            Get-Item -LiteralPath 'release/distribution-manifest.json'
+          ) | Select-Object -ExpandProperty FullName -Unique
+          if (gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY 2>$null) {
+            gh release upload $env:RELEASE_TAG @assets --clobber --repo $env:GITHUB_REPOSITORY
+          } else {
+            gh release create $env:RELEASE_TAG @assets --verify-tag --title "ChemVault Model $env:RELEASE_TAG" --notes-file "$env:RELEASE_DIRECTORY/release-notes.md" --repo $env:GITHUB_REPOSITORY
+          }
+
+      - name: Verify published release assets
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ steps.release_files.outputs.tag }}
+        run: |
+          $release = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json assets,url | ConvertFrom-Json
+          $names = @($release.assets | ForEach-Object { $_.name })
+          if (-not ($names | Where-Object { $_ -like 'ChemVault-Model-Setup-*.exe' })) { throw 'Published release is missing the Setup executable.' }
+          if (-not ($names | Where-Object { $_ -like 'ChemVault-Model-Portable-*.exe' })) { throw 'Published release is missing the Portable executable.' }
+          if (-not ($names -contains 'release-manifest.json')) { throw 'Published release is missing release-manifest.json.' }
+          Write-Output "Verified release: $($release.url)"

@@ -3,10 +3,12 @@ import Foundation
 struct QuantumCalculationService: Sendable {
     var baseURL: URL
     var session: URLSession
+    var accessToken: String?
 
-    init(baseURL: URL, session: URLSession = .chemVaultQuantum) {
+    init(baseURL: URL, session: URLSession = .chemVaultQuantum, accessToken: String? = nil) {
         self.baseURL = baseURL
         self.session = session
+        self.accessToken = accessToken
     }
 
     func calculate(
@@ -64,6 +66,9 @@ struct QuantumCalculationService: Sendable {
         request.httpBody = body
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        if let accessToken, !accessToken.isEmpty {
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        }
         let (data, response) = try await session.data(for: request)
         guard let http = response as? HTTPURLResponse else { throw ChemVaultError.invalidResponse }
         guard (200..<300).contains(http.statusCode) else {

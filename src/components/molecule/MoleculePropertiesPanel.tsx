@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { QuantumEngineSetupDialog, type QuantumSetupDialogMode } from '@/components/desktop/QuantumEngineSetupDialog';
 import { GlobalLoadingOverlay } from '@/components/ui/LoadingState';
 import { QuantumResultDiagnosisPanel } from '@/components/molecule/QuantumResultDiagnosisPanel';
+import { QuantumHistoryPanel, ResultComparisonPanel } from '@/components/molecule/QuantumHistoryPanels';
 import type { ElectrostaticAnalysis } from '@/lib/chem/electrostaticAnalysis';
 import { analyzeElectrostatics, structureToXyz } from '@/lib/chem/electrostaticAnalysis';
 import type {
@@ -25,6 +26,7 @@ import type {
 } from '@/lib/chem/quantumTypes';
 import { downloadBinary, downloadText, safeFileBaseName } from '@/lib/chem/fileExport';
 import { loadChemVaultExportBranding } from '@/lib/chem/exportBranding';
+import { buildMoleculeArtifactManifest } from '@/lib/chem/artifactManifest';
 import {
   consumeQuantumEnginePreferenceNotice,
   loadQuantumEnginePreference,
@@ -54,6 +56,7 @@ import {
 } from '@/lib/chem/quantumWorkflow';
 import {
   exportQuantumProjectBundle,
+  hydrateQuantumProjects,
   importQuantumProjectBundle,
   loadQuantumProjects,
   saveQuantumProjectFromCalculation,
@@ -61,7 +64,7 @@ import {
 } from '@/lib/chem/quantumProjectWorkspace';
 import { MoleculeProperties } from '@/lib/chem/types';
 import { formatValue } from '@/lib/chem/moleculeUtils';
-import { durationBucket, trackProductEvent } from '@/lib/productTelemetry';
+import { beginQuantumCalculationJourney, durationBucket, trackProductEvent } from '@/lib/productTelemetry';
 
 type Metadata = {
   name?: string;
@@ -419,7 +422,14 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
 
   useEffect(() => {
     setHistoryEntries(loadQuantumHistory());
+    let cancelled = false;
     setProjectRecords(loadQuantumProjects());
+    void hydrateQuantumProjects().then((projects) => {
+      if (!cancelled) setProjectRecords(projects);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {
@@ -1047,11 +1057,13 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
   function exportPreparedXyz() {
     if (!preparedStructure?.xyz) return;
     downloadText(`${exportBaseName}_${exportTimestamp()}_prepared.xyz`, preparedStructure.xyz, 'chemical/x-xyz');
+    recordQuantumExport('prepared-xyz');
   }
 
   function exportCurrentGaussianInputPreview() {
     if (!gaussianInputPreview) return;
     downloadText(`${exportBaseName}_${exportTimestamp()}_current.gjf`, gaussianInputPreview, 'chemical/x-gaussian-input');
+    recordQuantumExport('gjf-preview');
   }
 
   function exportActiveProject() {
@@ -1061,6 +1073,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       exportQuantumProjectBundle(activeProject),
       'application/json'
     );
+    recordQuantumExport('project-json');
   }
 
   function exportProjectIndex() {
@@ -1073,13 +1086,14 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       }, null, 2),
       'application/json'
     );
+    recordQuantumExport('project-index-json');
   }
 
   async function importProjectFile(file: File | null) {
     if (!file) return;
     try {
       const text = await file.text();
-      const nextProjects = importQuantumProjectBundle(text);
+      const nextProjects = await importQuantumProjectBundle(text);
       setProjectRecords(nextProjects);
       setProjectMessage(`${file.name} imported into the local ChemVault project workspace.`);
     } catch (importError) {
@@ -1168,6 +1182,14 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
 
     const calculationId = `qcalc_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
     const calculationStartedAt = performance.now();
+    const productJourney = beginQuantumCalculationJourney();
+    void trackProductEvent('quantum_calculation_started', {
+      engine: runEngine,
+      task: runGaussianTask || runMode,
+      status: 'started',
+      atomBand: validation.atomCount < 20 ? '<20' : validation.atomCount < 50 ? '20-49' : validation.atomCount < 100 ? '50-99' : '100+',
+      firstRun: productJourney.firstRun
+    });
     setActiveCalculationId(calculationId);
     setRunning(true);
     setError('');
@@ -1207,12 +1229,19 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
               : 180000
       });
       setResult(nextResult);
+      void trackProductEvent('quantum_result_available', {
+        engine: runEngine,
+        task: runGaussianTask || runMode,
+        status: nextResult.ok ? 'completed' : 'failed',
+        firstRun: productJourney.firstRun
+      });
       void trackProductEvent(nextResult.ok ? 'quantum_calculation_completed' : 'quantum_calculation_failed', {
         engine: runEngine,
         task: runGaussianTask || runMode,
         status: nextResult.cancelled ? 'cancelled' : nextResult.timedOut ? 'timed-out' : nextResult.ok ? 'completed' : 'failed',
         duration: durationBucket(nextResult.elapsedMs),
-        atomBand: validation.atomCount < 20 ? '<20' : validation.atomCount < 50 ? '20-49' : validation.atomCount < 100 ? '50-99' : '100+'
+        atomBand: validation.atomCount < 20 ? '<20' : validation.atomCount < 50 ? '20-49' : validation.atomCount < 100 ? '50-99' : '100+',
+        firstRun: productJourney.firstRun
       });
       if (nextResult.ok && nextResult.engine === 'gaussian' && nextResult.gaussianFiles?.checkpoint?.contentBase64) {
         setContinuationSource({
@@ -1233,15 +1262,21 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         unpairedElectrons: runUnpairedElectrons
       });
       setHistoryEntries(saveQuantumHistoryEntry(historyEntry));
-      setProjectRecords(saveQuantumProjectFromCalculation({
-        charge: runCharge,
-        diagnosis,
-        metadata,
-        preflight: validation,
-        result: nextResult,
-        unpairedElectrons: runUnpairedElectrons
-      }));
-      setProjectMessage(`${historyEntry.moleculeName} was saved to the local ChemVault project workspace.`);
+      try {
+        const savedProjects = await saveQuantumProjectFromCalculation({
+          charge: runCharge,
+          diagnosis,
+          metadata,
+          preflight: validation,
+          result: nextResult,
+          unpairedElectrons: runUnpairedElectrons
+        });
+        setProjectRecords(savedProjects);
+        setProjectMessage(`${historyEntry.moleculeName} was saved to the local ChemVault project workspace.`);
+      } catch (storageError) {
+        setProjectMessage('The calculation finished, but its project record could not be saved. Export the result before closing the app.');
+        setError(storageError instanceof Error ? `Project save failed: ${storageError.message}` : 'Project save failed. Export the result before closing the app.');
+      }
       publishQuantumVisualOverlay(nextResult);
       if (!nextResult.ok) {
         setError(nextResult.error || 'Quantum calculation did not complete.');
@@ -1321,6 +1356,15 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     ? 'Setup is required before this engine can calculate.'
     : `${selectedEngineOption.label} is configured. Local engines and port settings are folded.`;
 
+  function recordQuantumExport(format: string) {
+    void trackProductEvent('export_completed', {
+      source: 'quantum',
+      engine: result?.engine,
+      format,
+      status: 'completed'
+    });
+  }
+
   async function exportQuantumReport() {
     if (!result) return;
     const branding = await loadChemVaultExportBranding();
@@ -1337,6 +1381,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       }),
       'text/html'
     );
+    recordQuantumExport('html');
   }
 
   function exportQuantumLog() {
@@ -1352,6 +1397,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       }),
       'text/plain'
     );
+    recordQuantumExport('txt');
   }
 
   function exportRunManifest() {
@@ -1361,6 +1407,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       JSON.stringify(result.runManifest, null, 2),
       'application/json'
     );
+    recordQuantumExport('json');
   }
 
   async function exportQuantumExcel() {
@@ -1379,6 +1426,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       }),
       'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
     );
+    recordQuantumExport('xlsx');
   }
 
   async function exportQuantumWord() {
@@ -1397,6 +1445,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       }),
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
     );
+    recordQuantumExport('docx');
   }
 
   async function exportQuantumPdf() {
@@ -1415,6 +1464,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       }),
       'application/pdf'
     );
+    recordQuantumExport('pdf');
   }
 
   function exportGaussianInput() {
@@ -1422,6 +1472,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     const input = result.gaussianFiles?.input;
     if (!input?.contentText) return;
     downloadText(`${exportBaseName}_${exportTimestamp()}_gaussian.gjf`, input.contentText, input.mimeType || 'text/plain');
+    recordQuantumExport('gjf');
   }
 
   function exportGaussianOutputText() {
@@ -1429,6 +1480,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     const output = result.gaussianFiles?.output?.contentText || result.outputLog || result.outputTail;
     if (!output) return;
     downloadText(`${exportBaseName}_${exportTimestamp()}_gaussian.txt`, output, 'text/plain');
+    recordQuantumExport('gaussian-txt');
   }
 
   function exportGaussianCheckpoint() {
@@ -1438,23 +1490,27 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     const bytes = base64ToBytes(checkpoint.contentBase64);
     if (!bytes) return;
     downloadBinary(`${exportBaseName}_${exportTimestamp()}_gaussian.chk`, bytes, checkpoint.mimeType || 'application/octet-stream');
+    recordQuantumExport('chk');
   }
 
   function exportGaussianFchk() {
     const bytes = attachmentBytes(gaussianFchk || undefined);
     if (!bytes) return;
     downloadBinary(`${exportBaseName}_${exportTimestamp()}_gaussian.fchk`, bytes, gaussianFchk?.mimeType || 'chemical/x-gaussian-formatted-checkpoint');
+    recordQuantumExport('fchk');
   }
 
   function exportGaussianCube() {
     const bytes = attachmentBytes(gaussianCube || undefined);
     if (!bytes) return;
     downloadBinary(`${exportBaseName}_${exportTimestamp()}_gaussian.cube`, bytes, gaussianCube?.mimeType || 'chemical/x-cube');
+    recordQuantumExport('cube');
   }
 
   function exportOptimizedXyz() {
     if (!result?.optimizedXyz) return;
     downloadText(`${exportBaseName}_${exportTimestamp()}_optimized.xyz`, result.optimizedXyz, 'chemical/x-xyz');
+    recordQuantumExport('optimized-xyz');
   }
 
   async function exportGaussianSuite() {
@@ -1473,6 +1529,7 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
     if (!entries.length) return;
 
     downloadBinary(`${fileBase}_suite.zip`, createZip(entries), 'application/zip');
+    recordQuantumExport('gaussian-suite');
   }
 
   const gaussianInputReady = result?.engine === 'gaussian' && Boolean(result.gaussianFiles?.input?.contentText);
@@ -2964,137 +3021,6 @@ function AdvancedGaussianResultPanel({
   );
 }
 
-function QuantumHistoryPanel({
-  entries,
-  onApply,
-  onOpenChange,
-  open
-}: {
-  entries: QuantumHistoryEntry[];
-  onApply: (entry: QuantumHistoryEntry) => void;
-  onOpenChange: (open: boolean) => void;
-  open: boolean;
-}) {
-  return (
-    <details
-      className="mt-4 rounded-2xl border border-slate-200 bg-white px-4 py-3"
-      open={open}
-      onToggle={(event) => onOpenChange(event.currentTarget.open)}
-    >
-      <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-        Local calculation history {entries.length ? `(${entries.length})` : ''}
-      </summary>
-      <div className="mt-3 grid gap-2">
-        {entries.length ? entries.slice(0, 6).map((entry) => (
-          <div key={entry.id} className="rounded-2xl border border-slate-200 bg-slate-50 px-3 py-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-bold text-slate-950">{entry.moleculeName}</p>
-                <p className="mt-1 text-xs leading-5 text-slate-500">
-                  {entry.engineLabel} / {entry.mode} / {formatHistoryDate(entry.createdAt)}
-                </p>
-                <p className="mt-1 text-xs leading-5 text-slate-600">
-                  {entry.diagnosisTitle}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => onApply(entry)}
-                className="rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Use settings
-              </button>
-            </div>
-            <div className="mt-2 flex flex-wrap gap-2 text-[11px] text-slate-600">
-              <span className="rounded-full bg-white px-2 py-1">{entry.status}</span>
-              {typeof entry.completenessScore === 'number' ? <span className="rounded-full bg-white px-2 py-1">Completeness {entry.completenessScore}/100</span> : null}
-              <span className="rounded-full bg-white px-2 py-1">{entry.method}</span>
-              <span className="rounded-full bg-white px-2 py-1">{entry.atomCount} atoms</span>
-              <span className="rounded-full bg-white px-2 py-1">
-                Energy {entry.energyHartree === null ? 'N/A' : `${formatNumber(entry.energyHartree)} Eh`}
-              </span>
-            </div>
-          </div>
-        )) : (
-          <p className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-xs leading-5 text-slate-500">
-            No local calculations have been saved yet. Completed runs will appear here and in My Molecules.
-          </p>
-        )}
-      </div>
-    </details>
-  );
-}
-
-function ResultComparisonPanel({
-  currentResult,
-  entries
-}: {
-  currentResult: QuantumCalculationResult | null;
-  entries: QuantumHistoryEntry[];
-}) {
-  const rows = [
-    ...(currentResult ? [{
-      id: 'current',
-      label: 'Current result',
-      engineLabel: currentResult.engineLabel,
-      mode: currentResult.gaussianTaskLabel || currentResult.calculationMode,
-      energyHartree: currentResult.energyHartree,
-      dipoleDebye: currentResult.dipoleDebye?.total ?? null,
-      completenessScore: undefined as number | undefined,
-      status: currentResult.ok ? 'completed' : 'failed',
-      createdAt: new Date().toISOString()
-    }] : []),
-    ...entries.slice(0, 5).map((entry) => ({
-      id: entry.id,
-      label: entry.moleculeName,
-      engineLabel: entry.engineLabel,
-      mode: entry.mode,
-      energyHartree: entry.energyHartree,
-      dipoleDebye: entry.dipoleDebye,
-      completenessScore: entry.completenessScore,
-      status: entry.status,
-      createdAt: entry.createdAt
-    }))
-  ];
-
-  return (
-    <details className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-      <summary className="cursor-pointer text-sm font-semibold text-slate-800">
-        Result comparison {rows.length ? `(${rows.length})` : ''}
-      </summary>
-      {rows.length ? (
-        <div className="mt-3 overflow-x-auto rounded-2xl border border-slate-200 bg-white">
-          <div className="grid min-w-[760px] grid-cols-[minmax(140px,1.3fr)_minmax(90px,0.7fr)_minmax(94px,0.7fr)_minmax(112px,0.8fr)_minmax(98px,0.7fr)_minmax(80px,0.5fr)] bg-slate-50 px-3 py-2 text-xs font-semibold uppercase tracking-[0.1em] text-slate-500">
-            <span>Run</span>
-            <span>Engine</span>
-            <span>Mode</span>
-            <span>Energy</span>
-            <span>Dipole</span>
-            <span>Completeness</span>
-          </div>
-          {rows.map((row) => (
-            <div key={row.id} className="grid min-w-[760px] grid-cols-[minmax(140px,1.3fr)_minmax(90px,0.7fr)_minmax(94px,0.7fr)_minmax(112px,0.8fr)_minmax(98px,0.7fr)_minmax(80px,0.5fr)] border-t border-slate-100 px-3 py-2 text-xs text-slate-700">
-              <span className="min-w-0">
-                <span className="block truncate font-semibold text-slate-950">{row.label}</span>
-                <span className="mt-0.5 block text-[10px] text-slate-500">{formatHistoryDate(row.createdAt)} / {row.status}</span>
-              </span>
-              <span>{row.engineLabel}</span>
-              <span className="truncate">{row.mode}</span>
-              <span>{row.energyHartree === null ? 'N/A' : `${formatNumber(row.energyHartree)} Eh`}</span>
-              <span>{row.dipoleDebye === null ? 'N/A' : `${formatNumber(row.dipoleDebye)} D`}</span>
-              <span>{typeof row.completenessScore === 'number' ? `${row.completenessScore}/100` : row.id === 'current' ? 'Live' : 'N/A'}</span>
-            </div>
-          ))}
-        </div>
-      ) : (
-        <p className="mt-3 rounded-xl border border-dashed border-slate-300 bg-white px-3 py-2 text-xs leading-5 text-slate-500">
-          Run a calculation to compare results across engines, routes, and structures.
-        </p>
-      )}
-    </details>
-  );
-}
-
 function MetricCompact({ label, value }: { label: string; value: string }) {
   return (
     <p className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
@@ -3552,6 +3478,11 @@ function gaussianSuiteEntries(
   if (result.runManifest) {
     entries.push({ path: `${fileBase}_run-manifest.json`, content: JSON.stringify(result.runManifest, null, 2) });
   }
+
+  entries.push({
+    path: 'ChemVault/artifact-manifest.json',
+    content: JSON.stringify(buildMoleculeArtifactManifest(result, entries), null, 2),
+  });
 
   if (brandLogoPng?.length) {
     entries.push({ path: 'ChemVault/chemvault-logo.png', content: brandLogoPng });

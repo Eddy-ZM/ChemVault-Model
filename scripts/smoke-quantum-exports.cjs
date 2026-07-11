@@ -114,6 +114,7 @@ assert.ok(docxEntries['word/_rels/footer1.xml.rels']);
 assert.match(docxEntries['word/footer1.xml'].toString('utf8'), /Page/u);
 assert.match(docxEntries['word/footer1.xml'].toString('utf8'), /Copyright \(c\) ChemVault/u);
 assert.match(docxEntries['word/footer1.xml'].toString('utf8'), /r:embed="rIdLogo"/u);
+assert.match(docxEntries['word/footer1.xml'].toString('utf8'), /<w:position w:val="6"\/>/u);
 assert.match(docxEntries['word/document.xml'].toString('utf8'), /ChemVault processing time/u);
 
 const pdfText = Buffer.from(pdf).toString('latin1');
@@ -122,6 +123,7 @@ assert.match(pdfText, /ChemVault Quantum Calculation Report/u);
 assert.match(pdfText, /Copyright \\\(c\\\) ChemVault/u);
 assert.match(pdfText, /Page 1 of/u);
 assert.match(pdfText, /\/ImLogo Do/u);
+assert.match(pdfText, /16 0 0 16 42 20 cm/u);
 assert.match(pdfText, /\/Subtype \/Image/u);
 assert.match(pdfText, /ChemVault processing/u);
 assert.match(pdfText, /Engine time/u);

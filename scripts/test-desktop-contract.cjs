@@ -12,7 +12,11 @@ for (const setting of ['nodeIntegration: false', 'contextIsolation: true', 'sand
 assert.equal(main.includes("mainWindow.on('close'"), true, 'Desktop close guard is missing.');
 assert.equal(main.includes('activeQuantumProcesses.size'), true, 'Active quantum process guard is missing.');
 assert.equal(main.includes("ipcMain.handle('quantum:queue:get'"), true, 'Queue restore IPC is missing.');
+assert.equal(main.includes("ipcMain.handle('quantum:projects:get'"), true, 'Project restore IPC is missing.');
+assert.equal(main.includes("ipcMain.handle('quantum:projects:save'"), true, 'Project save IPC is missing.');
 assert.equal(preload.includes('getQuantumQueue'), true, 'Queue restore preload bridge is missing.');
 assert.equal(preload.includes('saveQuantumQueue'), true, 'Queue save preload bridge is missing.');
+assert.equal(preload.includes('getQuantumProjects'), true, 'Project restore preload bridge is missing.');
+assert.equal(preload.includes('saveQuantumProjects'), true, 'Project save preload bridge is missing.');
 
 console.log('Desktop security and lifecycle contract tests passed.');

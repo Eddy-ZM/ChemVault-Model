@@ -609,6 +609,7 @@ export function MoleculeStudio() {
       }
       const ext = format === 'smi' ? 'smi' : format;
       downloadText(fileNameForFormat(ext, exportBaseName), content, mimeForFormat(format));
+      void trackProductEvent('export_completed', { source: 'structure', format, status: 'completed' });
     },
     [exportBaseName, toast]
   );
@@ -637,6 +638,7 @@ export function MoleculeStudio() {
         link.click();
         document.body.removeChild(link);
         window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+        void trackProductEvent('export_completed', { source: 'viewer', format: 'png', status: 'completed' });
       }
     } catch {
       toast('PNG export failed.', 'error');

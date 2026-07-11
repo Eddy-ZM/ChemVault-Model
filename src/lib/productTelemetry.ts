@@ -5,8 +5,10 @@ export type ProductEventName =
   | 'molecule_search_failed'
   | 'structure_generation_completed'
   | 'structure_generation_failed'
+  | 'quantum_calculation_started'
   | 'quantum_calculation_completed'
   | 'quantum_calculation_failed'
+  | 'quantum_result_available'
   | 'export_completed';
 
 const EVENT_NAMES = new Set<ProductEventName>([
@@ -14,11 +16,15 @@ const EVENT_NAMES = new Set<ProductEventName>([
   'molecule_search_failed',
   'structure_generation_completed',
   'structure_generation_failed',
+  'quantum_calculation_started',
   'quantum_calculation_completed',
   'quantum_calculation_failed',
+  'quantum_result_available',
   'export_completed'
 ]);
-const ATTRIBUTE_KEYS = new Set(['source', 'engine', 'task', 'status', 'duration', 'atomBand', 'format', 'cached']);
+const ATTRIBUTE_KEYS = new Set(['source', 'engine', 'task', 'status', 'duration', 'atomBand', 'format', 'cached', 'version', 'platform', 'journey', 'firstRun']);
+const JOURNEY_KEY = 'chemvault.model.productJourney.v1';
+const FIRST_CALCULATION_KEY = 'chemvault.model.firstCalculationStarted.v1';
 
 export function isProductTelemetryEnabled() {
   if (typeof window === 'undefined') return false;
@@ -38,10 +44,23 @@ export function durationBucket(milliseconds: number) {
   return '>120s';
 }
 
+export function beginQuantumCalculationJourney() {
+  if (typeof window === 'undefined') return { firstRun: false };
+  const firstRun = window.localStorage.getItem(FIRST_CALCULATION_KEY) !== 'yes';
+  window.localStorage.setItem(FIRST_CALCULATION_KEY, 'yes');
+  return { firstRun };
+}
+
 export async function trackProductEvent(name: ProductEventName, attributes: Record<string, unknown> = {}) {
   if (!isProductTelemetryEnabled() || !EVENT_NAMES.has(name)) return;
+  const enrichedAttributes = {
+    ...attributes,
+    version: packageInfo.version,
+    platform: window.chemVaultDesktop?.isDesktop ? 'windows' : 'web',
+    journey: productJourneyId()
+  };
   const safeAttributes = Object.fromEntries(
-    Object.entries(attributes)
+    Object.entries(enrichedAttributes)
       .filter(([key, value]) => ATTRIBUTE_KEYS.has(key) && ['string', 'number', 'boolean'].includes(typeof value))
       .map(([key, value]) => [key, String(value).slice(0, 60)])
   );
@@ -52,3 +71,14 @@ export async function trackProductEvent(name: ProductEventName, attributes: Reco
     keepalive: true
   }).catch(() => undefined);
 }
+
+function productJourneyId() {
+  const existing = window.sessionStorage.getItem(JOURNEY_KEY);
+  if (existing) return existing;
+  const next = typeof crypto.randomUUID === 'function'
+    ? crypto.randomUUID()
+    : `journey_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+  window.sessionStorage.setItem(JOURNEY_KEY, next);
+  return next;
+}
+import packageInfo from '../../package.json';

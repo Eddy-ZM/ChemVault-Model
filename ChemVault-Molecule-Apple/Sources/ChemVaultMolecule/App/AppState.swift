@@ -71,6 +71,7 @@ final class AppState {
     func bootstrap() async {
         await refreshRemoteConfig()
         session = authService.restoreSession()
+        quantumService.accessToken = session?.accessToken
         hasEnteredApp = session != nil
         await refreshPermissions()
         libraryStore.load()
@@ -147,6 +148,7 @@ final class AppState {
     func login(email: String, password: String) async throws {
         let nextSession = try await authService.login(email: email, password: password)
         session = nextSession
+        quantumService.accessToken = nextSession.accessToken
         hasEnteredApp = true
         await refreshPermissions()
     }
@@ -154,6 +156,7 @@ final class AppState {
     func logout() {
         authService.logout()
         session = nil
+        quantumService.accessToken = nil
         permissions = .free
         hasEnteredApp = false
     }

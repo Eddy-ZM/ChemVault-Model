@@ -61,14 +61,31 @@ export function loadQuantumProjects(): QuantumProjectRecord[] {
   }
 }
 
-export function saveQuantumProjectFromCalculation(options: {
+export async function hydrateQuantumProjects(): Promise<QuantumProjectRecord[]> {
+  const cached = loadQuantumProjects();
+  const api = typeof window !== 'undefined' ? window.chemVaultDesktop : undefined;
+  if (!api?.getQuantumProjects) return cached;
+  try {
+    const persisted = await api.getQuantumProjects();
+    const merged = mergeProjects(persisted, cached);
+    cacheQuantumProjects(merged);
+    if (merged.length !== persisted.length || (persisted.length === 0 && cached.length > 0)) {
+      await api.saveQuantumProjects(merged);
+    }
+    return merged;
+  } catch {
+    return cached;
+  }
+}
+
+export async function saveQuantumProjectFromCalculation(options: {
   charge: number;
   diagnosis: QuantumResultDiagnosis;
   metadata?: QuantumHistoryMetadata;
   preflight: QuantumPreflightResult;
   result: QuantumCalculationResult;
   unpairedElectrons: number;
-}): QuantumProjectRecord[] {
+}): Promise<QuantumProjectRecord[]> {
   const calculation = projectCalculationFromResult(options);
   const key = projectKey(options.metadata);
   const now = new Date().toISOString();
@@ -106,9 +123,7 @@ export function saveQuantumProjectFromCalculation(options: {
     .sort((first, second) => Date.parse(second.updatedAt) - Date.parse(first.updatedAt))
     .slice(0, PROJECT_LIMIT);
 
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(PROJECTS_KEY, JSON.stringify(nextProjects));
-  }
+  await persistQuantumProjects(nextProjects);
   return nextProjects;
 }
 
@@ -122,7 +137,7 @@ export function exportQuantumProjectBundle(project: QuantumProjectRecord): strin
   return JSON.stringify(bundle, null, 2);
 }
 
-export function importQuantumProjectBundle(content: string): QuantumProjectRecord[] {
+export async function importQuantumProjectBundle(content: string): Promise<QuantumProjectRecord[]> {
   const parsed = JSON.parse(content) as Partial<QuantumProjectBundle> | QuantumProjectRecord;
   const project = 'schema' in parsed ? parsed.project : parsed;
   if (!isProjectRecord(project)) {
@@ -141,17 +156,50 @@ export function importQuantumProjectBundle(content: string): QuantumProjectRecor
     .sort((first, second) => Date.parse(second.updatedAt) - Date.parse(first.updatedAt))
     .slice(0, PROJECT_LIMIT);
 
-  if (typeof window !== 'undefined') {
-    window.localStorage.setItem(PROJECTS_KEY, JSON.stringify(nextProjects));
-  }
+  await persistQuantumProjects(nextProjects);
   return nextProjects;
 }
 
-export function clearQuantumProjects() {
+export async function clearQuantumProjects() {
   if (typeof window !== 'undefined') {
     window.localStorage.removeItem(PROJECTS_KEY);
+    await window.chemVaultDesktop?.saveQuantumProjects?.([]);
   }
   return [];
+}
+
+async function persistQuantumProjects(projects: QuantumProjectRecord[]) {
+  let cacheError: unknown = null;
+  try {
+    cacheQuantumProjects(projects);
+  } catch (error) {
+    cacheError = error;
+  }
+  const desktopSave = typeof window !== 'undefined' ? window.chemVaultDesktop?.saveQuantumProjects : undefined;
+  if (desktopSave) {
+    await desktopSave(projects);
+    return;
+  }
+  if (cacheError) throw cacheError;
+}
+
+function cacheQuantumProjects(projects: QuantumProjectRecord[]) {
+  if (typeof window !== 'undefined') {
+    window.localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
+  }
+}
+
+function mergeProjects(primary: QuantumProjectRecord[], secondary: QuantumProjectRecord[]) {
+  const byId = new Map<string, QuantumProjectRecord>();
+  for (const project of [...primary, ...secondary]) {
+    if (!isProjectRecord(project)) continue;
+    const normalized = normalizeProjectRecord(project);
+    const current = byId.get(normalized.id);
+    if (!current || Date.parse(normalized.updatedAt) > Date.parse(current.updatedAt)) byId.set(normalized.id, normalized);
+  }
+  return [...byId.values()]
+    .sort((first, second) => Date.parse(second.updatedAt) - Date.parse(first.updatedAt))
+    .slice(0, PROJECT_LIMIT);
 }
 
 function projectCalculationFromResult(options: {

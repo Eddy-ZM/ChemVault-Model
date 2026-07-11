@@ -6,67 +6,68 @@ import {
   quantumBackendToken,
   quantumBackendUrl
 } from '../../../../src/lib/cloudflare/functions';
+import {
+  authorizeQuantumRequest,
+  isAllowedOrigin,
+  quantumCorsHeaders,
+  quantumQuotaKey,
+  type QuantumRequestPayload,
+  validateQuantumGatewayConfig,
+  validateQuantumPayload
+} from '../../../../src/lib/cloudflare/quantumSecurity';
 
-type QuantumPayload = {
-  moleculeName?: string;
-  structureData?: string;
-  format?: string;
-  method?: string;
-  charge?: number;
-  multiplicity?: number;
-};
-
-const MAX_STRUCTURE_BYTES = 2_000_000;
-
-export function onRequestOptions() {
-  return optionsResponse();
+export function onRequestOptions(context: CloudflarePagesContext) {
+  const origin = context.request.headers.get('origin');
+  if (origin && !isAllowedOrigin(origin, context.env)) return new Response(null, { status: 403 });
+  return optionsResponse(quantumCorsHeaders(context.request, context.env));
 }
 
 export async function onRequestPost(context: CloudflarePagesContext) {
-  const body = (await context.request.json().catch(() => null)) as QuantumPayload | null;
-  const structureData = typeof body?.structureData === 'string' ? body.structureData.trim() : '';
-  const format = normalizeFormat(body?.format);
-  const method = normalizeMethod(body?.method);
-  const charge = Number.isFinite(body?.charge) ? Number(body?.charge) : 0;
-  const multiplicity = Number.isFinite(body?.multiplicity) ? Math.max(1, Number(body?.multiplicity)) : 1;
+  const cors = quantumCorsHeaders(context.request, context.env);
+  const origin = context.request.headers.get('origin');
+  if (origin && !isAllowedOrigin(origin, context.env)) return jsonResponse({ success: false, status: 'forbidden-origin', error: 'Origin is not allowed.' }, 403, cors);
+  const contentLength = Number(context.request.headers.get('content-length') || 0);
+  if (contentLength > 2_100_000) return jsonResponse({ success: false, status: 'too-large', error: 'Request body is too large.' }, 413, cors);
 
-  if (!structureData) {
-    return jsonResponse({ success: false, status: 'invalid-input', error: 'structureData is required' }, 400);
-  }
+  const identity = await authorizeQuantumRequest(context.request, context.env).catch(() => null);
+  if (!identity) return jsonResponse({ success: false, status: 'unauthorized', error: 'Sign in with an authorized ChemVault account before using cloud quantum calculation.' }, 401, cors);
 
-  if (new TextEncoder().encode(structureData).byteLength > MAX_STRUCTURE_BYTES) {
-    return jsonResponse({ success: false, status: 'too-large', error: 'Structure payload is too large for quantum submission.' }, 413);
-  }
+  const body = (await context.request.json().catch(() => null)) as QuantumRequestPayload | null;
+  const validation = validateQuantumPayload(body);
+  if (!validation.ok) return jsonResponse({ success: false, status: 'invalid-input', error: validation.error }, validation.status, cors);
+  const { moleculeName, structureData, format, method, charge, multiplicity } = validation.value;
 
-  const backendUrl = quantumBackendUrl(context.env);
-  if (!backendUrl) {
+  const gateway = validateQuantumGatewayConfig(context.env);
+  if (!gateway.ok) {
     return jsonResponse(
       {
         success: false,
         status: 'unconfigured',
         engine: 'none',
         method,
-        error: 'Professional quantum engine is not configured for this deployment.'
+        error: gateway.error
       },
-      503
+      503,
+      cors
     );
   }
+  const backendUrl = quantumBackendUrl(context.env);
+  const token = quantumBackendToken(context.env);
+  const quota = await context.env.QUANTUM_RATE_LIMITER.limit({ key: quantumQuotaKey(identity) });
+  if (!quota.success) return jsonResponse({ success: false, status: 'rate-limited', error: 'Quantum calculation quota reached. Try again later.' }, 429, { ...cors, 'Retry-After': '60' });
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     Accept: 'application/json'
   };
-  const token = quantumBackendToken(context.env);
-  if (token) {
-    headers.Authorization = `Bearer ${token}`;
-  }
+  headers.Authorization = `Bearer ${token}`;
 
   try {
     const response = await fetchWithTimeout(calculationEndpoint(backendUrl), {
       method: 'POST',
       headers,
       body: JSON.stringify({
-        moleculeName: typeof body?.moleculeName === 'string' ? body.moleculeName : null,
+        moleculeName,
         structureData,
         format,
         method,
@@ -87,7 +88,8 @@ export async function onRequestPost(context: CloudflarePagesContext) {
           method,
           error: payload?.error || payload?.message || text || 'Quantum calculation failed.'
         },
-        response.status === 400 ? 400 : 502
+        response.status === 400 ? 400 : 502,
+        cors
       );
     }
 
@@ -97,7 +99,7 @@ export async function onRequestPost(context: CloudflarePagesContext) {
       engine: payload?.engine || 'remote-quantum',
       method: payload?.method || method,
       ...payload
-    });
+    }, 200, cors);
   } catch (error) {
     return jsonResponse(
       {
@@ -107,7 +109,8 @@ export async function onRequestPost(context: CloudflarePagesContext) {
         method,
         error: error instanceof Error ? error.message : 'Quantum calculation failed.'
       },
-      502
+      502,
+      cors
     );
   }
 }
@@ -115,19 +118,6 @@ export async function onRequestPost(context: CloudflarePagesContext) {
 function calculationEndpoint(baseUrl: string) {
   const clean = baseUrl.replace(/\/+$/u, '');
   return /\/calculate$/iu.test(clean) ? clean : `${clean}/calculate`;
-}
-
-function normalizeFormat(format: unknown) {
-  const value = typeof format === 'string' ? format.toLowerCase() : 'xyz';
-  return ['xyz', 'sdf', 'mol', 'pdb', 'cif'].includes(value) ? value : 'xyz';
-}
-
-function normalizeMethod(method: unknown) {
-  const value = typeof method === 'string' ? method.trim() : '';
-  if (/^gfn2[-_ ]?xtb$/iu.test(value)) return 'gfn2-xTB';
-  if (/^gfn1[-_ ]?xtb$/iu.test(value)) return 'gfn1-xTB';
-  if (/dft/iu.test(value)) return value;
-  return 'gfn2-xTB';
 }
 
 function parseJson(text: string) {

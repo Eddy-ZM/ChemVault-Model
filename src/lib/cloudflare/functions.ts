@@ -6,6 +6,20 @@ export type CloudflareChemEnv = {
   CHEMVAULT_QUANTUM_API_URL?: string;
   QUANTUM_API_TOKEN?: string;
   CHEMVAULT_QUANTUM_API_TOKEN?: string;
+  CHEMVAULT_USER_ORIGIN?: string;
+  CHEMVAULT_ALLOWED_ORIGINS?: string;
+  CHEM_API_RATE_LIMITER?: CloudflareRateLimiter;
+  QUANTUM_RATE_LIMITER?: CloudflareRateLimiter;
+  PRODUCT_EVENTS_RATE_LIMITER?: CloudflareRateLimiter;
+  PRODUCT_ANALYTICS?: CloudflareAnalyticsEngine;
+};
+
+export type CloudflareRateLimiter = {
+  limit(options: { key: string }): Promise<{ success: boolean }>;
+};
+
+export type CloudflareAnalyticsEngine = {
+  writeDataPoint(event: { blobs?: string[]; doubles?: number[]; indexes?: string[] }): void;
 };
 
 export type CloudflarePagesContext<Params extends Record<string, string | string[] | undefined> = Record<string, string | string[] | undefined>> = {
@@ -31,10 +45,10 @@ export function jsonResponse(payload: unknown, status = 200, headers: HeadersIni
   });
 }
 
-export function optionsResponse() {
+export function optionsResponse(headers: HeadersInit = corsHeaders) {
   return new Response(null, {
     status: 204,
-    headers: corsHeaders
+    headers
   });
 }
 

@@ -32,6 +32,8 @@ const commit = gitValue('git rev-parse HEAD', 'local');
 const shortCommit = gitValue('git rev-parse --short=12 HEAD', 'local');
 const commitDate = gitValue('git show -s --format=%cI HEAD', '');
 const buildId = `${version}+${shortCommit}`;
+const buildNumber = numericEnvironmentValue(process.env.CHEMVAULT_BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER) || versionCode(version);
+const releasePublished = /^(1|true|yes)$/iu.test(String(process.env.CHEMVAULT_WINDOWS_RELEASE_PUBLISHED || ''));
 const downloadUrl = process.env.CHEMVAULT_WINDOWS_DOWNLOAD_URL || 'https://github.com/Eddy-ZM/ChemVault-Model/releases/latest';
 
 const manifest = {
@@ -47,16 +49,19 @@ const manifest = {
     web: {
       version,
       versionCode: versionCode(version),
+      buildNumber,
       buildId,
       releaseId: `web-v${version}-${shortCommit}`
     },
     windows: {
       version,
       versionCode: versionCode(version),
+      buildNumber,
       latestVersion: version,
       minimumSupportedVersion: version,
       buildId,
       releaseId: `windows-v${version}-${shortCommit}`,
+      releasePublished,
       updateCheckIntervalSeconds: 300,
       allowDeferralHours: 24,
       downloadUrl,
@@ -72,6 +77,11 @@ const manifest = {
     }
   }
 };
+
+function numericEnvironmentValue(value) {
+  const parsed = Number.parseInt(String(value || ''), 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : 0;
+}
 
 fs.mkdirSync(publicDir, { recursive: true });
 fs.writeFileSync(target, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');

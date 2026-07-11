@@ -1,0 +1,49 @@
+name: Apple native validation
+
+on:
+  pull_request:
+    paths:
+      - "ChemVault-Molecule-Apple/**"
+      - ".github/workflows/apple-native.yml"
+  push:
+    branches: [main, test]
+    paths:
+      - "ChemVault-Molecule-Apple/**"
+      - ".github/workflows/apple-native.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install XcodeGen
+        run: brew install xcodegen
+      - name: Generate Xcode project
+        working-directory: ChemVault-Molecule-Apple
+        run: xcodegen generate --spec project.yml
+      - name: Build iOS Simulator target
+        working-directory: ChemVault-Molecule-Apple
+        run: >-
+          xcodebuild build
+          -project ChemVaultMolecule.xcodeproj
+          -scheme ChemVaultMolecule-iOS
+          -destination 'generic/platform=iOS Simulator'
+          CODE_SIGNING_ALLOWED=NO
+      - name: Build macOS target
+        working-directory: ChemVault-Molecule-Apple
+        run: >-
+          xcodebuild build
+          -project ChemVaultMolecule.xcodeproj
+          -scheme ChemVaultMolecule-macOS
+          -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO
+      - name: Preserve generated wrapper for Xcode Cloud bootstrap
+        uses: actions/upload-artifact@v4
+        with:
+          name: ChemVaultMolecule-xcodeproj
+          path: ChemVault-Molecule-Apple/ChemVaultMolecule.xcodeproj
+          if-no-files-found: error

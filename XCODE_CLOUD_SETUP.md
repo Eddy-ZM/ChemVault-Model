@@ -1,44 +1,23 @@
-# Xcode Cloud Setup
+# Xcode Cloud and Apple build setup
 
-This repository contains a native SwiftUI molecule app implemented as a Swift Package:
+The native SwiftUI app source and XcodeGen wrapper specification live in `ChemVault-Molecule-Apple`.
 
-`ChemVault-Molecule-Apple/Package.swift`
+- XcodeGen spec: `ChemVault-Molecule-Apple/project.yml`
+- iOS scheme: `ChemVaultMolecule-iOS`
+- macOS scheme: `ChemVaultMolecule-macOS`
+- iOS bundle ID: `science.chemvault.molecule`
+- macOS bundle ID: `science.chemvault.molecule.mac`
+- Apple Developer Team: `96L6379Q92`
 
-The package product is `ChemVaultMolecule`, and the app Bundle ID declared in code is `science.chemvault.molecule`.
+The repository CI generates `ChemVaultMolecule.xcodeproj` from the committed specification and performs unsigned iOS Simulator and macOS builds. This removes generated-project drift while keeping the Xcode wrapper reproducible.
 
-## Current State
+On macOS, generate the project before opening it:
 
-- Native SwiftUI app source exists.
-- `Package.swift` is tracked.
-- No `.xcodeproj` or `.xcworkspace` exists for an App Store app target.
-- No AppIcon asset catalog exists for the Swift Package app.
-- No app target signing settings, generated Info.plist settings or entitlements exist.
+```bash
+brew install xcodegen
+cd ChemVault-Molecule-Apple
+xcodegen generate --spec project.yml
+open ChemVaultMolecule.xcodeproj
+```
 
-Because of that, this package can be useful for local development and source builds, but it is not yet ready for Xcode Cloud Archive + TestFlight distribution by itself.
-
-## Required Before TestFlight
-
-Create an Xcode app project or app target that wraps the package source with:
-
-- Bundle ID: `science.chemvault.molecule`.
-- Shared scheme for the app target.
-- Automatically manage signing enabled.
-- Apple Developer Team `96L6379Q92` selected.
-- Xcode/Apple Developer signing account/name shown as `Ziwen Mu`.
-- AppIcon asset catalog.
-- Generated or explicit Info.plist.
-- iOS/iPadOS deployment target that Xcode Cloud supports.
-- App Store Connect app record with the same Bundle ID.
-
-## Recommended Workflow After App Target Exists
-
-- Trigger: push to the `main` branch.
-- Scheme: the shared app scheme, for example `ChemVaultMolecule`.
-- Action: Build.
-- Archive: enabled.
-- Distribution: TestFlight.
-- Environment: latest stable Xcode available in Xcode Cloud.
-
-## Remote Config
-
-The Swift Package app now reads `https://api.chemvault.science/app-config.json` on startup and falls back to bundled defaults if the request fails. Remote config controls maintenance mode, enabled modules, minimum supported version, resource bundle version and announcement message.
+For Xcode Cloud, generate and commit the project once from a trusted macOS checkout, then create workflows for the two shared schemes. Keep automatic signing enabled and use Team `96L6379Q92`. Final archive, signing, App Store Connect association, and TestFlight upload require the Apple account and cannot be validated on Windows.

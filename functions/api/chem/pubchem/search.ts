@@ -1,7 +1,9 @@
 import { searchCompoundsByNameOrIdentifier } from '../../../../src/lib/chem/pubchem';
 import { CloudflarePagesContext, jsonResponse, optionsResponse } from '../../../../src/lib/cloudflare/functions';
+import { authorizePublicChemRequest, publicChemOptionsAllowed } from '../../../../src/lib/cloudflare/chemApiSecurity';
 
-export function onRequestOptions() {
+export function onRequestOptions(context: CloudflarePagesContext) {
+  if (!publicChemOptionsAllowed(context.request, context.env)) return new Response(null, { status: 403 });
   return optionsResponse();
 }
 
@@ -9,13 +11,16 @@ const searchCacheHeaders = {
   'Cache-Control': 'public, max-age=300, s-maxage=1800, stale-while-revalidate=86400'
 };
 
-export async function onRequestGet({ request }: CloudflarePagesContext) {
+export async function onRequestGet({ request, env }: CloudflarePagesContext) {
+  const access = await authorizePublicChemRequest(request, env);
+  if (!access.ok) return jsonResponse({ error: access.error }, access.status, access.status === 429 ? { 'Retry-After': '60' } : {});
   const url = new URL(request.url);
   const query = url.searchParams.get('query')?.trim() || '';
   const limit = Number(url.searchParams.get('limit') || 8);
   if (!query) {
     return jsonResponse({ error: 'query is required' }, 400);
   }
+  if (query.length > 256) return jsonResponse({ error: 'query is too long' }, 413);
 
   try {
     const results = await searchCompoundsByNameOrIdentifier(query, Number.isFinite(limit) ? limit : 8);

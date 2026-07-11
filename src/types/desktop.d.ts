@@ -31,9 +31,11 @@ declare global {
     currentVersion: string;
     currentBuildId: string;
     currentReleaseId: string;
+    currentBuildNumber: number;
     latestVersion: string;
     latestBuildId: string;
     latestReleaseId: string;
+    latestBuildNumber: number;
     minimumSupportedVersion: string;
     updateAvailable: boolean;
     updateRequired: boolean;
@@ -82,6 +84,8 @@ declare global {
       cancelQuantumCalculation: (calculationId: string) => Promise<QuantumCancelResult>;
       getQuantumQueue: () => Promise<QuantumQueueItem[]>;
       saveQuantumQueue: (items: QuantumQueueItem[]) => Promise<QuantumQueueItem[]>;
+      getQuantumProjects: () => Promise<import('@/lib/chem/quantumProjectWorkspace').QuantumProjectRecord[]>;
+      saveQuantumProjects: (projects: import('@/lib/chem/quantumProjectWorkspace').QuantumProjectRecord[]) => Promise<import('@/lib/chem/quantumProjectWorkspace').QuantumProjectRecord[]>;
     };
   }
 }

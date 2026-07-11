@@ -1,0 +1,42 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "chemvault-model",
+  "compatibility_date": "2026-07-11",
+  "pages_build_output_dir": "./out",
+  "vars": {
+    "CHEMVAULT_USER_ORIGIN": "https://user.chemvault.science",
+    "CHEMVAULT_ALLOWED_ORIGINS": "https://model.chemvault.science"
+  },
+  "ratelimits": [
+    {
+      "name": "CHEM_API_RATE_LIMITER",
+      "namespace_id": "2003",
+      "simple": {
+        "limit": 120,
+        "period": 60
+      }
+    },
+    {
+      "name": "QUANTUM_RATE_LIMITER",
+      "namespace_id": "2001",
+      "simple": {
+        "limit": 6,
+        "period": 60
+      }
+    },
+    {
+      "name": "PRODUCT_EVENTS_RATE_LIMITER",
+      "namespace_id": "2002",
+      "simple": {
+        "limit": 60,
+        "period": 60
+      }
+    }
+  ],
+  "analytics_engine_datasets": [
+    {
+      "binding": "PRODUCT_ANALYTICS",
+      "dataset": "chemvault_model_product_events"
+    }
+  ]
+}

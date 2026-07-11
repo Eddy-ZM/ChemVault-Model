@@ -6,9 +6,23 @@ const os = require('node:os');
 const path = require('node:path');
 const { TextDecoder } = require('node:util');
 const gaussianParsers = require('./gaussian-parsers.cjs');
-const { resolveDesktopUpdateStatus } = require('./versioning.cjs');
+const { compareVersions, normalizeWindowsRelease, resolveDesktopUpdateStatus } = require('./versioning.cjs');
 const { buildQuantumRunManifest, extractEngineVersion } = require('./quantum/run-manifest.cjs');
 const { readQueueJournal, writeQueueJournal } = require('./quantum/queue-journal.cjs');
+const { readProjectStore, writeProjectStore } = require('./quantum/project-store.cjs');
+const {
+  parseOrcaCharges,
+  parseOrcaDipole,
+  parseOrcaEnergy,
+  parsePyscfResult,
+  parseXtbDipole: parseDipole,
+  parseXtbEnergy: parseEnergy
+} = require('./quantum/engine-parsers.cjs');
+const {
+  buildGaussianInput,
+  gaussianTaskLabelFor,
+  normalizeGaussianTask
+} = require('./quantum/gaussian-input.cjs');
 
 const APP_TITLE = 'ChemVault Model';
 const DEFAULT_API_BASE = 'https://model.chemvault.science/api/chem';
@@ -16,6 +30,7 @@ const DEFAULT_MODEL_ORIGIN = 'https://model.chemvault.science';
 const DEFAULT_USER_ORIGIN = 'https://user.chemvault.science';
 const DEFAULT_START_PATH = '/';
 const DEFAULT_VERSION_MANIFEST_URL = 'https://model.chemvault.science/app-version.json';
+const DEFAULT_WINDOWS_RELEASE_API = 'https://api.github.com/repos/Eddy-ZM/ChemVault-Model/releases/latest';
 const QUANTUM_TIMEOUT_MS = 180000;
 const MAX_GAUSSIAN_TIMEOUT_MS = 12 * 60 * 60 * 1000;
 const GAUSSIAN_LOG_POLL_INTERVAL_MS = 1500;
@@ -124,6 +139,8 @@ ipcMain.handle('quantum:run', async (event, request) => runQuantumCalculation(re
 ipcMain.handle('quantum:cancel', async (_event, calculationId) => cancelQuantumCalculation(calculationId));
 ipcMain.handle('quantum:queue:get', async () => readQueueJournal(quantumQueueJournalPath()));
 ipcMain.handle('quantum:queue:save', async (_event, items) => writeQueueJournal(quantumQueueJournalPath(), items));
+ipcMain.handle('quantum:projects:get', async () => readProjectStore(quantumProjectStorePath()));
+ipcMain.handle('quantum:projects:save', async (_event, projects) => writeProjectStore(quantumProjectStorePath(), projects));
 ipcMain.handle('quantum:external-config:get', async (_event, engine) => getExternalQuantumConfig(engine));
 ipcMain.handle('quantum:external-config:save', async (_event, config) => saveExternalQuantumConfig(config));
 ipcMain.handle('quantum:external-config:discover', async (_event, engine) => discoverAndSaveExternalQuantumConfig(engine));
@@ -180,6 +197,7 @@ app.on('window-all-closed', () => {
 });
 
 function createMainWindow(baseUrl) {
+  const smokeOutput = process.env.CHEMVAULT_DESKTOP_SMOKE_OUTPUT || '';
   mainWindow = new BrowserWindow({
     title: APP_TITLE,
     width: 1440,
@@ -200,8 +218,33 @@ function createMainWindow(baseUrl) {
 
   mainWindow.setMenuBarVisibility(false);
   mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
+    if (!smokeOutput) mainWindow.show();
   });
+
+  if (smokeOutput) {
+    const smokeTimer = setTimeout(() => {
+      process.exitCode = 1;
+      allowWindowClose = true;
+      app.quit();
+    }, 60000);
+    mainWindow.webContents.once('did-finish-load', async () => {
+      try {
+        const result = await mainWindow.webContents.executeJavaScript(`({
+          title: document.title,
+          body: document.body?.innerText?.slice(0, 4000) || '',
+          desktopBridge: window.chemVaultDesktop?.isDesktop === true
+        })`);
+        fs.writeFileSync(smokeOutput, JSON.stringify(result, null, 2), 'utf8');
+      } catch (error) {
+        fs.writeFileSync(smokeOutput, JSON.stringify({ error: error instanceof Error ? error.message : String(error) }), 'utf8');
+        process.exitCode = 1;
+      } finally {
+        clearTimeout(smokeTimer);
+        allowWindowClose = true;
+        app.quit();
+      }
+    });
+  }
 
   mainWindow.on('close', async (event) => {
     if (allowWindowClose || activeQuantumProcesses.size === 0) return;
@@ -268,22 +311,34 @@ async function getAppVersionStatus() {
   const currentVersion = String(app.getVersion() || localConfig.version || '0.0.0');
   const currentBuildId = String(localConfig.buildId || localManifest?.generatedFrom?.commit || currentVersion);
   const currentReleaseId = String(localConfig.releaseId || `windows-v${currentVersion}`);
+  const currentBuildNumber = boundedInteger(localConfig.buildNumber, 0, 0, Number.MAX_SAFE_INTEGER);
   const sourceUrl = versionManifestUrl();
 
   try {
-    const remoteManifest = await fetchVersionManifest(sourceUrl);
+    const [remoteManifest, publishedRelease] = await Promise.all([
+      fetchVersionManifest(sourceUrl),
+      fetchLatestWindowsRelease()
+    ]);
     const remoteConfig = platformVersionConfig(remoteManifest, 'windows');
-    const latestVersion = String(remoteConfig.latestVersion || remoteConfig.version || currentVersion);
-    const latestBuildId = String(remoteConfig.buildId || '');
-    const latestReleaseId = String(remoteConfig.releaseId || '');
-    const minimumSupportedVersion = String(remoteConfig.minimumSupportedVersion || '0.0.0');
+    const latestVersion = publishedRelease?.version || currentVersion;
+    const manifestMatchesRelease = Boolean(publishedRelease) && compareVersions(String(remoteConfig.latestVersion || remoteConfig.version || ''), latestVersion) === 0;
+    const latestBuildId = manifestMatchesRelease ? String(remoteConfig.buildId || publishedRelease?.releaseId || '') : String(publishedRelease?.releaseId || '');
+    const latestReleaseId = String(publishedRelease?.releaseId || '');
+    const latestBuildNumber = manifestMatchesRelease && remoteConfig.releasePublished === true
+      ? boundedInteger(remoteConfig.buildNumber, 0, 0, Number.MAX_SAFE_INTEGER)
+      : 0;
+    const requestedMinimum = String(remoteConfig.minimumSupportedVersion || '0.0.0');
+    const minimumSupportedVersion = publishedRelease && compareVersions(requestedMinimum, latestVersion) <= 0 ? requestedMinimum : '0.0.0';
     const update = resolveDesktopUpdateStatus({
       currentVersion,
       currentBuildId,
       currentReleaseId,
+      currentBuildNumber,
       latestVersion,
       latestBuildId,
       latestReleaseId,
+      latestBuildNumber,
+      sameVersionUpdatePublished: manifestMatchesRelease && remoteConfig.releasePublished === true,
       minimumSupportedVersion,
       forceUpdate: remoteConfig.forceUpdate
     });
@@ -296,9 +351,11 @@ async function getAppVersionStatus() {
       currentVersion,
       currentBuildId,
       currentReleaseId,
+      currentBuildNumber,
       latestVersion,
       latestBuildId,
       latestReleaseId,
+      latestBuildNumber,
       minimumSupportedVersion,
       updateAvailable: update.updateAvailable,
       updateRequired: update.updateRequired,
@@ -307,8 +364,8 @@ async function getAppVersionStatus() {
       checkIntervalSeconds: boundedInteger(remoteConfig.updateCheckIntervalSeconds, 300, 60, 86400),
       checkedAt,
       sourceUrl,
-      downloadUrl: validExternalUrl(remoteConfig.downloadUrl) || 'https://github.com/Eddy-ZM/ChemVault-Model/releases/latest',
-      releaseNotesUrl: validExternalUrl(remoteConfig.releaseNotesUrl) || '',
+      downloadUrl: publishedRelease?.downloadUrl || 'https://github.com/Eddy-ZM/ChemVault-Model/releases',
+      releaseNotesUrl: publishedRelease?.releaseNotesUrl || '',
       message: String(remoteConfig.message || (update.updateRequired
         ? 'This ChemVault Model desktop build must be updated before continuing.'
         : update.updateAvailable
@@ -324,9 +381,11 @@ async function getAppVersionStatus() {
       currentVersion,
       currentBuildId,
       currentReleaseId,
+      currentBuildNumber,
       latestVersion: currentVersion,
       latestBuildId: '',
       latestReleaseId: '',
+      latestBuildNumber: 0,
       minimumSupportedVersion: '0.0.0',
       updateAvailable: false,
       updateRequired: false,
@@ -343,6 +402,25 @@ async function getAppVersionStatus() {
   }
 }
 
+async function fetchLatestWindowsRelease() {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), VERSION_CHECK_TIMEOUT_MS);
+  try {
+    const response = await fetch(DEFAULT_WINDOWS_RELEASE_API, {
+      signal: controller.signal,
+      headers: {
+        Accept: 'application/vnd.github+json',
+        'User-Agent': 'ChemVault-Model-Desktop'
+      }
+    });
+    if (response.status === 404) return null;
+    if (!response.ok) throw new Error(`GitHub Releases returned HTTP ${response.status}.`);
+    return normalizeWindowsRelease(await response.json());
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function openUpdateUrl(value) {
   const url = validExternalUrl(value) || 'https://github.com/Eddy-ZM/ChemVault-Model/releases/latest';
   await shell.openExternal(url);
@@ -356,7 +434,8 @@ function currentDesktopBuildIdentity() {
   return {
     version,
     buildId: String(config.buildId || manifest?.generatedFrom?.commit || version),
-    releaseId: String(config.releaseId || `windows-v${version}`)
+    releaseId: String(config.releaseId || `windows-v${version}`),
+    buildNumber: boundedInteger(config.buildNumber, 0, 0, Number.MAX_SAFE_INTEGER)
   };
 }
 
@@ -493,6 +572,10 @@ async function proxyChemApi(request, response, requestUrl) {
 
   const headers = sanitizeProxyHeaders(request.headers);
   headers['x-chemvault-client'] = 'desktop-windows';
+  const cookieHeader = desktopUserCookieHeader();
+  if (cookieHeader) {
+    headers.cookie = cookieHeader;
+  }
 
   let upstream;
   try {
@@ -3428,40 +3511,6 @@ print(END)
 `.trimStart();
 }
 
-function parsePyscfResult(output) {
-  const match = output.match(/CHEMVAULT_PYSCF_RESULT_START\s*([\s\S]*?)\s*CHEMVAULT_PYSCF_RESULT_END/u);
-  if (!match) return null;
-
-  try {
-    const parsed = JSON.parse(match[1]);
-    const dipole = parsed.dipoleDebye && typeof parsed.dipoleDebye === 'object'
-      ? {
-          x: Number(parsed.dipoleDebye.x),
-          y: Number(parsed.dipoleDebye.y),
-          z: Number(parsed.dipoleDebye.z),
-          total: Number(parsed.dipoleDebye.total)
-        }
-      : null;
-    return {
-      energyHartree: Number.isFinite(Number(parsed.energyHartree)) ? Number(parsed.energyHartree) : null,
-      dipoleDebye: dipole && Object.values(dipole).every(Number.isFinite) ? dipole : null,
-      charges: Array.isArray(parsed.charges)
-        ? parsed.charges
-            .map((atom) => ({
-              index: Number(atom.index),
-              element: String(atom.element || '?'),
-              charge: Number(atom.charge)
-            }))
-            .filter((atom) => Number.isFinite(atom.index) && Number.isFinite(atom.charge))
-        : [],
-      method: typeof parsed.method === 'string' ? parsed.method : '',
-      warnings: Array.isArray(parsed.warnings) ? parsed.warnings.map((warning) => String(warning)).filter(Boolean) : []
-    };
-  } catch {
-    return null;
-  }
-}
-
 function sanitizeQuantumToken(value) {
   return String(value || '')
     .replace(/[\r\n]/gu, ' ')
@@ -3659,6 +3708,10 @@ function quantumQueueJournalPath() {
   return path.join(app.getPath('userData'), 'quantum-queue.json');
 }
 
+function quantumProjectStorePath() {
+  return path.join(app.getPath('userData'), 'quantum-projects.json');
+}
+
 function normalizeCalculationId(value) {
   return String(value || '')
     .replace(/[^a-zA-Z0-9_-]/gu, '')
@@ -3731,49 +3784,10 @@ async function prepareGaussianJob(workDir, xyz, options) {
       throw new Error('The Gaussian continuation checkpoint exceeds the supported size limit.');
     }
   }
-  const outputKeywords = gaussianOutputKeywords(options.outputDetail, options.routeOptions);
-  const routeParts = [
-    options.outputDetail === 'orbitals' ? '#p' : '#',
-    `${options.method}/${options.basisSet}`,
-    gaussianRouteKeywords(options.gaussianTask, options.calculationMode),
-    outputKeywords,
-    options.reuseCheckpoint ? 'Geom=AllCheck Guess=Read' : '',
-    options.routeOptions
-  ].filter(Boolean);
-  const link0 = [
-    `%NProcShared=${processorCount}`,
-    `%Mem=${memoryGb}GB`,
-    options.reuseCheckpoint ? '%OldChk=chemvault-old.chk' : '',
-    '%chk=chemvault.chk',
-  ].filter(Boolean);
-  const content = options.reuseCheckpoint
-    ? [...link0, routeParts.join(' '), '', ''].join('\n')
-    : [
-        ...link0,
-        routeParts.join(' '),
-        '',
-        'ChemVault Model external Gaussian job',
-        '',
-        `${options.charge} ${options.multiplicity}`,
-        ...atoms.map((atom) => `${atom.element} ${formatCoordinate(atom.x)} ${formatCoordinate(atom.y)} ${formatCoordinate(atom.z)}`),
-        '',
-        ''
-      ].join('\n');
+  const content = buildGaussianInput({ atoms, memoryGb, options, processorCount });
 
   await fs.promises.writeFile(inputPath, content, 'utf8');
   return { args: [inputPath], checkpointPath, inputContent: content, inputPath, oldCheckpointPath, outputPath };
-}
-
-function gaussianOutputKeywords(detail, routeOptions) {
-  const route = String(routeOptions || '');
-  const keywords = [];
-  if (!/\bpop\s*=/iu.test(route)) {
-    if (detail === 'charges') keywords.push('Pop=Regular');
-    if (detail === 'orbitals') keywords.push('Pop=Full');
-  }
-  if (detail === 'orbitals' && !/\bgfinput\b/iu.test(route)) keywords.push('GFInput');
-  if (detail === 'orbitals' && !/\bgfprint\b/iu.test(route)) keywords.push('GFPrint');
-  return keywords.join(' ');
 }
 
 function gaussianResourceDefaults() {
@@ -3955,89 +3969,12 @@ function bridgeFileBaseName(value) {
     .slice(0, 80) || 'chemvault_gaussian';
 }
 
-function normalizeGaussianTask(value, calculationMode = 'single-point') {
-  const normalized = String(value || '').trim();
-  if (
-    normalized === 'frequency' ||
-    normalized === 'optimization-frequency' ||
-    normalized === 'td-dft' ||
-    normalized === 'nmr' ||
-    normalized === 'solvent-model' ||
-    normalized === 'transition-state' ||
-    normalized === 'irc' ||
-    normalized === 'stability' ||
-    normalized === 'frontier-orbitals' ||
-    normalized === 'nbo'
-  ) {
-    return normalized;
-  }
-  return calculationMode === 'geometry-optimization' ? 'geometry-optimization' : 'single-point';
-}
-
-function gaussianTaskLabelFor(task) {
-  if (task === 'geometry-optimization') return 'Geometry optimization';
-  if (task === 'frequency') return 'Frequency analysis';
-  if (task === 'optimization-frequency') return 'Optimization + frequency';
-  if (task === 'td-dft') return 'TD-DFT excited states';
-  if (task === 'nmr') return 'NMR shielding';
-  if (task === 'solvent-model') return 'Solvent model';
-  if (task === 'transition-state') return 'Transition-state search';
-  if (task === 'irc') return 'IRC pathway';
-  if (task === 'stability') return 'Wavefunction stability';
-  if (task === 'frontier-orbitals') return 'Frontier orbital analysis';
-  if (task === 'nbo') return 'NBO bridge';
-  return 'Single point';
-}
-
-function gaussianRouteKeywords(task, calculationMode = 'single-point') {
-  const normalized = normalizeGaussianTask(task, calculationMode);
-  if (normalized === 'geometry-optimization') return 'Opt';
-  if (normalized === 'frequency') return 'Freq';
-  if (normalized === 'optimization-frequency') return 'Opt Freq';
-  if (normalized === 'td-dft') return 'TD(NStates=10)';
-  if (normalized === 'nmr') return 'NMR=GIAO';
-  if (normalized === 'solvent-model') return 'SP SCRF=(SMD,Solvent=Water)';
-  if (normalized === 'transition-state') return 'Opt=(TS,CalcFC,NoEigenTest) Freq';
-  if (normalized === 'irc') return 'IRC=(CalcFC,MaxPoints=20)';
-  if (normalized === 'stability') return 'Stable=Opt';
-  if (normalized === 'frontier-orbitals') return 'SP';
-  if (normalized === 'nbo') return 'Pop=NBORead';
-  return 'SP';
-}
-
 function extractVersion(output) {
   const versionLine = output
     .split(/\r?\n/u)
     .map((line) => line.trim())
     .find((line) => /xtb|\d+\.\d+/iu.test(line));
   return versionLine || undefined;
-}
-
-function parseEnergy(output) {
-  const matches = Array.from(output.matchAll(/TOTAL\s+ENERGY\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/giu));
-  const last = matches.at(-1);
-  return last ? Number(last[1]) : null;
-}
-
-function parseDipole(output) {
-  const lines = output.split(/\r?\n/u);
-  let fallback = null;
-
-  for (const line of lines) {
-    const match = line.match(/^\s*(full|q\s+only)\s*:?\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/iu);
-    if (!match) continue;
-
-    const dipole = {
-      x: Number(match[2]),
-      y: Number(match[3]),
-      z: Number(match[4]),
-      total: Number(match[5])
-    };
-    if (/full/iu.test(match[1])) return dipole;
-    fallback = dipole;
-  }
-
-  return fallback;
 }
 
 function parseGaussianEnergy(output) {
@@ -4078,54 +4015,6 @@ function parseGaussianExcitedStates(output) {
 
 function parseGaussianNmrShielding(output) {
   return gaussianParsers.parseGaussianNmrShielding(output);
-}
-
-function parseOrcaEnergy(output) {
-  const matches = Array.from(output.matchAll(/FINAL\s+SINGLE\s+POINT\s+ENERGY\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/giu));
-  const last = matches.at(-1);
-  return last ? Number(last[1]) : null;
-}
-
-function parseOrcaDipole(output) {
-  const vectorMatches = Array.from(output.matchAll(/Total\s+Dipole\s+Moment\s*:?\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/giu));
-  const magnitudeMatches = Array.from(output.matchAll(/Magnitude\s+\(Debye\)\s*:?\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/giu));
-  const vector = vectorMatches.at(-1);
-  const magnitude = magnitudeMatches.at(-1);
-
-  if (vector) {
-    const scale = 2.541746;
-    const x = Number(vector[1]) * scale;
-    const y = Number(vector[2]) * scale;
-    const z = Number(vector[3]) * scale;
-    return {
-      x,
-      y,
-      z,
-      total: magnitude ? Number(magnitude[1]) : Math.hypot(x, y, z)
-    };
-  }
-
-  return magnitude
-    ? {
-        x: 0,
-        y: 0,
-        z: 0,
-        total: Number(magnitude[1])
-      }
-    : null;
-}
-
-function parseOrcaCharges(output) {
-  const section = output.match(/MULLIKEN\s+ATOMIC\s+CHARGES[\s\S]*?(?:Sum\s+of\s+atomic\s+charges|LOEWDIN|HIRSHFELD|DIPOLE|ORBITAL)/iu)?.[0] || '';
-  const charges = [];
-  for (const match of section.matchAll(/^\s*(\d+)\s+([A-Za-z]{1,2})\s*:?\s+([-+]?\d+(?:\.\d+)?(?:[Ee][-+]?\d+)?)/gmu)) {
-    charges.push({
-      index: Number(match[1]) + 1,
-      element: match[2],
-      charge: Number(match[3])
-    });
-  }
-  return charges;
 }
 
 async function readCharges(workDir, xyz) {

@@ -23,15 +23,13 @@ function resolveDesktopUpdateStatus(options) {
   const currentVersion = String(options.currentVersion || '0.0.0');
   const latestVersion = String(options.latestVersion || currentVersion);
   const minimumSupportedVersion = String(options.minimumSupportedVersion || '0.0.0');
-  const currentBuildId = String(options.currentBuildId || '');
-  const latestBuildId = String(options.latestBuildId || '');
-  const currentReleaseId = String(options.currentReleaseId || '');
-  const latestReleaseId = String(options.latestReleaseId || '');
+  const currentBuildNumber = normalizedBuildNumber(options.currentBuildNumber);
+  const latestBuildNumber = normalizedBuildNumber(options.latestBuildNumber);
   const updateRequired = compareVersions(currentVersion, minimumSupportedVersion) < 0 || Boolean(options.forceUpdate);
   const newerVersion = compareVersions(currentVersion, latestVersion) < 0;
   const sameVersion = compareVersions(currentVersion, latestVersion) === 0;
-  const newerBuild = sameVersion && Boolean(latestBuildId) && Boolean(currentBuildId) && latestBuildId !== currentBuildId;
-  const newerRelease = sameVersion && Boolean(latestReleaseId) && Boolean(currentReleaseId) && latestReleaseId !== currentReleaseId;
+  const newerBuild = sameVersion && Boolean(options.sameVersionUpdatePublished) && latestBuildNumber > currentBuildNumber;
+  const newerRelease = newerBuild;
   const updateAvailable = updateRequired || newerVersion || newerBuild || newerRelease;
 
   return {
@@ -45,8 +43,31 @@ function resolveDesktopUpdateStatus(options) {
   };
 }
 
+function normalizeWindowsRelease(release) {
+  if (!release || typeof release !== 'object' || release.draft || release.prerelease) return null;
+  const match = String(release.tag_name || '').match(/^v?(\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?)$/u);
+  if (!match) return null;
+  const assets = Array.isArray(release.assets) ? release.assets : [];
+  const setup = assets.find((asset) => /ChemVault-Model-Setup-.*\.exe$/iu.test(String(asset?.name || '')) && /^https:\/\//u.test(String(asset?.browser_download_url || '')));
+  if (!setup) return null;
+  return {
+    version: match[1],
+    releaseId: `github-${String(release.id || release.tag_name)}`,
+    buildNumber: normalizedBuildNumber(release.id),
+    downloadUrl: String(setup.browser_download_url),
+    releaseNotesUrl: /^https:\/\//u.test(String(release.html_url || '')) ? String(release.html_url) : '',
+    publishedAt: String(release.published_at || '')
+  };
+}
+
+function normalizedBuildNumber(value) {
+  const number = Number(value);
+  return Number.isSafeInteger(number) && number >= 0 ? number : 0;
+}
+
 module.exports = {
   compareVersions,
+  normalizeWindowsRelease,
   resolveDesktopUpdateStatus,
   versionParts
 };

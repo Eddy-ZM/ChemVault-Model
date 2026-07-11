@@ -130,7 +130,7 @@ export function validateQuantumGatewayConfig(env: CloudflareChemEnv) {
   if (!(env.QUANTUM_API_TOKEN || env.CHEMVAULT_QUANTUM_API_TOKEN)) {
     return { ok: false as const, error: 'Professional quantum engine authentication is not configured.' };
   }
-  if (!env.QUANTUM_RATE_LIMITER) {
+  if (!env.RATE_LIMIT_KV) {
     return { ok: false as const, error: 'Cloud quantum rate limiting is not configured.' };
   }
   return { ok: true as const };

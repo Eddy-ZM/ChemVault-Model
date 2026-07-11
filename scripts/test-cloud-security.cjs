@@ -39,8 +39,8 @@ assert.equal(isAllowedOrigin('https://model.chemvault.science', {}), true);
 assert.equal(isAllowedOrigin('http://127.0.0.1:3000', {}), true);
 assert.equal(isAllowedOrigin('https://attacker.example', {}), false);
 assert.equal(quantumQuotaKey({ id: 'user-1', email: 'test@example.com' }), 'quantum:user-1');
-assert.equal(validateQuantumGatewayConfig({ QUANTUM_API_URL: 'https://quantum.example', QUANTUM_RATE_LIMITER: limiter(true) }).ok, false);
-assert.equal(validateQuantumGatewayConfig({ QUANTUM_API_URL: 'https://quantum.example', QUANTUM_API_TOKEN: 'secret', QUANTUM_RATE_LIMITER: limiter(true) }).ok, true);
+assert.equal(validateQuantumGatewayConfig({ QUANTUM_API_URL: 'https://quantum.example', RATE_LIMIT_KV: rateLimitKv(true) }).ok, false);
+assert.equal(validateQuantumGatewayConfig({ QUANTUM_API_URL: 'https://quantum.example', QUANTUM_API_TOKEN: 'secret', RATE_LIMIT_KV: rateLimitKv(true) }).ok, true);
 
 (async () => {
   const originalFetch = global.fetch;
@@ -55,7 +55,7 @@ assert.equal(validateQuantumGatewayConfig({ QUANTUM_API_URL: 'https://quantum.ex
     };
     const missingToken = await quantumRoute.onRequestPost(quantumContext({
       QUANTUM_API_URL: 'https://quantum.example',
-      QUANTUM_RATE_LIMITER: limiter(true)
+      RATE_LIMIT_KV: rateLimitKv(true)
     }, true));
     assert.equal(missingToken.status, 503);
     assert.equal(fetchCalls, 1, 'The backend must not be invoked without its private token.');
@@ -69,7 +69,7 @@ assert.equal(validateQuantumGatewayConfig({ QUANTUM_API_URL: 'https://quantum.ex
     const completed = await quantumRoute.onRequestPost(quantumContext({
       QUANTUM_API_URL: 'https://quantum.example',
       QUANTUM_API_TOKEN: 'private-token',
-      QUANTUM_RATE_LIMITER: limiter(true)
+      RATE_LIMIT_KV: rateLimitKv(true)
     }, true));
     assert.equal(completed.status, 200);
     assert.equal(requests.length, 2);
@@ -77,10 +77,10 @@ assert.equal(validateQuantumGatewayConfig({ QUANTUM_API_URL: 'https://quantum.ex
 
     const denied = await authorizePublicChemRequest(new Request('https://model.chemvault.science/api/chem/properties', {
       headers: { Origin: 'https://attacker.example' }
-    }), { CHEM_API_RATE_LIMITER: limiter(true) });
+    }), { RATE_LIMIT_KV: rateLimitKv(true) });
     assert.equal(denied.status, 403);
     const exhausted = await authorizePublicChemRequest(new Request('https://model.chemvault.science/api/chem/properties'), {
-      CHEM_API_RATE_LIMITER: limiter(false)
+      RATE_LIMIT_KV: rateLimitKv(false)
     });
     assert.equal(exhausted.status, 429);
     const oversized = await readBoundedJson(new Request('https://model.chemvault.science/api/chem/properties', {
@@ -97,8 +97,11 @@ assert.equal(validateQuantumGatewayConfig({ QUANTUM_API_URL: 'https://quantum.ex
   process.exitCode = 1;
 });
 
-function limiter(success) {
-  return { limit: async () => ({ success }) };
+function rateLimitKv(success) {
+  return {
+    get: async () => success ? null : '999',
+    put: async () => undefined
+  };
 }
 
 function quantumContext(env, authenticated = false) {

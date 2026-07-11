@@ -1,4 +1,4 @@
-import type { CloudflareChemEnv } from './functions';
+import { consumeRateLimit, type CloudflareChemEnv } from './functions';
 import { isAllowedOrigin } from './quantumSecurity';
 
 const MAX_PUBLIC_JSON_BYTES = 64 * 1024;
@@ -8,11 +8,14 @@ export async function authorizePublicChemRequest(request: Request, env: Cloudfla
   if (origin && !isAllowedOrigin(origin, env)) {
     return { ok: false as const, status: 403, error: 'Origin is not allowed.' };
   }
-  if (!env.CHEM_API_RATE_LIMITER) {
+  if (!env.RATE_LIMIT_KV) {
     return { ok: false as const, status: 503, error: 'Chemistry API rate limiting is not configured.' };
   }
   const clientAddress = request.headers.get('cf-connecting-ip') || 'unknown';
-  const quota = await env.CHEM_API_RATE_LIMITER.limit({ key: `chem-api:${clientAddress}` });
+  const quota = await consumeRateLimit(env, `chem-api:${clientAddress}`, 120);
+  if (quota.unavailable) {
+    return { ok: false as const, status: 503, error: 'Chemistry API rate limiting is temporarily unavailable.' };
+  }
   if (!quota.success) {
     return { ok: false as const, status: 429, error: 'Chemistry API rate limit reached.' };
   }

@@ -7,30 +7,10 @@
     "CHEMVAULT_USER_ORIGIN": "https://user.chemvault.science",
     "CHEMVAULT_ALLOWED_ORIGINS": "https://model.chemvault.science"
   },
-  "ratelimits": [
+  "kv_namespaces": [
     {
-      "name": "CHEM_API_RATE_LIMITER",
-      "namespace_id": "2003",
-      "simple": {
-        "limit": 120,
-        "period": 60
-      }
-    },
-    {
-      "name": "QUANTUM_RATE_LIMITER",
-      "namespace_id": "2001",
-      "simple": {
-        "limit": 6,
-        "period": 60
-      }
-    },
-    {
-      "name": "PRODUCT_EVENTS_RATE_LIMITER",
-      "namespace_id": "2002",
-      "simple": {
-        "limit": 60,
-        "period": 60
-      }
+      "binding": "RATE_LIMIT_KV",
+      "id": "712dd52f9ea345a695441a2fa873b0fa"
     }
   ],
   "analytics_engine_datasets": [

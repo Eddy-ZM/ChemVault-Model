@@ -1,6 +1,7 @@
 import { fetchWithTimeout } from '../../../../src/lib/chem/http';
 import {
   CloudflarePagesContext,
+  consumeRateLimit,
   jsonResponse,
   optionsResponse,
   quantumBackendToken,
@@ -53,7 +54,8 @@ export async function onRequestPost(context: CloudflarePagesContext) {
   }
   const backendUrl = quantumBackendUrl(context.env);
   const token = quantumBackendToken(context.env);
-  const quota = await context.env.QUANTUM_RATE_LIMITER.limit({ key: quantumQuotaKey(identity) });
+  const quota = await consumeRateLimit(context.env, quantumQuotaKey(identity), 6);
+  if (quota.unavailable) return jsonResponse({ success: false, status: 'unavailable', error: 'Quantum rate limiting is temporarily unavailable.' }, 503, cors);
   if (!quota.success) return jsonResponse({ success: false, status: 'rate-limited', error: 'Quantum calculation quota reached. Try again later.' }, 429, { ...cors, 'Retry-After': '60' });
 
   const headers: Record<string, string> = {

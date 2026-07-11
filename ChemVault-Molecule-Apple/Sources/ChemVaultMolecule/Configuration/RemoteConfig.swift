@@ -93,6 +93,14 @@ struct RemoteAppConfig: Codable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let fallback = Self.fallback
         let platformConfig = (try? container.decodeIfPresent([String: PlatformVersionConfig].self, forKey: .platforms))?["apple"]
+        let flatMinimumVersion = try container.decodeIfPresent(String.self, forKey: .minimumSupportedVersion)
+        let flatLatestVersion = try container.decodeIfPresent(String.self, forKey: .latestVersion)
+        let flatDownloadURL = try container.decodeIfPresent(String.self, forKey: .downloadUrl)
+        let flatUpdateURL = try container.decodeIfPresent(String.self, forKey: .updateURL)
+        let flatUpdateMessage = try container.decodeIfPresent(String.self, forKey: .updateMessage)
+        let flatDeferralHours = try container.decodeIfPresent(Int.self, forKey: .allowDeferralHours)
+        let flatGracePeriodHours = try container.decodeIfPresent(Int.self, forKey: .updateGracePeriodHours)
+        let flatCheckInterval = try container.decodeIfPresent(Int.self, forKey: .updateCheckIntervalSeconds)
 
         maintenanceMode = try container.decodeIfPresent(Bool.self, forKey: .maintenanceMode) ?? fallback.maintenanceMode
 
@@ -102,10 +110,10 @@ struct RemoteAppConfig: Codable, Equatable {
         enabledModules = decodedModules.isEmpty ? fallback.enabledModules : decodedModules
 
         minimumSupportedVersion = platformConfig?.minimumSupportedVersion
-            ?? (try container.decodeIfPresent(String.self, forKey: .minimumSupportedVersion))
+            ?? flatMinimumVersion
             ?? fallback.minimumSupportedVersion
         latestVersion = platformConfig?.latestVersion
-            ?? (try container.decodeIfPresent(String.self, forKey: .latestVersion))
+            ?? flatLatestVersion
             ?? minimumSupportedVersion
         resourceBundleVersion = try container.decodeIfPresent(String.self, forKey: .resourceBundleVersion)
             ?? fallback.resourceBundleVersion
@@ -113,18 +121,18 @@ struct RemoteAppConfig: Codable, Equatable {
             ?? fallback.announcementMessage
         updateURL = platformConfig?.downloadUrl
             ?? platformConfig?.updateURL
-            ?? (try container.decodeIfPresent(String.self, forKey: .downloadUrl))
-            ?? (try container.decodeIfPresent(String.self, forKey: .updateURL))
+            ?? flatDownloadURL
+            ?? flatUpdateURL
             ?? fallback.updateURL
         updateMessage = platformConfig?.message
-            ?? (try container.decodeIfPresent(String.self, forKey: .updateMessage))
+            ?? flatUpdateMessage
             ?? fallback.updateMessage
         updateGracePeriodHours = platformConfig?.allowDeferralHours
-            ?? (try container.decodeIfPresent(Int.self, forKey: .allowDeferralHours))
-            ?? (try container.decodeIfPresent(Int.self, forKey: .updateGracePeriodHours))
+            ?? flatDeferralHours
+            ?? flatGracePeriodHours
             ?? fallback.updateGracePeriodHours
         updateCheckIntervalSeconds = platformConfig?.updateCheckIntervalSeconds
-            ?? (try container.decodeIfPresent(Int.self, forKey: .updateCheckIntervalSeconds))
+            ?? flatCheckInterval
             ?? fallback.updateCheckIntervalSeconds
     }
 

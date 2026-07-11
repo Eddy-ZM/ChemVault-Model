@@ -24,7 +24,7 @@ struct SettingsView: View {
                     Label("Windows ChemVault Model handles local Gaussian, ORCA, PySCF, and engine setup workflows.", systemImage: "desktopcomputer")
                 }
                 .font(.subheadline)
-                .foregroundStyle(CVTheme.secondaryText)
+                .foregroundStyle(.secondary)
             }
         }
         .frame(minWidth: 520, minHeight: 360)

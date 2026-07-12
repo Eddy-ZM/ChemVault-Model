@@ -2,15 +2,10 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.join(__dirname, '..');
-const lock = JSON.parse(fs.readFileSync(path.join(root, 'package-lock.json'), 'utf8'));
-const rootPackage = lock.packages?.[''] || {};
-const directNames = new Set([
-  ...Object.keys(rootPackage.dependencies || {}),
-  'electron'
-]);
+const distributedNames = new Set(['3dmol', 'electron', 'next', 'react', 'react-dom']);
 const notices = [];
 
-for (const name of [...directNames].sort((left, right) => left.localeCompare(right))) {
+for (const name of [...distributedNames].sort((left, right) => left.localeCompare(right))) {
   const packageDirectory = path.join(root, 'node_modules', ...name.split('/'));
   const packageFile = path.join(packageDirectory, 'package.json');
   if (!fs.existsSync(packageFile)) throw new Error(`Missing installed package metadata for ${name}. Run npm ci first.`);
@@ -30,7 +25,7 @@ for (const name of [...directNames].sort((left, right) => left.localeCompare(rig
 const output = [
   '# Third-Party Notices',
   '',
-  'ChemVault Model includes the following directly distributed third-party components. Each component remains subject to its own license terms.',
+  'ChemVault Model includes the following desktop runtime or statically bundled web components. Each component remains subject to its own license terms.',
   '',
   ...notices.flatMap((notice) => [
     `## ${notice.name} ${notice.version}`,
@@ -46,7 +41,7 @@ const output = [
 ].join('\n');
 
 fs.writeFileSync(path.join(root, 'THIRD_PARTY_NOTICES.md'), output, 'utf8');
-console.log(`Wrote THIRD_PARTY_NOTICES.md for ${notices.length} directly distributed components.`);
+console.log(`Wrote THIRD_PARTY_NOTICES.md for ${notices.length} packaged components.`);
 
 function findLicenseFile(directory) {
   const names = fs.readdirSync(directory);

@@ -4,6 +4,8 @@
 
 ChemVault Model contains a static Next.js website, Cloudflare Pages Functions, a Windows Electron shell, and a native SwiftUI Apple project. The website provides molecular input, visualization, exports, and approximate electrostatic analysis. Professional Windows calculations execute through locally installed xTB, PySCF, Gaussian, or ORCA engines. Psi4 can be discovered and configured for future bridge work, but is not a selectable calculation engine. Commercial binaries are never bundled.
 
+The desktop renderer is packaged from the static `out` tree. Next, React, 3Dmol, compiler binaries, and other web build dependencies are not copied as runtime `node_modules`; a post-build ASAR check enforces this boundary. Quantum setup, engine readiness, calculation controls, history, diagnostics, and result views are split into focused renderer components while the parent workspace owns orchestration and persistence.
+
 Cloud quantum submission is optional and fails closed unless a backend URL, private server-side backend token, ChemVault User authorization, and Cloudflare rate limiter are all configured. Apple uses native SwiftUI and SceneKit rather than a WebView wrapper.
 
 ## Trust boundaries
@@ -28,7 +30,7 @@ Cloud quantum submission is optional and fails closed unless a backend URL, priv
 - ChemVault User authenticates users and evaluates `chemvault_molecule` service access.
 - PubChem and RCSB supply public structure data.
 - GitHub Releases is the source of truth for published Windows installers.
-- Cloudflare KV stores short-retention fixed-window quota counters, low-cardinality product-event aggregates, and expiring append-only anonymous journey rows under separate key prefixes.
+- Cloudflare KV stores short-retention fixed-window quota counters, low-cardinality product-event aggregates, and expiring append-only anonymous journey rows under separate key prefixes. Funnel reads are capped at 20,000 rows and expose truncation/sample sufficiency instead of silently returning an unbounded partial report.
 
 ## Known risks and assumptions
 
@@ -48,3 +50,4 @@ There are no email delivery jobs, scheduled calculations, or embedded AI agents 
 - [Verification map](tests.md)
 - [Molecule artifact contract](artifact-contract.md)
 - [Scheduled production monitoring](cron.md)
+- [Search visibility and indexing](seo.md)

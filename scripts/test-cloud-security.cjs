@@ -129,9 +129,29 @@ assert.equal(validateQuantumGatewayConfig({ QUANTUM_API_URL: 'https://quantum.ex
     });
     assert.equal(dependencyUnauthorized.status, 401);
 
-    global.fetch = async (input) => String(input).includes('app-version.json')
-      ? Response.json({ product: 'ChemVault Model', platforms: { windows: { version: '0.1.0', downloadUrl: 'https://example.test/setup.exe' } } })
-      : Response.json({ ok: true });
+    global.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes('app-version.json')) {
+        return Response.json({ product: 'ChemVault Model', platforms: { windows: { buildVersion: '0.1.1', version: '0.1.0', downloadUrl: 'https://example.test/setup.exe' } } });
+      }
+      if (url.includes('api.github.com')) {
+        return Response.json({
+          draft: false,
+          prerelease: false,
+          assets: [
+            { name: 'ChemVault-Model-Setup-0.1.0-win-x64.exe' },
+            { name: 'ChemVault-Model-Setup-0.1.0-win-x64.exe.sha256' },
+            { name: 'ChemVault-Model-Portable-0.1.0-win-x64.exe' },
+            { name: 'ChemVault-Model-Portable-0.1.0-win-x64.exe.sha256' }
+          ]
+        });
+      }
+      if (url.includes('/api/chem/pubchem/search')) return Response.json({ results: [{ cid: 962 }], cid: 962 });
+      if (url.includes('/api/chem/pdb/')) return Response.json({ pdbId: '1CRN', data: 'HEADER TEST' });
+      if (url.includes('/api/auth/oauth/')) return new Response(null, { status: 302, headers: { Location: 'https://identity.example/authorize' } });
+      if (url.endsWith('/login')) return new Response('<html>login</html>', { status: 200 });
+      return Response.json({ ok: true });
+    };
     const dependencies = await dependencyRoute.onRequestGet({
       request: new Request('https://model.chemvault.science/api/internal/dependencies', {
         headers: { Authorization: 'Bearer monitor-secret' }
@@ -142,6 +162,10 @@ assert.equal(validateQuantumGatewayConfig({ QUANTUM_API_URL: 'https://quantum.ex
     const dependencyReport = await dependencies.json();
     assert.equal(dependencyReport.ok, true);
     assert.equal(dependencyReport.checks.find((check) => check.name === 'cloud-quantum').skipped, true);
+    const emptyFunnel = await cloudflareFunctions.readProductFunnel({ RATE_LIMIT_KV: memoryKv().binding }, 14);
+    assert.equal(emptyFunnel.scan.truncated, false);
+    assert.equal(emptyFunnel.scan.rowLimit, 20000);
+    assert.equal(emptyFunnel.sample.sufficient, false);
   } finally {
     global.fetch = originalFetch;
   }

@@ -34,6 +34,21 @@ const commitDate = gitValue('git show -s --format=%cI HEAD', '');
 const buildId = `${version}+${shortCommit}`;
 const buildNumber = numericEnvironmentValue(process.env.CHEMVAULT_BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER) || versionCode(version);
 const releasePublished = /^(1|true|yes)$/iu.test(String(process.env.CHEMVAULT_WINDOWS_RELEASE_PUBLISHED || ''));
+const publishedVersion = releasePublished
+  ? String(process.env.CHEMVAULT_WINDOWS_RELEASE_VERSION || version)
+  : String(process.env.CHEMVAULT_WINDOWS_RELEASE_VERSION || '0.0.0');
+const publishedBuildNumber = releasePublished
+  ? numericEnvironmentValue(process.env.CHEMVAULT_WINDOWS_RELEASE_BUILD_NUMBER || process.env.GITHUB_RUN_NUMBER) || versionCode(publishedVersion)
+  : 0;
+const publishedBuildId = releasePublished
+  ? String(process.env.CHEMVAULT_WINDOWS_RELEASE_BUILD_ID || `${publishedVersion}+${shortCommit}`)
+  : '';
+const publishedReleaseId = releasePublished
+  ? String(process.env.CHEMVAULT_WINDOWS_RELEASE_ID || `windows-v${publishedVersion}`)
+  : '';
+const minimumSupportedVersion = releasePublished
+  ? String(process.env.CHEMVAULT_WINDOWS_MINIMUM_VERSION || publishedVersion)
+  : '0.0.0';
 const downloadUrl = process.env.CHEMVAULT_WINDOWS_DOWNLOAD_URL || 'https://github.com/Eddy-ZM/ChemVault-Model/releases/latest';
 
 const manifest = {
@@ -54,13 +69,17 @@ const manifest = {
       releaseId: `web-v${version}-${shortCommit}`
     },
     windows: {
-      version,
-      versionCode: versionCode(version),
-      buildNumber,
-      latestVersion: version,
-      minimumSupportedVersion: version,
+      version: publishedVersion,
+      versionCode: versionCode(publishedVersion),
+      buildNumber: publishedBuildNumber,
+      latestVersion: publishedVersion,
+      minimumSupportedVersion,
+      buildVersion: version,
+      buildVersionCode: versionCode(version),
+      localBuildNumber: buildNumber,
       buildId,
-      releaseId: `windows-v${version}-${shortCommit}`,
+      releaseBuildId: publishedBuildId,
+      releaseId: publishedReleaseId,
       releasePublished,
       updateCheckIntervalSeconds: 300,
       allowDeferralHours: 24,

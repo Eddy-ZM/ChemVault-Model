@@ -67,6 +67,13 @@ declare global {
         elapsedMs: number;
         energyHartree: number | null;
         version?: string;
+        validation?: {
+          passed: boolean;
+          checks: Record<string, boolean>;
+          failedChecks: string[];
+          reference: { molecule: string; atomCount: number; totalCharge: number; energyHartree: number; toleranceHartree: number };
+          observed: { energyHartree: number | null; dipoleDebye: number | null; atomChargeCount: number; totalCharge: number | null; version: string };
+        };
         message: string;
         outputTail?: string;
       }>;

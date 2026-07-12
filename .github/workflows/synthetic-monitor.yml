@@ -21,7 +21,7 @@ jobs:
     steps:
       - name: Require monitor credential
         run: test -n "$SYNTHETIC_MONITOR_SECRET"
-      - name: Verify PubChem, RCSB, User, release metadata and quantum backend
+      - name: Verify production molecule, authentication, release and quantum paths
         run: |
           response="$(curl --fail-with-body --silent --show-error \
             --retry 2 --retry-delay 5 --retry-all-errors \
@@ -29,7 +29,7 @@ jobs:
             -H "Authorization: Bearer $SYNTHETIC_MONITOR_SECRET" \
             https://chemvault-model.pages.dev/api/internal/dependencies)"
           printf '%s\n' "$response" | jq .
-          jq -e '.ok == true and (.checks | length == 5) and (.checks | all(.[]; .ok == true))' <<<"$response" > /dev/null
+          jq -e '.ok == true and (.checks | length >= 9) and (.checks | all(.[]; .ok == true))' <<<"$response" > /dev/null
           {
             echo "### Model production dependencies"
             jq -r '.checks[] | "- \(.name): \(if .skipped then "not configured (optional)" elif .ok then "ok" else "failed" end) (HTTP \(.status // "n/a"), \(.durationMs) ms)"' <<<"$response"

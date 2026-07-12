@@ -4,8 +4,28 @@ import { DesktopUpdateGate } from '@/components/home/DesktopUpdateGate';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'ChemVault Molecule Studio',
-  description: 'Build and inspect molecules with a modern chemistry interface.',
+  metadataBase: new URL('https://model.chemvault.science'),
+  title: {
+    default: 'ChemVault Molecule Studio',
+    template: '%s | ChemVault Molecule Studio'
+  },
+  description: 'Search, draw, import, visualise and export molecular structures in 2D and 3D with optional professional desktop quantum workflows.',
+  applicationName: 'ChemVault Molecule Studio',
+  alternates: { canonical: '/' },
+  openGraph: {
+    type: 'website',
+    url: '/',
+    siteName: 'ChemVault Molecule Studio',
+    title: 'ChemVault Molecule Studio',
+    description: 'Molecular search, drawing, 3D visualisation, exports and professional Windows quantum workflows.',
+    images: [{ url: '/assets/favicon-512.png', width: 512, height: 512, alt: 'ChemVault Molecule Studio' }]
+  },
+  twitter: {
+    card: 'summary',
+    title: 'ChemVault Molecule Studio',
+    description: 'Molecular search, drawing, 3D visualisation and professional desktop quantum workflows.',
+    images: ['/assets/favicon-512.png']
+  },
   icons: {
     icon: [
       { url: '/favicon.ico', sizes: 'any' },

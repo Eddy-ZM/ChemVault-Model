@@ -1,5 +1,12 @@
 # Product Flows
 
+## ChemVault account sign-in
+
+- Actor: website or desktop user who chooses to sign in; molecule tools remain available without an account.
+- Sequence: Molecule Studio validates a same-origin return path, opens ChemVault User email/password or Apple, Google, or GitHub authentication, then returns the session to the requested Model page. Desktop requests pass through the local authenticated proxy so cookies remain compatible with the packaged app.
+- Deny cases: invalid credentials, unavailable provider, unsafe return URL, expired session, or denied `chemvault_molecule` permission for protected cloud features.
+- Side effects: ChemVault User owns the account session. Model receives only the session result and synchronized profile/library data; it never stores third-party OAuth secrets.
+
 ## Public molecule lookup and generation
 
 - Actor: website or desktop user.
@@ -39,14 +46,14 @@
 ## Product diagnostics and maintainer report
 
 - Actor: user who explicitly enabled diagnostics.
-- Sequence: client adds version, platform, short-lived journey, and allowlisted categorical attributes; Pages Functions origin-checks, rate-limits, revalidates the allowlist, increments a low-cardinality daily aggregate, and appends a short-retention anonymous journey event row.
+- Sequence: client adds version, platform, short-lived journey, and allowlisted categorical attributes; Pages Functions origin-checks, rate-limits, revalidates the allowlist, increments a low-cardinality daily aggregate, and appends a short-retention anonymous journey event row. Reports read rows in bounded batches, stop at 20,000 rows, and report truncation and whether at least 30 journeys are available.
 - Deny cases: diagnostics disabled, unsupported event/attribute, missing bindings, disallowed origin, oversized event, or exhausted quota.
 - Side effects: aggregate counts and anonymous journey event rows only; no molecular or account payload. A bearer-protected maintainer endpoint calculates start, completion, result, and export conversion for a bounded 1-90 day window.
 
 ## Production dependency monitor
 
 - Actor: scheduled GitHub Actions workflow using a shared secret.
-- Sequence: call the protected production endpoint, then verify PubChem, RCSB, ChemVault User, and the configured cloud quantum health endpoint.
+- Sequence: call the protected production endpoint, then verify PubChem and RCSB upstreams, Model's public PubChem/PDB routes, ChemVault User health, the login page and Apple/Google/GitHub redirect contracts, the public version manifest, the latest Windows installer/portable/checksum assets, and the configured cloud quantum health endpoint.
 - Deny cases: missing or mismatched monitor secret, failed required dependency, timeout, or non-success response.
 - Side effects: workflow result and summary only. Cloud quantum is reported as optional and skipped when it is intentionally not configured.
 

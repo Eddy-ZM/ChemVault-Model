@@ -30,6 +30,7 @@ dist/
 build/*
 !build/
 !build/installer.nsh
+!build/chemvault-atom.ico
 release/
 dist_electron/
 public/vendor/3Dmol-min.js

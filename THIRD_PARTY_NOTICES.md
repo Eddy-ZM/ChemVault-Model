@@ -1,6 +1,6 @@
 # Third-Party Notices
 
-ChemVault Model includes the following directly distributed third-party components. Each component remains subject to its own license terms.
+ChemVault Model includes the following desktop runtime or statically bundled web components. Each component remains subject to its own license terms.
 
 ## 3dmol 2.5.5
 

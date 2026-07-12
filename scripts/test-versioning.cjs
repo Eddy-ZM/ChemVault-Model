@@ -19,6 +19,7 @@ const rebuilt = resolveDesktopUpdateStatus({
 });
 assert.equal(rebuilt.status, 'available');
 assert.equal(rebuilt.newerBuild, true);
+assert.equal(rebuilt.newerRelease, true);
 assert.equal(rebuilt.canDefer, true);
 
 const staleRemote = resolveDesktopUpdateStatus({
@@ -39,6 +40,19 @@ const unpublishedRebuild = resolveDesktopUpdateStatus({
 });
 assert.equal(unpublishedRebuild.status, 'current');
 
+const sameRelease = resolveDesktopUpdateStatus({
+  currentVersion: '0.1.0',
+  currentBuildId: 'release-build',
+  currentBuildNumber: 21,
+  currentReleaseId: 'windows-v0.1.0',
+  latestVersion: '0.1.0',
+  latestBuildId: 'release-build',
+  latestBuildNumber: 21,
+  latestReleaseId: 'windows-v0.1.0',
+  sameVersionUpdatePublished: true
+});
+assert.equal(sameRelease.status, 'current');
+
 const githubRelease = normalizeWindowsRelease({
   id: 42,
   tag_name: 'v0.2.0',
@@ -48,6 +62,7 @@ const githubRelease = normalizeWindowsRelease({
 });
 assert.equal(githubRelease.version, '0.2.0');
 assert.equal(githubRelease.buildNumber, 42);
+assert.equal(githubRelease.releaseId, 'windows-v0.2.0');
 
 assert.equal(normalizeWindowsRelease({ tag_name: 'v0.2.0', assets: [] }), null);
 

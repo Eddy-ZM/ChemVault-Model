@@ -22,3 +22,14 @@ const result = spawnSync(process.execPath, [
 
 if (result.error) throw result.error;
 if (result.status !== 0) process.exit(result.status || 1);
+
+const verification = spawnSync(process.execPath, [
+  path.join(root, 'scripts', 'verify-desktop-package.cjs'),
+  path.join(root, outputDirectory, 'win-unpacked', 'resources', 'app.asar')
+], {
+  cwd: root,
+  stdio: 'inherit',
+  windowsHide: true
+});
+if (verification.error) throw verification.error;
+if (verification.status !== 0) process.exit(verification.status || 1);

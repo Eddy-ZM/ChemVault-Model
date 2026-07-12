@@ -1,4 +1,5 @@
 const crypto = require('node:crypto');
+const { execSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -7,6 +8,8 @@ const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf
 const releaseRelativeDirectory = `release/windows/v${pkg.version}`;
 const releaseDir = path.join(repoRoot, 'release', 'windows', `v${pkg.version}`);
 const generatedAt = new Date().toISOString();
+const sourceCommit = gitValue('git rev-parse HEAD');
+const sourceTag = gitValue('git tag --points-at HEAD --list "v*"');
 
 if (!fs.existsSync(releaseDir)) {
   throw new Error(`Release directory does not exist: ${releaseDir}`);
@@ -32,6 +35,11 @@ const manifest = {
   platform: 'windows',
   arch: 'x64',
   generatedAt,
+  source: {
+    commit: sourceCommit,
+    tag: sourceTag || null,
+    packageVersion: pkg.version
+  },
   releaseDirectory: releaseRelativeDirectory,
   artifacts,
   copyright: 'Copyright (c) ChemVault. All rights reserved.'
@@ -56,6 +64,8 @@ function releaseNotes(nextManifest) {
   return `# ChemVault Model ${nextManifest.version} Windows Release
 
 Generated: ${nextManifest.generatedAt}
+Source commit: ${nextManifest.source.commit || 'unavailable'}
+Source tag: ${nextManifest.source.tag || 'untagged build'}
 
 ## Artifacts
 
@@ -69,4 +79,12 @@ ${rows || '| No artifacts found | 0 | N/A |'}
 - The installer is not code-signed in this release.
 - ${nextManifest.copyright}
 `;
+}
+
+function gitValue(command) {
+  try {
+    return execSync(command, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch {
+    return '';
+  }
 }

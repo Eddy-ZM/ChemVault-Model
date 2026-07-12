@@ -8,6 +8,7 @@ const { TextDecoder } = require('node:util');
 const gaussianParsers = require('./gaussian-parsers.cjs');
 const { compareVersions, normalizeWindowsRelease, resolveDesktopUpdateStatus } = require('./versioning.cjs');
 const { buildQuantumRunManifest, extractEngineVersion } = require('./quantum/run-manifest.cjs');
+const { validateWaterSelfTest } = require('./quantum/engine-self-test.cjs');
 const { readQueueJournal, writeQueueJournal } = require('./quantum/queue-journal.cjs');
 const { readProjectStore, writeProjectStore } = require('./quantum/project-store.cjs');
 const {
@@ -311,10 +312,14 @@ async function getAppVersionStatus() {
   const checkedAt = new Date().toISOString();
   const localManifest = readLocalVersionManifest();
   const localConfig = platformVersionConfig(localManifest, 'windows');
-  const currentVersion = String(app.getVersion() || localConfig.version || '0.0.0');
+  const currentVersion = String(app.getVersion() || localConfig.buildVersion || localConfig.version || '0.0.0');
   const currentBuildId = String(localConfig.buildId || localManifest?.generatedFrom?.commit || currentVersion);
-  const currentReleaseId = String(localConfig.releaseId || `windows-v${currentVersion}`);
-  const currentBuildNumber = boundedInteger(localConfig.buildNumber, 0, 0, Number.MAX_SAFE_INTEGER);
+  const currentReleaseId = String(
+    localConfig.releasePublished === true && localConfig.releaseId
+      ? localConfig.releaseId
+      : localConfig.buildReleaseId || `windows-build-v${currentVersion}-${currentBuildId}`
+  );
+  const currentBuildNumber = boundedInteger(localConfig.localBuildNumber ?? localConfig.buildNumber, 0, 0, Number.MAX_SAFE_INTEGER);
   const sourceUrl = versionManifestUrl();
 
   try {
@@ -325,7 +330,7 @@ async function getAppVersionStatus() {
     const remoteConfig = platformVersionConfig(remoteManifest, 'windows');
     const latestVersion = publishedRelease?.version || currentVersion;
     const manifestMatchesRelease = Boolean(publishedRelease) && compareVersions(String(remoteConfig.latestVersion || remoteConfig.version || ''), latestVersion) === 0;
-    const latestBuildId = manifestMatchesRelease ? String(remoteConfig.buildId || publishedRelease?.releaseId || '') : String(publishedRelease?.releaseId || '');
+    const latestBuildId = manifestMatchesRelease ? String(remoteConfig.releaseBuildId || publishedRelease?.releaseId || '') : String(publishedRelease?.releaseId || '');
     const latestReleaseId = String(publishedRelease?.releaseId || '');
     const latestBuildNumber = manifestMatchesRelease && remoteConfig.releasePublished === true
       ? boundedInteger(remoteConfig.buildNumber, 0, 0, Number.MAX_SAFE_INTEGER)
@@ -433,12 +438,12 @@ async function openUpdateUrl(value) {
 function currentDesktopBuildIdentity() {
   const manifest = readLocalVersionManifest();
   const config = platformVersionConfig(manifest, 'windows');
-  const version = String(app.getVersion() || config.version || '0.0.0');
+  const version = String(app.getVersion() || config.buildVersion || config.version || '0.0.0');
   return {
     version,
     buildId: String(config.buildId || manifest?.generatedFrom?.commit || version),
-    releaseId: String(config.releaseId || `windows-v${version}`),
-    buildNumber: boundedInteger(config.buildNumber, 0, 0, Number.MAX_SAFE_INTEGER)
+    releaseId: String(config.releasePublished === true && config.releaseId ? config.releaseId : config.buildReleaseId || `windows-build-v${version}`),
+    buildNumber: boundedInteger(config.localBuildNumber ?? config.buildNumber, 0, 0, Number.MAX_SAFE_INTEGER)
   };
 }
 
@@ -910,9 +915,8 @@ async function testQuantumEngine(engineValue, onProgress = () => {}) {
     xyz: '3\nChemVault engine self-test: water\nO 0.000000 0.000000 0.000000\nH 0.000000 0.757000 0.586000\nH 0.000000 -0.757000 0.586000\n'
   }, onProgress);
   const energy = Number(result?.energyHartree);
-  const range = engine === 'xtb' ? [-20, 0] : [-200, -20];
-  const energyValid = Number.isFinite(energy) && energy >= range[0] && energy <= range[1];
-  const passed = Boolean(result?.ok && energyValid);
+  const validation = validateWaterSelfTest(engine, result, status.version);
+  const passed = validation.passed;
   return {
     passed,
     engine,
@@ -920,10 +924,11 @@ async function testQuantumEngine(engineValue, onProgress = () => {}) {
     testedAt,
     elapsedMs: Number(result?.elapsedMs || 0),
     energyHartree: Number.isFinite(energy) ? energy : null,
-    version: status.version || '',
+    version: validation.observed.version,
+    validation,
     message: passed
-      ? `Water self-test passed at ${energy.toFixed(8)} Eh.`
-      : result?.error || (result?.ok ? 'The engine completed, but the parsed water energy was outside the expected smoke-test range.' : 'The engine self-test did not complete.'),
+      ? `Water self-test passed at ${energy.toFixed(8)} Eh with energy, termination, charge, dipole, and version checks.`
+      : result?.error || `Water self-test failed: ${validation.failedChecks.join(', ')}.`,
     outputTail: String(result?.outputTail || '').slice(-12000)
   };
 }

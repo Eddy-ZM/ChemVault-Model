@@ -6,6 +6,7 @@ import { GlobalLoadingOverlay } from '@/components/ui/LoadingState';
 import { QuantumResultDiagnosisPanel } from '@/components/molecule/QuantumResultDiagnosisPanel';
 import { QuantumHistoryPanel, ResultComparisonPanel } from '@/components/molecule/QuantumHistoryPanels';
 import { QuantumEngineReadiness } from '@/components/molecule/QuantumEngineReadiness';
+import { QuantumCalculationSetup } from '@/components/molecule/QuantumCalculationSetup';
 import type { ElectrostaticAnalysis } from '@/lib/chem/electrostaticAnalysis';
 import { analyzeElectrostatics, structureToXyz } from '@/lib/chem/electrostaticAnalysis';
 import type {
@@ -1641,97 +1642,27 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         onRunSelfTest={() => void runEngineSelfTest()}
       />
 
-      <section className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Calculation profile</p>
-            <h4 className="mt-1 text-sm font-bold text-slate-950">Choose speed and precision</h4>
-          </div>
-          <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
-            {calculationProfiles.find((profile) => profile.id === calculationProfile)?.label}
-          </span>
-        </div>
-        <div className="mt-3 grid gap-2 md:grid-cols-3">
-          {calculationProfiles.map((profile) => (
-            <button
-              key={profile.id}
-              type="button"
-              onClick={() => applyCalculationProfile(profile.id)}
-              className={`min-h-[92px] rounded-xl border px-4 py-3 text-left transition ${
-                calculationProfile === profile.id
-                  ? 'border-sky-400 bg-white text-sky-950 shadow-sm'
-                  : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-              }`}
-            >
-              <span className="block text-sm font-bold">{profile.label}</span>
-              <span className="mt-1 block text-xs leading-5 text-slate-500">{profile.description}</span>
-            </button>
-          ))}
-        </div>
-        {continuationSource ? (
-          <label className={`mt-3 flex items-start gap-3 rounded-xl border px-3 py-3 ${continuationCompatible && selectedEngine === 'gaussian' ? 'border-emerald-200 bg-emerald-50' : 'border-slate-200 bg-white'}`}>
-            <input
-              type="checkbox"
-              checked={reuseGaussianCheckpoint}
-              disabled={!continuationCompatible || selectedEngine !== 'gaussian'}
-              onChange={(event) => setReuseGaussianCheckpoint(event.target.checked)}
-              className="mt-0.5 h-4 w-4 accent-sky-700"
-            />
-            <span className="min-w-0">
-              <span className="block text-xs font-bold text-slate-900">Reuse the last compatible Gaussian checkpoint</span>
-              <span className="mt-1 block text-xs leading-5 text-slate-600">
-                {continuationCompatible
-                  ? 'The next Gaussian task can reuse geometry and the converged wavefunction with Geom=AllCheck and Guess=Read.'
-                  : 'Match the previous method, basis set, charge, and spin before reusing this checkpoint.'}
-              </span>
-            </span>
-          </label>
-        ) : null}
-      </section>
-
-      <div className="mt-4 grid gap-3 md:grid-cols-3">
-        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-          <span className="block text-xs font-medium text-slate-500">Total charge</span>
-          <input
-            type="number"
-            value={charge}
-            min={-20}
-            max={20}
-            step={1}
-            onChange={(event) => setCharge(Number(event.target.value))}
-            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-400"
-          />
-        </label>
-        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-          <span className="block text-xs font-medium text-slate-500">Unpaired electrons</span>
-          <input
-            type="number"
-            value={unpairedElectrons}
-            min={0}
-            max={20}
-            step={1}
-            onChange={(event) => setUnpairedElectrons(Number(event.target.value))}
-            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-400"
-          />
-        </label>
-        <label className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3">
-          <span className="block text-xs font-medium text-slate-500">Calculation type</span>
-          <select
-            value={calculationMode}
-            onChange={(event) => {
-              const nextMode = event.target.value as QuantumCalculationMode;
-              setCalculationMode(nextMode);
-              if (selectedEngine === 'gaussian') {
-                setGaussianTask(nextMode === 'geometry-optimization' ? 'geometry-optimization' : 'single-point');
-              }
-            }}
-            className="mt-2 w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-900 outline-none focus:border-sky-400"
-          >
-            <option value="single-point">Single-point analysis</option>
-            <option value="geometry-optimization">Geometry optimization</option>
-          </select>
-        </label>
-      </div>
+      <QuantumCalculationSetup
+        profiles={calculationProfiles}
+        profile={calculationProfile}
+        selectedEngine={selectedEngine}
+        continuationAvailable={Boolean(continuationSource)}
+        continuationCompatible={continuationCompatible}
+        reuseCheckpoint={reuseGaussianCheckpoint}
+        charge={charge}
+        unpairedElectrons={unpairedElectrons}
+        calculationMode={calculationMode}
+        onApplyProfile={applyCalculationProfile}
+        onReuseCheckpointChange={setReuseGaussianCheckpoint}
+        onChargeChange={setCharge}
+        onUnpairedElectronsChange={setUnpairedElectrons}
+        onCalculationModeChange={(nextMode) => {
+          setCalculationMode(nextMode);
+          if (selectedEngine === 'gaussian') {
+            setGaussianTask(nextMode === 'geometry-optimization' ? 'geometry-optimization' : 'single-point');
+          }
+        }}
+      />
 
       <div className="mt-4">
         <OperationPlanPanel

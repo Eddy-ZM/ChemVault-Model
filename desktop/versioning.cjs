@@ -28,8 +28,11 @@ function resolveDesktopUpdateStatus(options) {
   const updateRequired = compareVersions(currentVersion, minimumSupportedVersion) < 0 || Boolean(options.forceUpdate);
   const newerVersion = compareVersions(currentVersion, latestVersion) < 0;
   const sameVersion = compareVersions(currentVersion, latestVersion) === 0;
-  const newerBuild = sameVersion && Boolean(options.sameVersionUpdatePublished) && latestBuildNumber > currentBuildNumber;
-  const newerRelease = newerBuild;
+  const buildIdentityChanged = Boolean(options.latestBuildId && options.currentBuildId && options.latestBuildId !== options.currentBuildId);
+  const releaseIdentityChanged = Boolean(options.latestReleaseId && options.currentReleaseId && options.latestReleaseId !== options.currentReleaseId);
+  const identityUpdate = sameVersion && Boolean(options.sameVersionUpdatePublished) && (buildIdentityChanged || releaseIdentityChanged);
+  const newerBuild = sameVersion && Boolean(options.sameVersionUpdatePublished) && (latestBuildNumber > currentBuildNumber || (identityUpdate && latestBuildNumber >= currentBuildNumber));
+  const newerRelease = identityUpdate;
   const updateAvailable = updateRequired || newerVersion || newerBuild || newerRelease;
 
   return {
@@ -52,7 +55,7 @@ function normalizeWindowsRelease(release) {
   if (!setup) return null;
   return {
     version: match[1],
-    releaseId: `github-${String(release.id || release.tag_name)}`,
+    releaseId: `windows-v${match[1]}`,
     buildNumber: normalizedBuildNumber(release.id),
     downloadUrl: String(setup.browser_download_url),
     releaseNotesUrl: /^https:\/\//u.test(String(release.html_url || '')) ? String(release.html_url) : '',

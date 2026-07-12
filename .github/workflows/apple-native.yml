@@ -19,7 +19,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Install XcodeGen
         run: brew install xcodegen
       - name: Generate Xcode project
@@ -50,7 +50,7 @@ jobs:
           -destination 'platform=macOS'
           CODE_SIGNING_ALLOWED=NO
       - name: Preserve generated wrapper for Xcode Cloud bootstrap
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ChemVaultMolecule-xcodeproj
           path: ChemVault-Molecule-Apple/ChemVaultMolecule.xcodeproj

@@ -59,7 +59,6 @@ jobs:
       - name: Build Windows installer
         run: npm run build:desktop
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           CHEMVAULT_WINDOWS_RELEASE_PUBLISHED: ${{ github.ref_type == 'tag' }}
 
       - name: Create checksum and release record
@@ -111,8 +110,9 @@ jobs:
           ) | Select-Object -ExpandProperty FullName -Unique
           if (gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY 2>$null) {
             gh release upload $env:RELEASE_TAG @assets --clobber --repo $env:GITHUB_REPOSITORY
+            gh release edit $env:RELEASE_TAG --draft=false --latest --title "ChemVault Model $env:RELEASE_TAG" --notes-file "$env:RELEASE_DIRECTORY/release-notes.md" --repo $env:GITHUB_REPOSITORY
           } else {
-            gh release create $env:RELEASE_TAG @assets --verify-tag --title "ChemVault Model $env:RELEASE_TAG" --notes-file "$env:RELEASE_DIRECTORY/release-notes.md" --repo $env:GITHUB_REPOSITORY
+            gh release create $env:RELEASE_TAG @assets --verify-tag --latest --title "ChemVault Model $env:RELEASE_TAG" --notes-file "$env:RELEASE_DIRECTORY/release-notes.md" --repo $env:GITHUB_REPOSITORY
           }
 
       - name: Verify published release assets
@@ -122,7 +122,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_TAG: ${{ steps.release_files.outputs.tag }}
         run: |
-          $release = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json assets,url | ConvertFrom-Json
+          $release = gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY --json assets,url,isDraft,isPrerelease,tagName | ConvertFrom-Json
+          if ($release.isDraft -or $release.isPrerelease) { throw 'Published release is still a draft or prerelease.' }
+          if ($release.tagName -ne $env:RELEASE_TAG) { throw 'Published release tag does not match the build tag.' }
           $names = @($release.assets | ForEach-Object { $_.name })
           if (-not ($names | Where-Object { $_ -like 'ChemVault-Model-Setup-*.exe' })) { throw 'Published release is missing the Setup executable.' }
           if (-not ($names | Where-Object { $_ -like 'ChemVault-Model-Portable-*.exe' })) { throw 'Published release is missing the Portable executable.' }

@@ -21,7 +21,7 @@ export async function onRequestGet({ request, env }: CloudflarePagesContext) {
     check('pubchem', 'https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/cid/962/property/Title/JSON'),
     check('rcsb', 'https://data.rcsb.org/rest/v1/core/entry/1CRN'),
     check('chemvault-user', `${(env.CHEMVAULT_USER_ORIGIN || 'https://user.chemvault.science').replace(/\/+$/u, '')}/api/health`),
-    checkVersionManifest(new URL('/app-version.json', request.url).toString()),
+    checkVersionManifest('https://model.chemvault.science/app-version.json'),
     quantumUrl
       ? check('cloud-quantum', new URL('/health', quantumUrl).toString(), quantumToken ? { Authorization: `Bearer ${quantumToken}` } : {})
       : Promise.resolve<Check>({ name: 'cloud-quantum', ok: true, skipped: true, status: null, durationMs: 0, error: 'Optional cloud quantum backend is not configured.' }),

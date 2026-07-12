@@ -17,11 +17,16 @@
     "build:desktop": "npm run build && node scripts/ensure-electron-binary.cjs && node scripts/patch-nsis-details.cjs && node scripts/build-windows.cjs",
     "dist:win": "npm run build:desktop",
     "release:manifest": "node scripts/write-release-manifest.cjs",
+    "metrics:report": "node scripts/fetch-product-report.cjs",
+    "notices:generate": "node scripts/generate-third-party-notices.cjs",
     "test": "npm run test:desktop && npm run test:quantum && npm run test:workflow && npm run test:exports",
     "test:desktop": "node scripts/test-versioning.cjs && node scripts/test-run-manifest.cjs && node scripts/test-queue-journal.cjs && node scripts/test-project-store.cjs && node scripts/test-release-record.cjs && node scripts/test-cloud-security.cjs && node scripts/test-product-telemetry.cjs && node scripts/test-desktop-contract.cjs",
     "test:electron-smoke": "node scripts/ensure-electron-binary.cjs && node scripts/test-electron-smoke.cjs",
+    "test:electron-workflows": "node scripts/ensure-electron-binary.cjs && node scripts/test-electron-workflows.cjs",
+    "test:visual": "playwright test tests/visual",
+    "test:visual:update": "playwright test tests/visual --update-snapshots",
     "test:exports": "node scripts/smoke-quantum-exports.cjs",
-    "test:quantum": "node scripts/test-gaussian-inputs.cjs && node scripts/test-gaussian-parsers.cjs && node scripts/test-engine-parsers.cjs",
+    "test:quantum": "node scripts/test-scientific-benchmarks.cjs && node scripts/test-gaussian-inputs.cjs && node scripts/test-gaussian-parsers.cjs && node scripts/test-engine-parsers.cjs",
     "test:gaussian-live": "node scripts/test-gaussian-live.cjs",
     "test:engines-live": "node scripts/test-engines-live.cjs",
     "test:workflow": "node scripts/test-quantum-workflow.cjs",
@@ -37,6 +42,7 @@
     "react-dom": "19.2.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@types/node": "^22.10.5",
     "@types/react": "19.2.14",
     "@types/react-dom": "19.2.3",
@@ -45,6 +51,7 @@
     "electron-builder": "^26.15.3",
     "eslint": "9.39.2",
     "eslint-config-next": "16.2.10",
+    "playwright": "^1.61.1",
     "postcss": "8.5.16",
     "tailwindcss": "^3.4.17",
     "typescript": "^5.7.3"
@@ -67,6 +74,7 @@
       "desktop/**/*",
       "out/**/*",
       "public/favicon.ico",
+      "THIRD_PARTY_NOTICES.md",
       "package.json"
     ],
     "extraResources": [

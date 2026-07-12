@@ -23,6 +23,8 @@ const security = require(path.join(root, 'src', 'lib', 'cloudflare', 'quantumSec
 const publicSecurity = require(path.join(root, 'src', 'lib', 'cloudflare', 'chemApiSecurity.ts'));
 const cloudflareFunctions = require(path.join(root, 'src', 'lib', 'cloudflare', 'functions.ts'));
 const quantumRoute = require(path.join(root, 'functions', 'api', 'chem', 'quantum', 'calculate.ts'));
+const productReportRoute = require(path.join(root, 'functions', 'api', 'product-events', 'report.ts'));
+const dependencyRoute = require(path.join(root, 'functions', 'api', 'internal', 'dependencies.ts'));
 if (previousTsLoader) require.extensions['.ts'] = previousTsLoader;
 else delete require.extensions['.ts'];
 
@@ -91,10 +93,55 @@ assert.equal(validateQuantumGatewayConfig({ QUANTUM_API_URL: 'https://quantum.ex
     assert.equal(oversized.status, 413);
 
     const eventStore = memoryKv();
-    assert.equal(await cloudflareFunctions.recordProductEvent({ RATE_LIMIT_KV: eventStore.binding }, 'export_completed', { format: 'pdf' }), true);
-    assert.equal(await cloudflareFunctions.recordProductEvent({ RATE_LIMIT_KV: eventStore.binding }, 'export_completed', { format: 'pdf' }), true);
-    const eventRecord = [...eventStore.values.entries()].find(([key]) => key.startsWith('event:'))?.[1];
+    assert.equal(await cloudflareFunctions.recordProductEvent({ RATE_LIMIT_KV: eventStore.binding }, 'quantum_calculation_started', { engine: 'gaussian', firstRun: 'true', journey: 'journey_alpha' }), true);
+    assert.equal(await cloudflareFunctions.recordProductEvent({ RATE_LIMIT_KV: eventStore.binding }, 'quantum_calculation_completed', { engine: 'gaussian', journey: 'journey_alpha' }), true);
+    assert.equal(await cloudflareFunctions.recordProductEvent({ RATE_LIMIT_KV: eventStore.binding }, 'quantum_result_available', { engine: 'gaussian', journey: 'journey_alpha' }), true);
+    assert.equal(await cloudflareFunctions.recordProductEvent({ RATE_LIMIT_KV: eventStore.binding }, 'export_completed', { format: 'pdf', journey: 'journey_alpha' }), true);
+    assert.equal(await cloudflareFunctions.recordProductEvent({ RATE_LIMIT_KV: eventStore.binding }, 'export_completed', { format: 'pdf', journey: 'journey_beta' }), true);
+    const eventRecord = [...eventStore.values.entries()].find(([key]) => key.startsWith('event-aggregate:') && key.includes(':export_completed:'))?.[1];
     assert.equal(JSON.parse(eventRecord).count, 2);
+    assert.equal(JSON.parse(eventRecord).attributes.journey, undefined);
+    const funnel = await cloudflareFunctions.readProductFunnel({ RATE_LIMIT_KV: eventStore.binding }, 1);
+    assert.equal(funnel.journeys, 2);
+    assert.equal(funnel.counts.calculationStarted, 1);
+    assert.equal(funnel.counts.calculationCompleted, 1);
+    assert.equal(funnel.counts.exportCompleted, 2);
+    assert.equal(funnel.rates.completionAfterStart, 1);
+    assert.equal(funnel.rates.exportAfterResult, 1);
+
+    const reportUnauthorized = await productReportRoute.onRequestGet({
+      request: new Request('https://model.chemvault.science/api/product-events/report'),
+      env: { RATE_LIMIT_KV: eventStore.binding, CHEMVAULT_METRICS_TOKEN: 'metrics-secret' }
+    });
+    assert.equal(reportUnauthorized.status, 401);
+    const reportAuthorized = await productReportRoute.onRequestGet({
+      request: new Request('https://model.chemvault.science/api/product-events/report?days=1', {
+        headers: { Authorization: 'Bearer metrics-secret' }
+      }),
+      env: { RATE_LIMIT_KV: eventStore.binding, CHEMVAULT_METRICS_TOKEN: 'metrics-secret' }
+    });
+    assert.equal(reportAuthorized.status, 200);
+    assert.equal((await reportAuthorized.json()).counts.calculationCompleted, 1);
+
+    const dependencyUnauthorized = await dependencyRoute.onRequestGet({
+      request: new Request('https://model.chemvault.science/api/internal/dependencies'),
+      env: { SYNTHETIC_MONITOR_SECRET: 'monitor-secret' }
+    });
+    assert.equal(dependencyUnauthorized.status, 401);
+
+    global.fetch = async (input) => String(input).includes('app-version.json')
+      ? Response.json({ product: 'ChemVault Model', platforms: { windows: { version: '0.1.0', downloadUrl: 'https://example.test/setup.exe' } } })
+      : Response.json({ ok: true });
+    const dependencies = await dependencyRoute.onRequestGet({
+      request: new Request('https://model.chemvault.science/api/internal/dependencies', {
+        headers: { Authorization: 'Bearer monitor-secret' }
+      }),
+      env: { SYNTHETIC_MONITOR_SECRET: 'monitor-secret' }
+    });
+    assert.equal(dependencies.status, 200);
+    const dependencyReport = await dependencies.json();
+    assert.equal(dependencyReport.ok, true);
+    assert.equal(dependencyReport.checks.find((check) => check.name === 'cloud-quantum').skipped, true);
   } finally {
     global.fetch = originalFetch;
   }
@@ -117,7 +164,11 @@ function memoryKv() {
     values,
     binding: {
       get: async (key) => values.get(key) ?? null,
-      put: async (key, value) => { values.set(key, value); }
+      put: async (key, value) => { values.set(key, value); },
+      list: async ({ prefix = '' } = {}) => ({
+        keys: [...values.keys()].filter((key) => key.startsWith(prefix)).map((name) => ({ name })),
+        list_complete: true
+      })
     }
   };
 }

@@ -1,0 +1,57 @@
+[
+  {
+    "id": "water-singlet",
+    "basisSet": "6-31G(d)",
+    "charge": 0,
+    "unpairedElectrons": 0,
+    "expectedElectrons": 10,
+    "canRun": true,
+    "xyz": "3\nwater singlet\nO 0 0 0\nH 0 0.757 0.586\nH 0 -0.757 0.586\n"
+  },
+  {
+    "id": "hydroxyl-doublet",
+    "basisSet": "6-31G(d)",
+    "charge": 0,
+    "unpairedElectrons": 1,
+    "expectedElectrons": 9,
+    "canRun": true,
+    "xyz": "2\nhydroxyl radical\nO 0 0 0\nH 0 0 0.97\n"
+  },
+  {
+    "id": "ammonium-cation",
+    "basisSet": "6-31G(d)",
+    "charge": 1,
+    "unpairedElectrons": 0,
+    "expectedElectrons": 10,
+    "canRun": true,
+    "xyz": "5\nammonium\nN 0 0 0\nH 0.63 0.63 0.63\nH -0.63 -0.63 0.63\nH -0.63 0.63 -0.63\nH 0.63 -0.63 -0.63\n"
+  },
+  {
+    "id": "oxygen-invalid-singlet",
+    "basisSet": "6-31G(d)",
+    "charge": 0,
+    "unpairedElectrons": 1,
+    "expectedElectrons": 8,
+    "canRun": false,
+    "xyz": "1\ninvalid oxygen spin\nO 0 0 0\n"
+  },
+  {
+    "id": "iodide-pople-unsupported",
+    "basisSet": "6-31G(d)",
+    "charge": -1,
+    "unpairedElectrons": 0,
+    "expectedElectrons": 54,
+    "canRun": false,
+    "issue": "Pople basis",
+    "xyz": "1\niodide\nI 0 0 0\n"
+  },
+  {
+    "id": "iron-two-quintet-def2",
+    "basisSet": "def2-SVP",
+    "charge": 2,
+    "unpairedElectrons": 4,
+    "expectedElectrons": 24,
+    "canRun": true,
+    "xyz": "1\niron two quintet\nFe 0 0 0\n"
+  }
+]

@@ -133,6 +133,9 @@ app.setName(APP_TITLE);
 ipcMain.handle('app:version-status', async () => getAppVersionStatus());
 ipcMain.handle('app:open-update-url', async (_event, url) => openUpdateUrl(url));
 ipcMain.handle('quantum:engine-status', async (_event, engine) => getQuantumEngineStatus(engine));
+ipcMain.handle('quantum:engine-self-test', async (event, engine) => testQuantumEngine(engine, (progress) => {
+  event.sender.send('quantum:run-progress', progress);
+}));
 ipcMain.handle('quantum:run', async (event, request) => runQuantumCalculation(request, (progress) => {
   event.sender.send('quantum:run-progress', progress);
 }));
@@ -875,6 +878,53 @@ async function getQuantumEngineStatus(engineValue) {
     source: engine.source,
     version: extractVersion(`${versionResult.stdout}\n${versionResult.stderr}`),
     message: 'xTB engine is ready.'
+  };
+}
+
+async function testQuantumEngine(engineValue, onProgress = () => {}) {
+  const engine = normalizeEngineKind(engineValue);
+  const status = await getQuantumEngineStatus(engine);
+  const testedAt = new Date().toISOString();
+  if (!status.available) {
+    return {
+      passed: false,
+      engine,
+      engineLabel: status.engineLabel || QUANTUM_ENGINE_LABELS[engine],
+      testedAt,
+      elapsedMs: 0,
+      energyHartree: null,
+      message: status.message || 'The selected engine is not ready.'
+    };
+  }
+
+  const result = await runQuantumCalculation({
+    calculationId: `engine_test_${Date.now()}`,
+    calculationMode: 'single-point',
+    charge: 0,
+    engine,
+    gaussianTask: 'single-point',
+    pyscfBasisSet: '6-31G',
+    pyscfMethod: 'B3LYP',
+    timeoutMs: engine === 'xtb' ? 120000 : 300000,
+    unpairedElectrons: 0,
+    xyz: '3\nChemVault engine self-test: water\nO 0.000000 0.000000 0.000000\nH 0.000000 0.757000 0.586000\nH 0.000000 -0.757000 0.586000\n'
+  }, onProgress);
+  const energy = Number(result?.energyHartree);
+  const range = engine === 'xtb' ? [-20, 0] : [-200, -20];
+  const energyValid = Number.isFinite(energy) && energy >= range[0] && energy <= range[1];
+  const passed = Boolean(result?.ok && energyValid);
+  return {
+    passed,
+    engine,
+    engineLabel: status.engineLabel || QUANTUM_ENGINE_LABELS[engine],
+    testedAt,
+    elapsedMs: Number(result?.elapsedMs || 0),
+    energyHartree: Number.isFinite(energy) ? energy : null,
+    version: status.version || '',
+    message: passed
+      ? `Water self-test passed at ${energy.toFixed(8)} Eh.`
+      : result?.error || (result?.ok ? 'The engine completed, but the parsed water energy was outside the expected smoke-test range.' : 'The engine self-test did not complete.'),
+    outputTail: String(result?.outputTail || '').slice(-12000)
   };
 }
 

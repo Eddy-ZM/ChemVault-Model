@@ -1,0 +1,26 @@
+{
+  "id": "nist-cccbdb-water-neutral",
+  "molecule": "water",
+  "formula": "H2O",
+  "charge": 0,
+  "multiplicity": 1,
+  "geometry": {
+    "unit": "angstrom",
+    "atoms": [
+      { "element": "O", "x": 0.0, "y": 0.0, "z": 0.1173 },
+      { "element": "H", "x": 0.0, "y": 0.7572, "z": -0.4692 },
+      { "element": "H", "x": 0.0, "y": -0.7572, "z": -0.4692 }
+    ],
+    "ohBondAngstrom": 0.958,
+    "hohAngleDegrees": 104.4776,
+    "geometryTolerance": { "bondAngstrom": 0.01, "angleDegrees": 0.2 }
+  },
+  "dipole": {
+    "debye": 1.857,
+    "crossMethodToleranceDebye": 0.8
+  },
+  "sources": [
+    "https://cccbdb.nist.gov/expgeom2x.asp?casno=7732185&charge=0",
+    "https://cccbdb.nist.gov/exp2x.asp?casno=7732185&charge=0"
+  ]
+}

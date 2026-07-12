@@ -381,6 +381,16 @@ export function validateQuantumPreflight(options: {
   }
 
   if (options.engine === 'gaussian') {
+    const basisIssue = gaussianBasisCompatibility(options.basisSet, atoms, options.routeOptions);
+    if (basisIssue) {
+      issues.push(basisIssue);
+      preparationSteps.push({
+        status: basisIssue.severity === 'error' ? 'required' : 'recommended',
+        title: 'Confirm basis-set coverage',
+        detail: basisIssue.detail
+      });
+    }
+
     if (options.gaussianTask === 'frequency' && options.calculationMode === 'single-point') {
       issues.push({
         severity: 'info',
@@ -434,6 +444,44 @@ export function validateQuantumPreflight(options: {
     preparationSteps,
     totalElectrons
   };
+}
+
+export function gaussianBasisCompatibility(
+  basisSet: string | undefined,
+  atoms: QuantumWorkflowAtom[],
+  routeOptions = ''
+): QuantumWorkflowIssue | null {
+  if (!atoms.length) return null;
+  const basis = String(basisSet || '').trim();
+  if (!basis) {
+    return {
+      severity: 'error',
+      title: 'Gaussian basis set is missing',
+      detail: 'A Gaussian calculation requires a basis set or an explicit Gen/GenECP definition.',
+      action: 'Choose a supported basis set before running the job.'
+    };
+  }
+  if (/\bGen(?:ECP)?\b/iu.test(routeOptions) || /^(Gen|GenECP)$/iu.test(basis)) return null;
+
+  const uniqueHeavy = [...new Set(atoms.filter((atom) => atom.atomicNumber > 36).map((atom) => atom.element))];
+  if (!uniqueHeavy.length) return null;
+  if (/^(?:3-21G|4-31G|6-31(?:\+{0,2})G|6-311(?:\+{0,2})G)/iu.test(basis)) {
+    return {
+      severity: 'error',
+      title: 'Selected Pople basis may not cover heavy elements',
+      detail: `${basis} is not treated as a safe default for ${uniqueHeavy.join(', ')} in this workflow.`,
+      action: 'Use a basis/ECP combination with documented coverage, such as a suitable def2 basis, or provide Gen/GenECP data.'
+    };
+  }
+  if (/^cc-pV(?:D|T|Q|5|6)Z/iu.test(basis)) {
+    return {
+      severity: 'warning',
+      title: 'Verify correlation-consistent basis coverage',
+      detail: `${basis} coverage and any required pseudopotential must be confirmed for ${uniqueHeavy.join(', ')}.`,
+      action: 'Select a matching basis/ECP variant or verify the basis in the local Gaussian documentation.'
+    };
+  }
+  return null;
 }
 
 export function prepareQuantumStructure(xyz: string | null | undefined): QuantumStructurePreparationResult {

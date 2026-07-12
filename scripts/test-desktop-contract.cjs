@@ -16,10 +16,12 @@ assert.equal(main.includes('activeQuantumProcesses.size'), true, 'Active quantum
 assert.equal(main.includes("ipcMain.handle('quantum:queue:get'"), true, 'Queue restore IPC is missing.');
 assert.equal(main.includes("ipcMain.handle('quantum:projects:get'"), true, 'Project restore IPC is missing.');
 assert.equal(main.includes("ipcMain.handle('quantum:projects:save'"), true, 'Project save IPC is missing.');
+assert.equal(main.includes("ipcMain.handle('quantum:engine-self-test'"), true, 'Engine self-test IPC is missing.');
 assert.equal(preload.includes('getQuantumQueue'), true, 'Queue restore preload bridge is missing.');
 assert.equal(preload.includes('saveQuantumQueue'), true, 'Queue save preload bridge is missing.');
 assert.equal(preload.includes('getQuantumProjects'), true, 'Project restore preload bridge is missing.');
 assert.equal(preload.includes('saveQuantumProjects'), true, 'Project save preload bridge is missing.');
+assert.equal(preload.includes('testQuantumEngine'), true, 'Engine self-test preload bridge is missing.');
 assert.match(projectWorkspace, /await persistQuantumProjects\(nextProjects\)/u, 'Project persistence must be awaited.');
 assert.doesNotMatch(projectWorkspace, /saveQuantumProjects\?\.\(projects\)\.catch/u, 'Project persistence failures must not be swallowed.');
 assert.match(propertiesPanel, /Project save failed:/u, 'The renderer must surface project persistence failures.');

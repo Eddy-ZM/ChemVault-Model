@@ -1,0 +1,36 @@
+name: Production dependency monitor
+
+on:
+  schedule:
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-production-dependencies
+  cancel-in-progress: false
+
+jobs:
+  dependencies:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SYNTHETIC_MONITOR_SECRET: ${{ secrets.SYNTHETIC_MONITOR_SECRET }}
+    steps:
+      - name: Require monitor credential
+        run: test -n "$SYNTHETIC_MONITOR_SECRET"
+      - name: Verify PubChem, RCSB, User, release metadata and quantum backend
+        run: |
+          response="$(curl --fail-with-body --silent --show-error \
+            --retry 2 --retry-delay 5 --retry-all-errors \
+            --max-time 45 \
+            -H "Authorization: Bearer $SYNTHETIC_MONITOR_SECRET" \
+            https://model.chemvault.science/api/internal/dependencies)"
+          printf '%s\n' "$response" | jq .
+          jq -e '.ok == true and (.checks | length == 5) and (.checks | all(.[]; .ok == true))' <<<"$response" > /dev/null
+          {
+            echo "### Model production dependencies"
+            jq -r '.checks[] | "- \(.name): \(if .skipped then \"not configured (optional)\" elif .ok then \"ok\" else \"failed\" end) (HTTP \(.status // \"n/a\"), \(.durationMs) ms)"' <<<"$response"
+          } >> "$GITHUB_STEP_SUMMARY"

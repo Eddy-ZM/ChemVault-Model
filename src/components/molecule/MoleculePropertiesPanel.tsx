@@ -5,6 +5,7 @@ import { QuantumEngineSetupDialog, type QuantumSetupDialogMode } from '@/compone
 import { GlobalLoadingOverlay } from '@/components/ui/LoadingState';
 import { QuantumResultDiagnosisPanel } from '@/components/molecule/QuantumResultDiagnosisPanel';
 import { QuantumHistoryPanel, ResultComparisonPanel } from '@/components/molecule/QuantumHistoryPanels';
+import { QuantumEngineReadiness } from '@/components/molecule/QuantumEngineReadiness';
 import type { ElectrostaticAnalysis } from '@/lib/chem/electrostaticAnalysis';
 import { analyzeElectrostatics, structureToXyz } from '@/lib/chem/electrostaticAnalysis';
 import type {
@@ -363,6 +364,8 @@ function Identifier({ label, value, onCopy }: { label: string; value: string; on
 function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz: string | null }) {
   const [status, setStatus] = useState<QuantumEngineStatus | null>(null);
   const [statusLoading, setStatusLoading] = useState(true);
+  const [selfTestRunning, setSelfTestRunning] = useState(false);
+  const [selfTestMessage, setSelfTestMessage] = useState('');
   const [running, setRunning] = useState(false);
   const [selectedEngine, setSelectedEngine] = useState<QuantumEngineKind>('xtb');
   const [charge, setCharge] = useState(0);
@@ -419,6 +422,23 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
       setEnginePreferenceNotice(notice);
     }
   }, []);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(`chemvault.quantum.self-test.${selectedEngine}`);
+      if (!raw) {
+        setSelfTestMessage('');
+        return;
+      }
+      const saved = JSON.parse(raw) as { passed?: boolean; testedAt?: string; version?: string; message?: string };
+      const testedAt = saved.testedAt ? new Date(saved.testedAt).toLocaleString() : 'an earlier session';
+      setSelfTestMessage(saved.passed
+        ? `Last self-test passed ${testedAt}${saved.version ? ` with ${saved.version}` : ''}.`
+        : saved.message || `The last self-test failed ${testedAt}.`);
+    } catch {
+      setSelfTestMessage('');
+    }
+  }, [selectedEngine]);
 
   useEffect(() => {
     setHistoryEntries(loadQuantumHistory());
@@ -885,6 +905,34 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
 
   async function runCalculation() {
     await executeCalculation();
+  }
+
+  async function runEngineSelfTest() {
+    const api = window.chemVaultDesktop;
+    if (!api?.testQuantumEngine) return;
+    setSelfTestRunning(true);
+    setSelfTestMessage(`Running a water self-test with ${engineLabel(selectedEngine)}.`);
+    setCalculationProgress(null);
+    try {
+      const test = await api.testQuantumEngine(selectedEngine);
+      setSelfTestMessage(test.message);
+      try {
+        window.localStorage.setItem(`chemvault.quantum.self-test.${selectedEngine}`, JSON.stringify({
+          passed: test.passed,
+          testedAt: test.testedAt,
+          version: test.version || '',
+          message: test.message
+        }));
+      } catch {
+        // The self-test result remains usable when local storage is unavailable.
+      }
+      setConfigRevision((value) => value + 1);
+    } catch (testError) {
+      setSelfTestMessage(testError instanceof Error ? testError.message : 'The engine self-test failed.');
+    } finally {
+      setSelfTestRunning(false);
+      setCalculationProgress(null);
+    }
   }
 
   async function runQuickScreenThenGaussian() {
@@ -1574,58 +1622,24 @@ function ProfessionalQuantumPanel({ metadata, xyz }: { metadata?: Metadata; xyz:
         </div>
       </div>
 
-      <div className="mt-4 grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_minmax(320px,0.75fr)]">
-        <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Engine</p>
-              <h4 className="mt-1 text-base font-bold text-slate-950">Choose calculation engine</h4>
-            </div>
-            <span className="rounded-full bg-white px-3 py-1 text-xs font-semibold text-slate-600">
-              {selectedEngineOption.label}
-            </span>
-          </div>
-
-          <div className="mt-4 grid gap-2 md:grid-cols-4">
-            {engineOptions.map((option) => (
-              <button
-                key={option.value}
-                type="button"
-                onClick={() => selectEngine(option.value, option.label)}
-                className={`rounded-xl border px-3 py-3 text-left transition ${
-                  selectedEngine === option.value
-                    ? 'border-sky-400 bg-white text-sky-950 shadow-sm'
-                    : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300'
-                }`}
-              >
-                <span className="block text-sm font-bold">{option.label}</span>
-                <span className="mt-1 block text-xs leading-5 text-slate-500">{option.description}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="rounded-2xl border border-slate-200 bg-white p-4">
-          <p className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Readiness</p>
-          <div className="mt-3 space-y-2">
-            <ReadinessItem label="Structure" ready={Boolean(xyz)} value={xyz ? 'Loaded' : 'Load a 3D structure'} />
-            <ReadinessItem label="Engine" ready={engineReady} value={statusLoading ? 'Checking' : engineReady ? 'Ready' : 'Needs setup'} />
-            <ReadinessItem
-              label="Input check"
-              ready={preflight.canRun}
-              value={preflight.issueCount.errors > 0 ? `${preflight.issueCount.errors} blocking` : preflight.issueCount.warnings > 0 ? `${preflight.issueCount.warnings} warnings` : 'Passed'}
-            />
-            <ReadinessItem
-              label="Mode"
-              ready={selectedEngine !== 'pyscf' || calculationMode === 'single-point'}
-              value={selectedEngine === 'gaussian' ? selectedGaussianTaskTemplate.label : calculationMode === 'geometry-optimization' ? 'Geometry optimization' : 'Single point'}
-            />
-          </div>
-          <p className={`mt-3 rounded-xl border px-3 py-2 text-xs leading-5 ${engineReady ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800'}`}>
-            {statusDetails}
-          </p>
-        </div>
-      </div>
+      <QuantumEngineReadiness
+        engineOptions={engineOptions}
+        selectedEngine={selectedEngine}
+        selectedEngineLabel={selectedEngineOption.label}
+        onSelectEngine={selectEngine}
+        hasStructure={Boolean(xyz)}
+        engineReady={engineReady}
+        statusLoading={statusLoading}
+        inputReady={preflight.canRun}
+        inputValue={preflight.issueCount.errors > 0 ? `${preflight.issueCount.errors} blocking` : preflight.issueCount.warnings > 0 ? `${preflight.issueCount.warnings} warnings` : 'Passed'}
+        modeReady={selectedEngine !== 'pyscf' || calculationMode === 'single-point'}
+        modeValue={selectedEngine === 'gaussian' ? selectedGaussianTaskTemplate.label : calculationMode === 'geometry-optimization' ? 'Geometry optimization' : 'Single point'}
+        statusDetails={statusDetails}
+        selfTestRunning={selfTestRunning}
+        selfTestMessage={selfTestMessage}
+        selfTestDisabled={!engineReady || selfTestRunning || running || queueRunning}
+        onRunSelfTest={() => void runEngineSelfTest()}
+      />
 
       <section className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -3355,17 +3369,6 @@ function TimingBreakdown({ result }: { result: QuantumCalculationResult }) {
         </p>
       ) : null}
     </section>
-  );
-}
-
-function ReadinessItem({ label, ready, value }: { label: string; ready: boolean; value: string }) {
-  return (
-    <p className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
-      <span className="font-semibold text-slate-500">{label}</span>
-      <span className={`rounded-full px-2 py-1 font-semibold ${ready ? 'bg-emerald-50 text-emerald-800' : 'bg-amber-50 text-amber-800'}`}>
-        {value}
-      </span>
-    </p>
   );
 }
 

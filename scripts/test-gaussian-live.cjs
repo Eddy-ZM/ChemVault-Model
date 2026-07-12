@@ -4,7 +4,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
 const { buildGaussianInput } = require('../desktop/quantum/gaussian-input.cjs');
-const { parseGaussianEnergy } = require('../desktop/gaussian-parsers.cjs');
+const { parseGaussianDipole, parseGaussianEnergy } = require('../desktop/gaussian-parsers.cjs');
+const benchmark = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'tests', 'fixtures', 'benchmarks', 'water-nist.json'), 'utf8'));
 
 const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 
@@ -133,6 +134,12 @@ async function main() {
   const energy = parseGaussianEnergy(log);
   assert.equal(typeof energy, 'number');
   assert.ok(Math.abs(energy - (-74.9)) < 0.5, `Unexpected water energy: ${energy}`);
+  const dipole = parseGaussianDipole(log);
+  assert.equal(typeof dipole?.total, 'number', 'Gaussian did not report a water dipole moment.');
+  assert.ok(
+    Math.abs(dipole.total - benchmark.dipole.debye) <= benchmark.dipole.crossMethodToleranceDebye,
+    `Gaussian water dipole ${dipole.total} D is outside the NIST benchmark tolerance.`,
+  );
   console.log(`Live Gaussian equivalence test passed at ${energy} Eh.`);
 }
 

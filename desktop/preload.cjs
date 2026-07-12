@@ -8,6 +8,7 @@ contextBridge.exposeInMainWorld('chemVaultDesktop', {
   getVersionStatus: () => ipcRenderer.invoke('app:version-status'),
   openUpdateUrl: (url) => ipcRenderer.invoke('app:open-update-url', url),
   getQuantumEngineStatus: (engine) => ipcRenderer.invoke('quantum:engine-status', engine),
+  testQuantumEngine: (engine) => ipcRenderer.invoke('quantum:engine-self-test', engine),
   getEngineSetupRequest: () => ipcRenderer.invoke('quantum:engine-setup-request:get'),
   clearEngineSetupRequest: () => ipcRenderer.invoke('quantum:engine-setup-request:clear'),
   getLocalOpenSourceEngines: () => ipcRenderer.invoke('quantum:local-engines:list'),

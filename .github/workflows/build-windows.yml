@@ -53,10 +53,14 @@ jobs:
       - name: Run Electron UI smoke test
         run: npm run test:electron-smoke
 
+      - name: Run Electron critical workflow tests
+        run: npm run test:electron-workflows
+
       - name: Build Windows installer
         run: npm run build:desktop
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHEMVAULT_WINDOWS_RELEASE_PUBLISHED: ${{ github.ref_type == 'tag' }}
 
       - name: Create checksum and release record
         shell: pwsh

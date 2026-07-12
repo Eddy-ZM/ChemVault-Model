@@ -3,7 +3,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { spawn, spawnSync } = require('node:child_process');
-const { parseOrcaEnergy, parseXtbEnergy } = require('../desktop/quantum/engine-parsers.cjs');
+const { parseOrcaDipole, parseOrcaEnergy, parsePyscfResult, parseXtbDipole, parseXtbEnergy } = require('../desktop/quantum/engine-parsers.cjs');
+
+const benchmark = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'tests', 'fixtures', 'benchmarks', 'water-nist.json'), 'utf8'));
 
 const timeoutMs = positiveInteger(process.env.CHEMVAULT_ENGINE_TEST_TIMEOUT_MS, 10 * 60 * 1000);
 const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'chemvault-engines-live-'));
@@ -37,6 +39,7 @@ async function testXtb(executable) {
   const result = await run(executable, [input, '--gfn', '2', '--chrg', '0', '--uhf', '0', '--sp']);
   assert.equal(result.code, 0, result.output);
   assert.equal(typeof parseXtbEnergy(result.output), 'number');
+  assertDipole(parseXtbDipole(result.output), 'xTB');
   console.log('Live xTB water calculation passed.');
 }
 
@@ -44,13 +47,18 @@ async function testPyscf(executable) {
   requireExecutable(executable, 'PySCF Python');
   const code = [
     'from pyscf import gto, scf',
-    "mol=gto.M(atom='O 0 0 0; H 0 0.757 0.586; H 0 -0.757 0.586',basis='sto-3g',unit='Angstrom')",
-    'energy=scf.RHF(mol).kernel()',
-    "print('CHEMVAULT_ENERGY', energy)"
+    "mol=gto.M(atom='O 0 0 0.1173; H 0 0.7572 -0.4692; H 0 -0.7572 -0.4692',basis='6-31g*',unit='Angstrom')",
+    'mf=scf.RHF(mol).run()',
+    'energy=mf.e_tot',
+    "d=mf.dip_moment(unit='Debye', verbose=0)",
+    "import json",
+    "print('CHEMVAULT_PYSCF_RESULT_START', json.dumps({'energyHartree': energy, 'dipoleDebye': {'x': float(d[0]), 'y': float(d[1]), 'z': float(d[2]), 'total': float((d[0]**2+d[1]**2+d[2]**2)**0.5)}, 'method': 'RHF/6-31G*'}), 'CHEMVAULT_PYSCF_RESULT_END')"
   ].join(';');
   const result = await run(executable, ['-c', code]);
   assert.equal(result.code, 0, result.output);
-  assert.match(result.output, /CHEMVAULT_ENERGY\s+-?\d/iu);
+  const parsed = parsePyscfResult(result.output);
+  assert.equal(typeof parsed?.energyHartree, 'number');
+  assertDipole(parsed?.dipoleDebye, 'PySCF');
   console.log('Live PySCF water calculation passed.');
 }
 
@@ -61,6 +69,7 @@ async function testOrca(executable) {
   const result = await run(executable, [input]);
   assert.equal(result.code, 0, result.output);
   assert.equal(typeof parseOrcaEnergy(result.output), 'number');
+  assertDipole(parseOrcaDipole(result.output), 'ORCA');
   console.log('Live ORCA water calculation passed.');
 }
 
@@ -98,4 +107,10 @@ function requireExecutable(executable, label) {
 function positiveInteger(value, fallback) {
   const parsed = Number.parseInt(value || '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function assertDipole(dipole, engine) {
+  assert.equal(typeof dipole?.total, 'number', `${engine} did not report a dipole moment.`);
+  const difference = Math.abs(dipole.total - benchmark.dipole.debye);
+  assert.ok(difference <= benchmark.dipole.crossMethodToleranceDebye, `${engine} water dipole ${dipole.total} D differs from the NIST reference by ${difference} D.`);
 }

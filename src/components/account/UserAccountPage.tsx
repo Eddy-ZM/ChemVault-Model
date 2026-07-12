@@ -43,10 +43,10 @@ const pageMeta: Record<AccountPage, AccountPageMeta> = {
   },
   molecules: {
     title: 'My Molecules',
-    eyebrow: 'Molecule library',
-    description: 'Review molecule workspace availability, cloud-library entitlement and saved-project quota from ChemVault User.',
+    eyebrow: 'Local molecule workspace',
+    description: 'Review projects and calculation records stored on this device, plus account capabilities reported by ChemVault User.',
     path: '/molecules',
-    portalSection: 'molecules'
+    portalSection: 'account'
   },
   settings: {
     title: 'Settings',
@@ -136,7 +136,6 @@ export function UserAccountPage({ page }: { page: AccountPage }) {
   const securityUrl = buildUserPortalUrl('security', { userOrigin, callbackPath: meta.path });
   const settingsUrl = buildUserPortalUrl('settings', { userOrigin, callbackPath: meta.path });
   const profileUrl = buildUserPortalUrl('profile', { userOrigin, callbackPath: meta.path });
-  const moleculesUrl = buildUserPortalUrl('molecules', { userOrigin, callbackPath: meta.path });
   const loginHref = `/login?callbackUrl=${meta.path}` as Route;
 
   const permissions = useMemo(() => {
@@ -227,8 +226,6 @@ export function UserAccountPage({ page }: { page: AccountPage }) {
               entitlements={entitlements}
               localQuantumHistory={localQuantumHistory}
               localQuantumProjects={localQuantumProjects}
-              moleculesUrl={moleculesUrl}
-              permissions={permissions}
             />
           ) : null}
           {page === 'settings' ? (
@@ -352,45 +349,37 @@ function ProfileContent({
 function MoleculesContent({
   entitlements,
   localQuantumHistory,
-  localQuantumProjects,
-  moleculesUrl,
-  permissions
+  localQuantumProjects
 }: {
   entitlements: MoleculeEntitlements | null;
   localQuantumHistory: QuantumHistoryEntry[];
   localQuantumProjects: QuantumProjectRecord[];
-  moleculesUrl: string;
-  permissions: string[];
 }) {
   const quota = entitlements?.quota;
   const cloudSyncEnabled = Boolean(entitlements?.featureFlags?.cloudLibrarySyncEnabled);
-  const savedProjectsEnabled = permissions.includes('molecule.saved_projects');
-  const uploadEnabled = permissions.includes('molecule.upload');
 
   return (
     <section className="grid gap-4">
       <div className="grid gap-4 lg:grid-cols-[0.95fr_1.05fr]">
-        <Panel title="Library Sync" subtitle="Molecule library availability follows ChemVault User entitlements.">
+        <Panel title="Storage and account capabilities" subtitle="Current projects remain on this device unless the user exports them.">
           <div className="grid gap-3 sm:grid-cols-2">
-            <Metric label="Cloud library" value={cloudSyncEnabled ? 'Enabled' : savedProjectsEnabled ? 'Account controlled' : 'Local workspace'} />
+            <Metric label="Project storage" value="Local device" />
+            <Metric label="Cloud library entitlement" value={cloudSyncEnabled ? 'Available to account' : 'Not enabled'} />
             <Metric label="Saved projects" value={formatQuota(quota?.savedProjectsRemaining)} />
             <Metric label="Searches" value={formatQuota(quota?.searchesRemaining)} />
             <Metric label="Exports" value={formatQuota(quota?.exportsRemaining)} />
           </div>
           <p className="mt-4 text-sm leading-6 text-slate-600">
-            Molecule Studio uses the synced account to decide which library features are available. Local browser work remains available even when cloud
-            library access is not enabled.
+            ChemVault User reports account capabilities and quotas. This version does not upload or synchronize local molecule projects or calculation
+            records automatically.
           </p>
-          <a href={moleculesUrl} className="mt-5 inline-flex rounded-xl border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition hover:border-sky-300 hover:text-sky-700">
-            Open molecule library in User System
-          </a>
         </Panel>
 
         <Panel title="Workspace Actions" subtitle="Continue molecule work from the web app.">
           <div className="grid gap-3 md:grid-cols-2">
             <ActionLink href="/molecule" title="Search molecules" description="Search by compound name or PubChem CID, then inspect 3D structure and properties." />
             <ActionLink href="/molecule" title="Draw structure" description="Use the 2D sketcher and generate molecule data from a drawn structure." />
-            <ActionLink href="/molecule" title={uploadEnabled ? 'Upload structures' : 'Upload structures locked'} description={uploadEnabled ? 'Import MOL, SDF, XYZ, PDB or SMILES files.' : 'Upload access depends on molecule.upload permission.'} />
+            <ActionLink href="/molecule" title="Upload local structures" description="Import MOL, SDF, XYZ, PDB or SMILES files without uploading them to an account library." />
             <ActionLink href="/molecule" title="Export current work" description="Export supported formats and images from the active molecule workspace." />
           </div>
         </Panel>

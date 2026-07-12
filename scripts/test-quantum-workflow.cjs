@@ -24,6 +24,7 @@ new Function('exports', 'require', 'module', '__filename', '__dirname', compiled
 );
 
 const { diagnoseQuantumCalculation, validateQuantumPreflight } = localModule.exports;
+const benchmarks = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'tests', 'fixtures', 'quantum', 'preflight-benchmarks.json'), 'utf8'));
 
 const baseResult = {
   ok: false,
@@ -80,5 +81,24 @@ const missingChargeDiagnosis = diagnoseQuantumCalculation({
 });
 assert.match(missingChargeDiagnosis.suggestedActions.join(' '), /Detailed charges|Pop=Regular/iu);
 assert.doesNotMatch(missingChargeDiagnosis.suggestedActions.join(' '), /Pop=Full/iu);
+
+for (const benchmark of benchmarks) {
+  const preflight = validateQuantumPreflight({
+    basisSet: benchmark.basisSet,
+    calculationMode: 'single-point',
+    charge: benchmark.charge,
+    engine: 'gaussian',
+    gaussianTask: 'single-point',
+    method: 'B3LYP',
+    routeOptions: '',
+    unpairedElectrons: benchmark.unpairedElectrons,
+    xyz: benchmark.xyz
+  });
+  assert.equal(preflight.totalElectrons, benchmark.expectedElectrons, `${benchmark.id} electron count changed`);
+  assert.equal(preflight.canRun, benchmark.canRun, `${benchmark.id} run eligibility changed`);
+  if (benchmark.issue) {
+    assert.match(preflight.issues.map((issue) => issue.title).join(' '), new RegExp(benchmark.issue, 'iu'));
+  }
+}
 
 console.log('Quantum workflow diagnosis samples passed.');

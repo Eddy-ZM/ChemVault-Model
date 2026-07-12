@@ -59,6 +59,17 @@ declare global {
       getVersionStatus: () => Promise<DesktopVersionStatus>;
       openUpdateUrl: (url?: string) => Promise<{ ok: boolean; url: string }>;
       getQuantumEngineStatus: (engine?: QuantumEngineKind) => Promise<QuantumEngineStatus>;
+      testQuantumEngine: (engine: QuantumEngineKind) => Promise<{
+        passed: boolean;
+        engine: QuantumEngineKind;
+        engineLabel: string;
+        testedAt: string;
+        elapsedMs: number;
+        energyHartree: number | null;
+        version?: string;
+        message: string;
+        outputTail?: string;
+      }>;
       getEngineSetupRequest: () => Promise<EngineSetupRequest>;
       clearEngineSetupRequest: () => Promise<{ ok: boolean }>;
       getLocalOpenSourceEngines: () => Promise<LocalEngineStatus[]>;

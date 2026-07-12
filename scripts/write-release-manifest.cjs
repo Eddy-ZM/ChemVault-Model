@@ -37,6 +37,13 @@ const manifest = {
   copyright: 'Copyright (c) ChemVault. All rights reserved.'
 };
 
+for (const artifact of artifacts.filter((item) => item.fileName.toLowerCase().endsWith('.exe'))) {
+  fs.writeFileSync(
+    path.join(releaseDir, `${artifact.fileName}.sha256`),
+    `${artifact.sha256}  ${artifact.fileName}\n`,
+    'utf8'
+  );
+}
 fs.writeFileSync(path.join(releaseDir, 'release-manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 fs.writeFileSync(path.join(releaseDir, 'release-notes.md'), releaseNotes(manifest));
 console.log(`Wrote release manifest for ${artifacts.length} artifact(s) to ${releaseDir}`);

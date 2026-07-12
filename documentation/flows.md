@@ -36,12 +36,19 @@
 - Deny cases: required result, checkpoint, optimized geometry, or bridge tool output is unavailable.
 - Side effects: writes only the user-selected export destination and aggregate diagnostic event.
 
-## Product diagnostics
+## Product diagnostics and maintainer report
 
 - Actor: user who explicitly enabled diagnostics.
-- Sequence: client adds version, platform, short-lived journey, and allowlisted categorical attributes; Pages Functions origin-checks, rate-limits, revalidates the allowlist, and increments a short-retention KV event bucket.
+- Sequence: client adds version, platform, short-lived journey, and allowlisted categorical attributes; Pages Functions origin-checks, rate-limits, revalidates the allowlist, increments a low-cardinality daily aggregate, and appends a short-retention anonymous journey event row.
 - Deny cases: diagnostics disabled, unsupported event/attribute, missing bindings, disallowed origin, oversized event, or exhausted quota.
-- Side effects: aggregate event count only; no molecular or account payload.
+- Side effects: aggregate counts and anonymous journey event rows only; no molecular or account payload. A bearer-protected maintainer endpoint calculates start, completion, result, and export conversion for a bounded 1-90 day window.
+
+## Production dependency monitor
+
+- Actor: scheduled GitHub Actions workflow using a shared secret.
+- Sequence: call the protected production endpoint, then verify PubChem, RCSB, ChemVault User, and the configured cloud quantum health endpoint.
+- Deny cases: missing or mismatched monitor secret, failed required dependency, timeout, or non-success response.
+- Side effects: workflow result and summary only. Cloud quantum is reported as optional and skipped when it is intentionally not configured.
 
 ## Windows release and update
 

@@ -1,5 +1,5 @@
 export type OAuthProvider = 'apple' | 'google' | 'github';
-export type UserPortalSection = 'account' | 'profile' | 'molecules' | 'settings' | 'security';
+export type UserPortalSection = 'account' | 'profile' | 'settings' | 'security';
 
 export type AuthLinkOptions = {
   userOrigin: string;
@@ -11,7 +11,6 @@ const MODEL_ORIGIN = process.env.NEXT_PUBLIC_CHEMVAULT_MODEL_ORIGIN || 'https://
 const USER_PORTAL_PATHS: Record<UserPortalSection, string> = {
   account: '/',
   profile: '/profile',
-  molecules: '/molecules',
   settings: '/settings',
   security: '/settings/security'
 };

@@ -28,7 +28,7 @@ Cloud quantum submission is optional and fails closed unless a backend URL, priv
 - ChemVault User authenticates users and evaluates `chemvault_molecule` service access.
 - PubChem and RCSB supply public structure data.
 - GitHub Releases is the source of truth for published Windows installers.
-- Cloudflare KV stores short-retention fixed-window quota counters and aggregate product-event buckets under separate key prefixes.
+- Cloudflare KV stores short-retention fixed-window quota counters, low-cardinality product-event aggregates, and expiring append-only anonymous journey rows under separate key prefixes.
 
 ## Known risks and assumptions
 
@@ -38,7 +38,7 @@ Cloud quantum submission is optional and fails closed unless a backend URL, priv
 - Public chemistry endpoints depend on upstream PubChem/RCSB availability even when local quotas and caches are healthy.
 - KV fixed-window limits are an application guardrail rather than a billing-grade atomic quota; the private quantum backend must also enforce its own capacity ceiling.
 
-There are no email delivery jobs, scheduled calculations, cron-triggered workflows, or embedded AI agents in this repository, so no `emails.md`, `cron.md`, or `automation.md` is required.
+There are no email delivery jobs, scheduled calculations, or embedded AI agents in this repository, so no `emails.md` or `automation.md` is required. A scheduled production dependency monitor is documented in `cron.md`.
 
 ## Related documents
 
@@ -47,3 +47,4 @@ There are no email delivery jobs, scheduled calculations, cron-triggered workflo
 - [Runtime variables](variables.md)
 - [Verification map](tests.md)
 - [Molecule artifact contract](artifact-contract.md)
+- [Scheduled production monitoring](cron.md)

@@ -7,6 +7,7 @@ const main = fs.readFileSync(path.join(root, 'desktop', 'main.cjs'), 'utf8');
 const preload = fs.readFileSync(path.join(root, 'desktop', 'preload.cjs'), 'utf8');
 const projectWorkspace = fs.readFileSync(path.join(root, 'src', 'lib', 'chem', 'quantumProjectWorkspace.ts'), 'utf8');
 const propertiesPanel = fs.readFileSync(path.join(root, 'src', 'components', 'molecule', 'MoleculePropertiesPanel.tsx'), 'utf8');
+const windowsBuilder = fs.readFileSync(path.join(root, 'scripts', 'build-windows.cjs'), 'utf8');
 
 for (const setting of ['nodeIntegration: false', 'contextIsolation: true', 'sandbox: true', 'webSecurity: true']) {
   assert.equal(main.includes(setting), true, `Missing desktop security setting: ${setting}`);
@@ -25,5 +26,6 @@ assert.equal(preload.includes('testQuantumEngine'), true, 'Engine self-test prel
 assert.match(projectWorkspace, /await persistQuantumProjects\(nextProjects\)/u, 'Project persistence must be awaited.');
 assert.doesNotMatch(projectWorkspace, /saveQuantumProjects\?\.\(projects\)\.catch/u, 'Project persistence failures must not be swallowed.');
 assert.match(propertiesPanel, /Project save failed:/u, 'The renderer must surface project persistence failures.');
+assert.match(windowsBuilder, /'--publish',[\s\S]*'never'/u, 'Packaging must not implicitly publish from electron-builder.');
 
 console.log('Desktop security and lifecycle contract tests passed.');

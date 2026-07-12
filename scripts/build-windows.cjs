@@ -10,6 +10,8 @@ const result = spawnSync(process.execPath, [
   cli,
   '--win',
   '--x64',
+  '--publish',
+  'never',
   `--config.directories.output=${outputDirectory}`
 ], {
   cwd: root,

@@ -32,5 +32,5 @@ jobs:
           jq -e '.ok == true and (.checks | length == 5) and (.checks | all(.[]; .ok == true))' <<<"$response" > /dev/null
           {
             echo "### Model production dependencies"
-            jq -r '.checks[] | "- \(.name): \(if .skipped then \"not configured (optional)\" elif .ok then \"ok\" else \"failed\" end) (HTTP \(.status // \"n/a\"), \(.durationMs) ms)"' <<<"$response"
+            jq -r '.checks[] | "- \(.name): \(if .skipped then "not configured (optional)" elif .ok then "ok" else "failed" end) (HTTP \(.status // "n/a"), \(.durationMs) ms)"' <<<"$response"
           } >> "$GITHUB_STEP_SUMMARY"

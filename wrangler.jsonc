@@ -4,8 +4,11 @@
   "compatibility_date": "2026-07-11",
   "pages_build_output_dir": "./out",
   "vars": {
+    "APP_ENV": "production",
     "CHEMVAULT_USER_ORIGIN": "https://user.chemvault.science",
-    "CHEMVAULT_ALLOWED_ORIGINS": "https://model.chemvault.science"
+    "CHEMVAULT_ALLOWED_ORIGINS": "https://model.chemvault.science",
+    "BILLING_API_ORIGIN": "https://chemvault.science",
+    "BILLING_ENFORCEMENT_MODE": "shadow"
   },
   "kv_namespaces": [
     {

@@ -4,7 +4,8 @@
 
 | Use case | Rule and negative case | Evidence | CI status |
 | --- | --- | --- | --- |
-| Cloud quantum access | Anonymous, malformed, missing-token, and exhausted-quota requests never reach the backend | `test-cloud-security.cjs`; quantum route integration | Required |
+| Cloud quantum access | Anonymous, malformed, missing-token, Free-plan, unavailable-billing, and exhausted-quota requests never reach the backend; paid usage returns remaining quota | `test-cloud-security.cjs`; quantum route integration | Required |
+| Cloud quantum usage | Main billing accepts only the shared service secret, applies Pro+ daily limits atomically, and treats a repeated request ID as one job | Main `tests/billing-api.test.mjs`; Model `test-cloud-security.cjs` | Required before enforce |
 | Public chemistry APIs | Disallowed origins, missing/exhausted quotas, oversized JSON, long query/SMILES, and invalid identifiers are rejected | `test-cloud-security.cjs`; production TypeScript build | Required |
 | Desktop security | Node integration disabled, context isolation/sandbox/web security enabled, required preload bridges present | `test-desktop-contract.cjs` | Required |
 | Project records | Normalize, atomically write, read, back up, enforce size limit, and propagate write failure | `test-project-store.cjs`; renderer persistence tests | Required |

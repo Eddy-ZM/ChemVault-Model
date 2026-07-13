@@ -8,6 +8,10 @@ export type CloudflareChemEnv = {
   CHEMVAULT_QUANTUM_API_TOKEN?: string;
   CHEMVAULT_USER_ORIGIN?: string;
   CHEMVAULT_ALLOWED_ORIGINS?: string;
+  APP_ENV?: string;
+  BILLING_API_ORIGIN?: string;
+  BILLING_SERVICE_SECRET?: string;
+  BILLING_ENFORCEMENT_MODE?: string;
   CHEMVAULT_METRICS_TOKEN?: string;
   SYNTHETIC_MONITOR_SECRET?: string;
   RATE_LIMIT_KV?: CloudflareKvNamespace;

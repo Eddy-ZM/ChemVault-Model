@@ -13,6 +13,9 @@ Do not commit real keys, tokens, private keys, certificates or production `.env`
 | `CHEMVAULT_QUANTUM_API_TOKEN` | Optional | Alternate name for `QUANTUM_API_TOKEN`. |
 | `CHEMVAULT_USER_ORIGIN` | Required for cloud quantum | ChemVault User origin used for web, Apple and desktop session/service-access checks. |
 | `CHEMVAULT_ALLOWED_ORIGINS` | Optional | Comma-separated additional browser origins allowed to call protected quantum routes. |
+| `BILLING_API_ORIGIN` | Required for enforced cloud quantum | Main ChemVault billing API origin used for subscription and daily usage decisions. |
+| `BILLING_SERVICE_SECRET` | Required for enforced cloud quantum | Server-only shared credential for Model-to-main billing calls. |
+| `BILLING_ENFORCEMENT_MODE` | Required for controlled rollout | `shadow` observes billing decisions, `enforce` blocks Free/exhausted/unverifiable cloud usage, and `off` disables checks. |
 | `RATE_LIMIT_KV` | Required binding | Cloudflare KV namespace for prefixed public API, quantum quota, and aggregate product-event records. |
 | `CHEMVAULT_MODEL_API_URL` | Optional | Desktop EXE API proxy base URL. Defaults to `https://model.chemvault.science/api/chem`. |
 | `CHEMVAULT_APP_VERSION_URL` | Optional | Desktop EXE version manifest URL. Defaults to `https://model.chemvault.science/app-version.json`. |

@@ -16,6 +16,7 @@ import {
   validateQuantumGatewayConfig,
   validateQuantumPayload
 } from '../../../../src/lib/cloudflare/quantumSecurity';
+import { consumeCloudQuantumUsage, quantumUsageRequestId } from '../../../../src/lib/cloudflare/billingEntitlements';
 
 export function onRequestOptions(context: CloudflarePagesContext) {
   const origin = context.request.headers.get('origin');
@@ -57,6 +58,16 @@ export async function onRequestPost(context: CloudflarePagesContext) {
   const quota = await consumeRateLimit(context.env, quantumQuotaKey(identity), 6);
   if (quota.unavailable) return jsonResponse({ success: false, status: 'unavailable', error: 'Quantum rate limiting is temporarily unavailable.' }, 503, cors);
   if (!quota.success) return jsonResponse({ success: false, status: 'rate-limited', error: 'Quantum calculation quota reached. Try again later.' }, 429, { ...cors, 'Retry-After': '60' });
+  const billing = await consumeCloudQuantumUsage(context.env, identity.id, quantumUsageRequestId(context.request));
+  if (!billing.allowed) {
+    return jsonResponse({
+      success: false,
+      status: billing.reason === 'subscription_required' ? 'subscription-required' : billing.reason === 'quota_exhausted' ? 'quota-exhausted' : 'billing-unavailable',
+      error: billing.message || 'Cloud quantum billing is unavailable.',
+      plan: billing.plan,
+      quota: publicQuantumQuota(billing)
+    }, billing.status || 503, billing.status === 429 ? { ...cors, 'Retry-After': secondsUntil(billing.periodEnd) } : cors);
+  }
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -100,7 +111,8 @@ export async function onRequestPost(context: CloudflarePagesContext) {
       status: payload?.status || 'completed',
       engine: payload?.engine || 'remote-quantum',
       method: payload?.method || method,
-      ...payload
+      ...payload,
+      quota: publicQuantumQuota(billing)
     }, 200, cors);
   } catch (error) {
     return jsonResponse(
@@ -115,6 +127,23 @@ export async function onRequestPost(context: CloudflarePagesContext) {
       cors
     );
   }
+}
+
+function publicQuantumQuota(usage: Awaited<ReturnType<typeof consumeCloudQuantumUsage>>) {
+  return {
+    plan: usage.plan,
+    enforced: usage.enforced,
+    ...(usage.limit === undefined ? {} : { limit: usage.limit }),
+    ...(usage.used === undefined ? {} : { used: usage.used }),
+    ...(usage.remaining === undefined ? {} : { remaining: usage.remaining }),
+    ...(usage.periodEnd ? { periodEnd: usage.periodEnd } : {})
+  };
+}
+
+function secondsUntil(value: string | undefined) {
+  const timestamp = value ? Date.parse(value) : Number.NaN;
+  if (!Number.isFinite(timestamp)) return '60';
+  return String(Math.max(1, Math.ceil((timestamp - Date.now()) / 1000)));
 }
 
 function calculationEndpoint(baseUrl: string) {

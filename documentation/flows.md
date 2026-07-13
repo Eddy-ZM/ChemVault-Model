@@ -17,10 +17,10 @@
 
 ## Cloud quantum request
 
-- Actor: signed-in web or Apple user with Molecule service access.
-- Sequence: validate origin and body size, forward the session to ChemVault User, require `chemvault_molecule`, validate method/structure/charge/spin, require backend URL/token/limiter, consume per-user quota, and call the private backend.
-- Deny cases: anonymous session, denied service, disallowed origin, unsupported input, missing private configuration, or exhausted quota.
-- Side effects: consumes cloud calculation capacity and returns a professional result; the private token never crosses to the client.
+- Actor: signed-in web or Apple user with Molecule service access and a Pro-or-higher subscription.
+- Sequence: validate origin and body size, forward the session to ChemVault User, require `chemvault_molecule`, validate method/structure/charge/spin, require backend URL/token/limiter, apply the local abuse limit, submit an idempotent usage-consumption request to the main billing service, then call the private backend only when the subscription and daily quota allow it.
+- Deny cases: anonymous session, denied service, Free plan, exhausted daily quota, disallowed origin, unsupported input, missing billing/private configuration, or unavailable rate-limit storage. Enforcement fails closed; shadow mode records the observed billing decision without blocking the request.
+- Side effects: one daily cloud-quantum job is recorded centrally before private capacity is used. Model generates the internal accounting ID so clients cannot reuse a key to bypass quota; replaying that trusted internal ID does not double count. Local desktop engines are excluded from SaaS usage and billing.
 
 ## Desktop engine setup
 

@@ -22,6 +22,7 @@ require.extensions['.ts'] = (module, fileName) => {
 const security = require(path.join(root, 'src', 'lib', 'cloudflare', 'quantumSecurity.ts'));
 const publicSecurity = require(path.join(root, 'src', 'lib', 'cloudflare', 'chemApiSecurity.ts'));
 const cloudflareFunctions = require(path.join(root, 'src', 'lib', 'cloudflare', 'functions.ts'));
+const billing = require(path.join(root, 'src', 'lib', 'cloudflare', 'billingEntitlements.ts'));
 const quantumRoute = require(path.join(root, 'functions', 'api', 'chem', 'quantum', 'calculate.ts'));
 const productReportRoute = require(path.join(root, 'functions', 'api', 'product-events', 'report.ts'));
 const dependencyRoute = require(path.join(root, 'functions', 'api', 'internal', 'dependencies.ts'));
@@ -30,6 +31,7 @@ else delete require.extensions['.ts'];
 
 const { isAllowedOrigin, quantumQuotaKey, validateQuantumGatewayConfig, validateQuantumPayload } = security;
 const { authorizePublicChemRequest, readBoundedJson } = publicSecurity;
+const { billingEnforcementMode, consumeCloudQuantumUsage, quantumUsageRequestId } = billing;
 const water = '3\nwater\nO 0 0 0\nH 0 0.757 0.586\nH 0 -0.757 0.586\n';
 const valid = validateQuantumPayload({ structureData: water, format: 'xyz', method: 'gfn2-xTB', charge: 0, multiplicity: 1 });
 assert.equal(valid.ok, true);
@@ -44,6 +46,13 @@ assert.equal(isAllowedOrigin('https://attacker.example', {}), false);
 assert.equal(quantumQuotaKey({ id: 'user-1', email: 'test@example.com' }), 'quantum:user-1');
 assert.equal(validateQuantumGatewayConfig({ QUANTUM_API_URL: 'https://quantum.example', RATE_LIMIT_KV: rateLimitKv(true) }).ok, false);
 assert.equal(validateQuantumGatewayConfig({ QUANTUM_API_URL: 'https://quantum.example', QUANTUM_API_TOKEN: 'secret', RATE_LIMIT_KV: rateLimitKv(true) }).ok, true);
+assert.equal(billingEnforcementMode({ APP_ENV: 'production' }), 'enforce');
+assert.equal(billingEnforcementMode({ APP_ENV: 'production', BILLING_ENFORCEMENT_MODE: 'shadow' }), 'shadow');
+const serverUsageId = quantumUsageRequestId(new Request('https://model.chemvault.science', {
+  headers: { 'Idempotency-Key': 'client-controlled-key-0001' }
+}));
+assert.match(serverUsageId, /^[0-9a-f-]{36}$/u);
+assert.notEqual(serverUsageId, 'client-controlled-key-0001');
 
 (async () => {
   const originalFetch = global.fetch;
@@ -77,6 +86,126 @@ assert.equal(validateQuantumGatewayConfig({ QUANTUM_API_URL: 'https://quantum.ex
     assert.equal(completed.status, 200);
     assert.equal(requests.length, 2);
     assert.equal(requests[1].init.headers.Authorization, 'Bearer private-token');
+
+    let backendCalls = 0;
+    global.fetch = async (input, init = {}) => {
+      const url = String(input);
+      if (url.includes('/api/access/check')) return Response.json({ allowed: true, user: { id: 'user-1', email: 'test@example.com' } });
+      if (url.includes('/api/internal/billing/usage/consume')) {
+        assert.equal(init.headers.authorization, 'Bearer billing-secret');
+        const usageBody = JSON.parse(init.body);
+        assert.equal(usageBody.userId, 'user-1');
+        assert.equal(usageBody.featureKey, 'modeling.cloud_quantum');
+        assert.match(usageBody.requestId, /^[0-9a-f-]{36}$/u);
+        return Response.json({
+          ok: true,
+          allowed: true,
+          userId: 'user-1',
+          featureKey: 'modeling.cloud_quantum',
+          plan: 'pro',
+          limit: 20,
+          used: 1,
+          remaining: 19,
+          periodEnd: '2099-01-02T00:00:00.000Z'
+        });
+      }
+      backendCalls += 1;
+      return Response.json({ status: 'completed', engine: 'test-engine', energy: -1 });
+    };
+    const billed = await quantumRoute.onRequestPost(quantumContext({
+      APP_ENV: 'production',
+      BILLING_API_ORIGIN: 'https://chemvault.science',
+      BILLING_SERVICE_SECRET: 'billing-secret',
+      BILLING_ENFORCEMENT_MODE: 'enforce',
+      QUANTUM_API_URL: 'https://quantum.example',
+      QUANTUM_API_TOKEN: 'private-token',
+      RATE_LIMIT_KV: rateLimitKv(true)
+    }, true, 'quantum-request-route-0001'));
+    assert.equal(billed.status, 200);
+    assert.equal(backendCalls, 1);
+    assert.deepEqual((await billed.json()).quota, {
+      plan: 'pro',
+      enforced: true,
+      limit: 20,
+      used: 1,
+      remaining: 19,
+      periodEnd: '2099-01-02T00:00:00.000Z'
+    });
+
+    backendCalls = 0;
+    global.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes('/api/access/check')) return Response.json({ allowed: true, user: { id: 'free-user', email: 'free@example.com' } });
+      if (url.includes('/api/internal/billing/usage/consume')) {
+        return Response.json({
+          ok: true,
+          allowed: false,
+          reason: 'subscription_required',
+          requiredPlan: 'pro',
+          userId: 'free-user',
+          featureKey: 'modeling.cloud_quantum',
+          plan: 'free',
+          limit: 0,
+          used: 0,
+          remaining: 0,
+          periodEnd: '2099-01-02T00:00:00.000Z'
+        }, { status: 402 });
+      }
+      backendCalls += 1;
+      return Response.json({ status: 'completed' });
+    };
+    const subscriptionRequired = await quantumRoute.onRequestPost(quantumContext({
+      APP_ENV: 'production',
+      BILLING_SERVICE_SECRET: 'billing-secret',
+      BILLING_ENFORCEMENT_MODE: 'enforce',
+      QUANTUM_API_URL: 'https://quantum.example',
+      QUANTUM_API_TOKEN: 'private-token',
+      RATE_LIMIT_KV: rateLimitKv(true)
+    }, true, 'quantum-request-free-0001'));
+    assert.equal(subscriptionRequired.status, 402);
+    assert.equal((await subscriptionRequired.json()).status, 'subscription-required');
+    assert.equal(backendCalls, 0, 'Free subscriptions must not reach the cloud quantum backend.');
+
+    global.fetch = async (input) => {
+      const url = String(input);
+      if (url.includes('/api/access/check')) return Response.json({ allowed: true, user: { id: 'user-1', email: 'test@example.com' } });
+      throw new Error(`Unexpected request: ${url}`);
+    };
+    const billingUnavailable = await quantumRoute.onRequestPost(quantumContext({
+      APP_ENV: 'production',
+      BILLING_ENFORCEMENT_MODE: 'enforce',
+      QUANTUM_API_URL: 'https://quantum.example',
+      QUANTUM_API_TOKEN: 'private-token',
+      RATE_LIMIT_KV: rateLimitKv(true)
+    }, true, 'quantum-request-no-billing'));
+    assert.equal(billingUnavailable.status, 503);
+    assert.equal((await billingUnavailable.json()).status, 'billing-unavailable');
+
+    global.fetch = async (input, init = {}) => {
+      assert.equal(String(input), 'https://chemvault.science/api/internal/billing/usage/consume');
+      assert.equal(init.method, 'POST');
+      return Response.json({
+        ok: true,
+        allowed: false,
+        reason: 'quota_exhausted',
+        userId: 'user-1',
+        featureKey: 'modeling.cloud_quantum',
+        plan: 'pro',
+        limit: 20,
+        used: 20,
+        remaining: 0,
+        periodEnd: '2099-01-02T00:00:00.000Z'
+      }, { status: 429 });
+    };
+    const shadow = await consumeCloudQuantumUsage({
+      APP_ENV: 'production',
+      BILLING_API_ORIGIN: 'https://chemvault.science',
+      BILLING_SERVICE_SECRET: 'billing-secret',
+      BILLING_ENFORCEMENT_MODE: 'shadow'
+    }, 'user-1', 'quantum-request-shadow-0001');
+    assert.equal(shadow.allowed, true);
+    assert.equal(shadow.observedAllowed, false);
+    assert.equal(shadow.enforced, false);
 
     const denied = await authorizePublicChemRequest(new Request('https://model.chemvault.science/api/chem/properties', {
       headers: { Origin: 'https://attacker.example' }
@@ -197,14 +326,15 @@ function memoryKv() {
   };
 }
 
-function quantumContext(env, authenticated = false) {
+function quantumContext(env, authenticated = false, requestId = '') {
   return {
     request: new Request('https://model.chemvault.science/api/chem/quantum/calculate', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Origin: 'https://model.chemvault.science',
-        ...(authenticated ? { Cookie: 'chemvault_session=session-token' } : {})
+        ...(authenticated ? { Cookie: 'chemvault_session=session-token' } : {}),
+        ...(requestId ? { 'Idempotency-Key': requestId } : {})
       },
       body: JSON.stringify({ structureData: water, format: 'xyz', method: 'gfn2-xTB', charge: 0, multiplicity: 1 })
     }),

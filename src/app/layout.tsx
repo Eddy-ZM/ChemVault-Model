@@ -2,6 +2,7 @@ import type { Metadata } from 'next';
 import { AuthProvider } from '@/components/auth/AuthProvider';
 import { DesktopUpdateGate } from '@/components/home/DesktopUpdateGate';
 import './globals.css';
+import './exhibition-theme.css';
 
 export const metadata: Metadata = {
   metadataBase: new URL('https://model.chemvault.science'),
@@ -43,7 +44,7 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="min-h-screen bg-gradient-to-br from-chemvault-paper via-indigo-50 to-sky-100 text-slate-900">
+      <body className="min-h-screen bg-chemvault-paper text-slate-900">
         <AuthProvider>
           {children}
           <DesktopUpdateGate />

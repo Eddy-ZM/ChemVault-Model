@@ -4,9 +4,9 @@ import { AuthButton } from '@/components/auth/AuthButton';
 
 export function Header() {
   return (
-    <header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur-xl">
+    <header className="cv-site-header sticky top-0 z-40 border-b backdrop-blur-xl">
       <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3">
-        <Link href="/" className="flex min-w-0 items-center gap-3 text-slate-950">
+        <Link href="/" className="cv-site-brand flex min-w-0 items-center gap-3">
           <Image
             src="/brand/chemvault-logo.png"
             alt="ChemVault logo"
@@ -18,7 +18,7 @@ export function Header() {
           />
           <span className="truncate text-sm font-bold tracking-tight sm:text-base">ChemVault Molecule Studio</span>
         </Link>
-        <nav className="hidden items-center gap-5 text-sm font-medium text-slate-600 md:flex" aria-label="Main navigation">
+        <nav className="cv-site-nav hidden items-center gap-5 text-sm font-medium md:flex" aria-label="Main navigation">
           <Link href="/molecule" className="transition hover:text-sky-700">
             Molecule Studio
           </Link>

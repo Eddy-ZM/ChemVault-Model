@@ -2354,7 +2354,7 @@ function CalculationProgressDetails({
         <span>{percent}%</span>
       </div>
       <div className="h-2 overflow-hidden rounded-full bg-slate-200">
-        <div className="h-full rounded-full bg-sky-500 transition-all duration-500" style={{ width: `${percent}%` }} />
+        <div className="h-full rounded-full bg-sky-500 transition-[width] duration-500" style={{ width: `${percent}%` }} />
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
         <p className="rounded-xl bg-white px-3 py-2">

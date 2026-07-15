@@ -59,7 +59,7 @@ export function MoleculeModeTabs({ activeMode, onChange }: Props) {
                 key={mode.id}
                 type="button"
                 onClick={() => onChange(mode.id)}
-                className={`rounded-lg px-4 py-2 text-sm font-medium transition ${
+                className={`min-h-11 rounded-lg px-4 py-2 text-sm font-medium transition ${
                   selected ? 'bg-slate-950 text-white shadow-sm' : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950'
                 }`}
               >

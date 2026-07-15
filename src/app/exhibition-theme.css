@@ -205,6 +205,42 @@ main [class*="shadow-"] {
   box-shadow: none;
 }
 
+main button,
+main a[role="button"],
+main [class*=" px-3"][class*=" py-1"],
+main [class*="px-3"][class*="py-2"] {
+  min-height: 44px;
+}
+
+main [class*="h-screen"][class*="bg-slate-100"] {
+  background-color: #f4f1e9;
+}
+
+main header[class*="bg-white"] {
+  border-color: rgba(255, 255, 255, 0.12);
+  background-color: rgba(7, 17, 31, 0.97);
+  color: #f7f4ec;
+}
+
+main header :is([class*="text-slate-600"], [class*="text-slate-500"], [class*="text-slate-700"]) {
+  color: #b7c5d1;
+}
+
+main header [class*="bg-slate-50"],
+main header [class*="bg-slate-100"] {
+  border-color: rgba(255, 255, 255, 0.17);
+  background-color: rgba(255, 255, 255, 0.06);
+  color: #f7f4ec;
+}
+
+main [class*="bg-white"] button[class*="border-slate-300"],
+main [role="dialog"] button[class*="border-slate-300"] {
+  border-color: #d8d2c7;
+  border-radius: 8px;
+  background-color: #fffdf8;
+  color: #10203a;
+}
+
 .cv-auth-page {
   background: #f4f1e9;
 }
@@ -213,6 +249,17 @@ footer {
   border-top-color: rgba(255, 255, 255, 0.12);
   background: #07111f;
   color: #aebbc9;
+}
+
+.cv-site-header .cv-site-brand,
+.cv-site-header .cv-site-nav a,
+.cv-site-header a,
+.cv-auth-page a,
+footer a {
+  min-width: 44px;
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
 }
 
 @media (max-width: 640px) {
@@ -248,4 +295,45 @@ footer {
   .cv-mol-hero-image {
     min-height: 480px;
   }
+}
+
+.cv-site-header .cv-site-brand,
+.cv-site-header .cv-site-nav a,
+.cv-site-header a,
+.cv-auth-page a,
+footer a,
+button,
+select,
+textarea,
+input:not([type="checkbox"]):not([type="radio"]),
+.cv-button,
+.cv-pill,
+.cv-tab,
+a[href="/profile"],
+a[href="/molecules"],
+a[href="/settings"],
+a[href="/login"],
+a[href*="/login"],
+a[href="/molecule"],
+a[href*="/molecule"],
+a[href*="/register"],
+a[href*="/settings"],
+a[href*="/profile"] {
+  min-width: 46px !important;
+  min-height: 46px !important;
+}
+
+a[href="/profile"],
+a[href="/molecules"],
+a[href="/settings"],
+a[href="/login"],
+a[href*="/login"],
+a[href="/molecule"],
+a[href*="/molecule"],
+a[href*="/register"],
+a[href*="/settings"],
+a[href*="/profile"] {
+  display: inline-flex;
+  align-items: center;
+  padding-block: 12px !important;
 }

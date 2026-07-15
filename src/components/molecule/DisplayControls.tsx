@@ -56,7 +56,7 @@ export function DisplayControls({
           <select
             value={selectedRepresentation}
             onChange={(event) => onRepresentationChange(event.target.value as Representation)}
-            className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+            className="min-h-11 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
           >
             {representationOptions.map((entry) => (
               <option key={entry.value} value={entry.value}>{entry.label}</option>
@@ -69,7 +69,7 @@ export function DisplayControls({
           <select
             value={background}
             onChange={(event) => onBackgroundChange(event.target.value)}
-            className="w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
+            className="min-h-11 w-full rounded-md border border-slate-300 bg-white px-2 py-1.5 text-xs outline-none focus:border-sky-500 focus:ring-4 focus:ring-sky-100"
           >
             {BACKGROUNDS.map((entry) => (
               <option key={entry.value} value={entry.value}>{entry.label}</option>
@@ -80,18 +80,18 @@ export function DisplayControls({
         <button
           type="button"
           onClick={onToggleHydrogens}
-          className={`rounded-md border px-2.5 py-1.5 text-xs font-medium ${showHydrogens ? 'border-sky-500 bg-sky-50 text-sky-800' : 'border-slate-300 text-slate-700 hover:bg-slate-50'}`}
+          className={`min-h-11 rounded-md border px-2.5 py-1.5 text-xs font-medium ${showHydrogens ? 'border-sky-500 bg-sky-50 text-sky-800' : 'border-slate-300 text-slate-700 hover:bg-slate-50'}`}
         >
           {showHydrogens ? 'H shown' : 'H hidden'}
         </button>
         <button
           type="button"
           onClick={onToggleAtomLabels}
-          className={`rounded-md border px-2.5 py-1.5 text-xs font-medium ${showAtomLabels ? 'border-sky-500 bg-sky-50 text-sky-800' : 'border-slate-300 text-slate-700 hover:bg-slate-50'}`}
+          className={`min-h-11 rounded-md border px-2.5 py-1.5 text-xs font-medium ${showAtomLabels ? 'border-sky-500 bg-sky-50 text-sky-800' : 'border-slate-300 text-slate-700 hover:bg-slate-50'}`}
         >
           {showAtomLabels ? 'Labels on' : 'Labels off'}
         </button>
-        <button type="button" onClick={onResetView} className="rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
+        <button type="button" onClick={onResetView} className="min-h-11 rounded-md border border-slate-300 px-2.5 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50">
           Reset
         </button>
       </div>

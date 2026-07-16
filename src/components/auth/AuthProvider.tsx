@@ -115,6 +115,10 @@ export function useAuth() {
 }
 
 async function userRequest<T>(path: string, init: RequestInit = {}): Promise<T> {
+  if (!canReachConfiguredUserApi()) {
+    throw new Error('ChemVault User API is not available in this static preview.');
+  }
+
   const headers = new Headers(init.headers);
   if (init.body && !headers.has('content-type')) headers.set('content-type', 'application/json');
 
@@ -147,4 +151,17 @@ export function userApiUrl(path: string) {
 
 function isDesktopRuntime() {
   return typeof window !== 'undefined' && Boolean(window.chemVaultDesktop?.isDesktop);
+}
+
+function canReachConfiguredUserApi() {
+  if (typeof window === 'undefined' || isDesktopRuntime()) return true;
+  try {
+    const configured = new URL(USER_ORIGIN);
+    const current = new URL(window.location.origin);
+    const configuredIsLocal = /^(localhost|127\.0\.0\.1)$/i.test(configured.hostname);
+    if (!configuredIsLocal) return true;
+    return configured.origin === current.origin;
+  } catch {
+    return true;
+  }
 }

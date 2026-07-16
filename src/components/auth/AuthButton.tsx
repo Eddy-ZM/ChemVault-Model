@@ -14,7 +14,6 @@ export function AuthButton() {
   const navigationTimer = useRef<number | null>(null);
 
   useEffect(() => {
-    router.prefetch('/login');
     return () => {
       if (navigationTimer.current !== null) window.clearTimeout(navigationTimer.current);
     };
@@ -42,6 +41,7 @@ export function AuthButton() {
     <div className="flex items-center gap-2">
       <Link
         href="/login"
+        prefetch={false}
         onClick={openLogin}
         aria-busy={openingLogin}
         className={`cv-login-launch rounded-full border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-800 shadow-sm transition hover:border-sky-300 hover:text-sky-700 ${openingLogin ? 'is-opening' : ''}`}
